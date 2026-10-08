@@ -11,6 +11,17 @@ URL = "https://code.s3.yandex.net/middle-java/my-blog-front-app.zip"
 SHA256 = "17609f3fd2bb452117583f06e57ccb4f7cdd98b29f43b246c7580c4f9e11003e"
 OLD_COMMENT_ROUTE = 'function zR(n,a,i){fetch(Xt()+"/api/posts/"+n.id+"/comments/"+n.id,'
 NEW_COMMENT_ROUTE = OLD_COMMENT_ROUTE.replace('+n.id+"/comments/"', '+n.postId+"/comments/"')
+OLD_COMMENT_LOAD = 'function AR(n,a,i){fetch(Xt()+"/api/posts/"+n+"/comments").then(r=>r.json()).then(a).catch(i)}'
+NEW_COMMENT_LOAD = (
+    'function AR(n,a,i){fetch(Xt()+"/api/posts/"+n+"/comments").then(async r=>{'
+    'const p=await r.json();if(!r.ok)throw new Error(p?.error||"Не удалось загрузить комментарии");'
+    'if(!Array.isArray(p))throw new Error("Некорректный ответ со списком комментариев");'
+    'return p}).then(a).catch(i)}'
+)
+OLD_COMMENT_EFFECT = 'w.useEffect(()=>{!n.isPreview&&AR(n.postId,p=>i(h=>({...h,comments:p})),p=>n.handleError(p.message))},[]);'
+NEW_COMMENT_EFFECT = OLD_COMMENT_EFFECT.replace(
+    '!n.isPreview&&AR(', '!n.isPreview&&Number.isSafeInteger(n.postId)&&n.postId>0&&AR('
+).replace('},[]);', '},[n.isPreview,n.postId]);')
 
 
 def prepare(output: Path, archive: bytes) -> None:
@@ -32,10 +43,16 @@ def prepare(output: Path, archive: bytes) -> None:
     if len(owners) != 1:
         raise ValueError("Маршрут комментария изменился: требуется проверить совместимость клиента")
     client = owners[0].read_text()
-    if client.count(OLD_COMMENT_ROUTE) != 1:
-        raise ValueError("Маршрут комментария неоднозначен")
-    # В предоставленном клиенте postId ошибочно подменён идентификатором комментария.
-    owners[0].write_text(client.replace(OLD_COMMENT_ROUTE, NEW_COMMENT_ROUTE, 1))
+    # Клиент путает postId и id, а до загрузки поста принимает ответ 400 за массив комментариев.
+    for old, new in (
+        (OLD_COMMENT_ROUTE, NEW_COMMENT_ROUTE),
+        (OLD_COMMENT_LOAD, NEW_COMMENT_LOAD),
+        (OLD_COMMENT_EFFECT, NEW_COMMENT_EFFECT),
+    ):
+        if client.count(old) != 1:
+            raise ValueError("Клиент изменился: требуется проверить загрузку и маршруты комментариев")
+        client = client.replace(old, new, 1)
+    owners[0].write_text(client)
     index = output / "index.html"
     html = index.read_text()
     if html.count("</head>") != 1 or html.count("</body>") != 1:

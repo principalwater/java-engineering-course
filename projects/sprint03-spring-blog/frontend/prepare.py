@@ -41,8 +41,16 @@ def prepare(output: Path, archive: bytes) -> None:
     if html.count("</head>") != 1 or html.count("</body>") != 1:
         raise ValueError("Неизвестная структура главной страницы")
     html = html.replace('lang="en"', 'lang="ru"').replace("<title>My Blog</title>", "<title>Тетрадь инженера</title>")
-    html = html.replace("</head>", '<link rel="stylesheet" href="/theme.css">\n</head>')
-    html = html.replace("</body>", '<script defer src="/accessibility.js"></script>\n</body>')
+    # Версия содержимого предотвращает загрузку старого клиента и оформления из кеша после пересборки.
+    client_source = f'src="/assets/{owners[0].name}"'
+    if html.count(client_source) != 1:
+        raise ValueError("Неизвестное подключение JavaScript-клиента")
+    client_version = hashlib.sha256(owners[0].read_bytes()).hexdigest()[:12]
+    html = html.replace(client_source, f'src="/assets/{owners[0].name}?v={client_version}"', 1)
+    css_version = hashlib.sha256(Path(__file__).with_name("theme.css").read_bytes()).hexdigest()[:12]
+    js_version = hashlib.sha256(Path(__file__).with_name("accessibility.js").read_bytes()).hexdigest()[:12]
+    html = html.replace("</head>", f'<link rel="stylesheet" href="/theme.css?v={css_version}">\n</head>')
+    html = html.replace("</body>", f'<script defer src="/accessibility.js?v={js_version}"></script>\n</body>')
     index.write_text(html)
     for name in ("theme.css", "accessibility.js"):
         shutil.copyfile(Path(__file__).with_name(name), output / name)

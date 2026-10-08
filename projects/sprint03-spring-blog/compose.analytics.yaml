@@ -1,0 +1,43 @@
+services:
+  analytics-reader:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    profiles: [analytics]
+    environment:
+      PGHOST: db
+      PGDATABASE: ${POSTGRES_DB:-blog}
+      PGUSER: ${POSTGRES_USER:-blog}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-blog-local}
+      READER_PASSWORD: ${ANALYTICS_DB_PASSWORD:-analytics-local}
+    volumes:
+      - ./analytics/create-reader.sh:/setup/create-reader.sh:ro
+    command: [sh, /setup/create-reader.sh]
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8-alpine@sha256:58f554637bfe3b77e0335b4ff90611279dbdf8d262dc15225ee93901853dfa13
+    profiles: [analytics]
+    environment:
+      CLICKHOUSE_USER: analyst
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse-local}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "0"
+      PG_DATABASE: ${POSTGRES_DB:-blog}
+      PG_READER_PASSWORD: ${ANALYTICS_DB_PASSWORD:-analytics-local}
+    ports:
+      - "127.0.0.1:8123:8123"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./analytics/postgresql.xml:/etc/clickhouse-server/config.d/postgresql.xml:ro
+      - ./analytics/readonly.xml:/etc/clickhouse-server/users.d/readonly.xml:ro
+    depends_on:
+      analytics-reader:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1:8123/ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  clickhouse-data:

@@ -1,12 +1,24 @@
 # Java Engineering Course
 
-Полноценные проектные работы Владислава Кузьмина по курсу Java Middle в [Яндекс Практикуме](https://practicum.yandex.ru/middle-java/).
+[Русский](#-о-курсе) · [English](#-about-the-course)
 
-Каждая работа содержит описание приложения, решение, инструкции по запуску, тесты и результаты проверки. Каталог организован по спринтам.
+Проектные и домашние работы по курсу [Java Middle](https://practicum.yandex.ru/middle-java/) Яндекс Практикума.
 
-## Проекты курса
+Репозиторий организован по спринтам: от приложения на Spring Framework до взаимодействия микросервисов, логирования и мониторинга. Здесь размещаются полноценные приложения с описанием решения, инструкциями по запуску и тестами.
 
-| Спринт | Проект | Каталог |
+## 📚 О курсе
+
+Основные направления обучения:
+
+- современная Java, многопоточность и тестирование;
+- Spring Framework, Spring Boot и веб-приложения;
+- работа с данными: Spring Data JPA, реактивный стек и Redis;
+- REST API, OpenAPI и Spring Security;
+- микросервисы, Apache Kafka, логирование и мониторинг.
+
+## 📁 Структура репозитория
+
+| Спринт | Проект | Планируемый каталог |
 | --- | --- | --- |
 | 3 | Приложение-блог на Spring Framework | `projects/sprint03-spring-blog/` |
 | 4 | Перевод блога на Spring Boot | `projects/sprint04-spring-boot-blog/` |
@@ -18,29 +30,96 @@
 | 10 | Взаимодействие микросервисов через Apache Kafka | `projects/sprint10-kafka/` |
 | 11 | Логирование и мониторинг | `projects/sprint11-observability/` |
 
-Таблица определяет структуру репозитория. Каталог проекта добавляется вместе с его реализацией и требованиями конкретной работы.
+Каталог проекта появляется вместе с реализацией. Пока репозиторий содержит план проектных работ; готовые приложения ещё не опубликованы.
 
-## Состав проектной работы
+## 🎯 Цели обучения
 
-В README каждого проекта указываются:
+- Разрабатывать, запускать и тестировать Java-приложения.
+- Объяснять архитектурные решения и их ограничения.
+- Строить веб-сервисы и работать с хранилищами данных.
+- Проверять взаимодействие сервисов и сценарии отказа.
+- Готовить воспроизводимое окружение и документацию проекта.
 
-- назначение приложения и краткие требования в самостоятельном изложении;
-- архитектура, используемые технологии и структура кода;
-- необходимые версии JDK, сборщика и внешних сервисов;
-- воспроизводимые команды сборки, запуска и тестирования;
-- проверенные сценарии, ограничения и демонстрация результата;
-- порядок сдачи, если задание требует отдельной ветки, ссылки или репозитория.
+## 🔧 Технологии
 
-Код и тесты размещаются по стандартной структуре выбранного сборщика. Конфигурация локального окружения содержит только безопасные примерные значения; секреты передаются через переменные окружения. CI подключается вместе с первым проектом и выполняет его реальные проверки.
+Java · Spring Framework · Spring Boot · Spring Data JPA · Spring Web · Reactor · Spring Security · Redis · Apache Kafka · OpenAPI · JUnit
 
-## Запуск и сдача
+Базовый ориентир — Java 21. Точные версии JDK, библиотек и сборщика определяются требованиями конкретной работы и фиксируются в её README.
 
-Точные команды приводятся в README соответствующего проекта. Основной ориентир курса — Java 21; версия Spring и формат сборки выбираются по требованиям работы.
+## 🚀 Запуск, тестирование и сдача
 
-Формат передачи решения определяется заданием на платформе. Этот репозиторий служит каталогом проектных работ; если для проверки нужен отдельный репозиторий, это будет указано в README проекта.
+Каждый проект будет содержать краткое описание требований, архитектуру, конфигурацию окружения и команды сборки, запуска и тестирования. Код и тесты размещаются в стандартных каталогах выбранного сборщика. Секреты передаются через переменные окружения.
 
-## Автор и права
+CI подключается вместе с первым приложением и выполняет его реальные проверки. Формат сдачи определяется заданием на платформе; при необходимости отдельного репозитория или ветки инструкции приводятся в README проекта.
 
-Автор: [principalwater — Владислав Кузьмин](https://github.com/principalwater).
+## 📖 Материалы
 
-Репозиторий предназначен для демонстрации выполненных проектных работ. Сведения о правах — в [COPYRIGHT.md](COPYRIGHT.md).
+- [Курс Java Middle в Яндекс Практикуме](https://practicum.yandex.ru/middle-java/)
+- [Документация Java 21](https://docs.oracle.com/en/java/javase/21/)
+- [Документация Spring](https://spring.io/projects)
+- [Документация Apache Kafka](https://kafka.apache.org/documentation/)
+
+Репозиторий предназначен для демонстрации проектных работ. Условия использования материалов приведены в [COPYRIGHT.md](COPYRIGHT.md).
+
+---
+
+# Homework Projects for the Java Engineering Course
+
+Sprint projects and homework applications for the [Middle Java Developer course](https://practicum.yandex.ru/middle-java/) at Yandex Practicum.
+
+The repository follows the sprint sequence, from a Spring Framework application to microservice communication, logging, and monitoring. Each application will include a solution overview, setup instructions, and tests.
+
+## 📚 About the Course
+
+Key learning areas:
+
+- modern Java, concurrency, and testing;
+- Spring Framework, Spring Boot, and web applications;
+- data access with Spring Data JPA, the reactive stack, and Redis;
+- REST APIs, OpenAPI, and Spring Security;
+- microservices, Apache Kafka, logging, and monitoring.
+
+## 📁 Repository Structure
+
+| Sprint | Project | Planned Directory |
+| --- | --- | --- |
+| 3 | Blog application with Spring Framework | `projects/sprint03-spring-blog/` |
+| 4 | Blog migration to Spring Boot | `projects/sprint04-spring-boot-blog/` |
+| 5 | Storefront with Spring Data JPA and Spring Web | `projects/sprint05-storefront/` |
+| 6 | Storefront on the reactive stack | `projects/sprint06-reactive-storefront/` |
+| 7 | REST service with OpenAPI and Redis | `projects/sprint07-rest-service/` |
+| 8 | Spring Security | `projects/sprint08-security/` |
+| 9 | Banking microservices | `projects/sprint09-bank/` |
+| 10 | Microservice communication with Apache Kafka | `projects/sprint10-kafka/` |
+| 11 | Logging and monitoring | `projects/sprint11-observability/` |
+
+Project directories are added with their implementations. The repository currently contains the project plan; completed applications have not been published yet.
+
+## 🎯 Learning Objectives
+
+- Develop, run, and test Java applications.
+- Explain architecture decisions and their limitations.
+- Build web services and work with data stores.
+- Verify service interactions and failure scenarios.
+- Document projects and provide reproducible environments.
+
+## 🔧 Technologies
+
+Java · Spring Framework · Spring Boot · Spring Data JPA · Spring Web · Reactor · Spring Security · Redis · Apache Kafka · OpenAPI · JUnit
+
+Java 21 is the baseline. Each project's requirements determine its exact JDK, library, and build tool versions, documented in the project README.
+
+## 🚀 Running, Testing, and Submission
+
+Each project will document its requirements, architecture, environment configuration, and build, run, and test commands. Source code and tests follow the selected build tool's standard layout. Secrets are supplied through environment variables.
+
+CI will be added with the first application and run its actual checks. Submission follows the platform's assignment instructions. Any requirement for a separate repository or branch will be documented in the project's README.
+
+## 📖 Additional Resources
+
+- [Middle Java course at Yandex Practicum](https://practicum.yandex.ru/middle-java/)
+- [Java 21 Documentation](https://docs.oracle.com/en/java/javase/21/)
+- [Spring Documentation](https://spring.io/projects)
+- [Apache Kafka Documentation](https://kafka.apache.org/documentation/)
+
+This repository presents coursework projects. See [COPYRIGHT.md](COPYRIGHT.md) for content usage terms.

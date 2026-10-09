@@ -1,11 +1,12 @@
 package dev.principalwater.blog.config;
 
-import java.util.Arrays;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.PropertySource;
 import org.springframework.core.env.Environment;
 import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.web.multipart.support.StandardServletMultipartResolver;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.EnableWebMvc;
@@ -13,25 +14,23 @@ import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
+@PropertySource("classpath:blog.properties")
 @EnableWebMvc
 @ComponentScan("dev.principalwater.blog.controller")
 public class WebConfig implements WebMvcConfigurer {
     private final String[] allowedOrigins;
+    private final long maxAgeSeconds;
 
     public WebConfig(Environment environment) {
-        allowedOrigins = Arrays.stream(environment.getProperty("CORS_ORIGINS",
-                "http://localhost,http://127.0.0.1").split(","))
-                .map(String::strip).filter(origin -> !origin.isEmpty()).toArray(String[]::new);
-        if (Arrays.stream(allowedOrigins).anyMatch(origin -> origin.contains("*"))) {
-            throw new IllegalArgumentException("CORS_ORIGINS must contain exact origins");
-        }
+        allowedOrigins = WebSettings.allowedOrigins(environment);
+        maxAgeSeconds = WebSettings.maxAgeSeconds(environment);
     }
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        registry.addMapping("/api/**").allowedOrigins(allowedOrigins)
-                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
-                .allowedHeaders("Content-Type").maxAge(3600);
+        registry.addMapping(WebSettings.API_PATH_PATTERN).allowedOrigins(allowedOrigins)
+                .allowedMethods(WebSettings.allowedMethods())
+                .allowedHeaders(HttpHeaders.CONTENT_TYPE).maxAge(maxAgeSeconds);
     }
 
     @Override

@@ -6,8 +6,9 @@ services:
       PGHOST: db
       PGDATABASE: ${POSTGRES_DB:-blog}
       PGUSER: ${POSTGRES_USER:-blog}
-      PGPASSWORD: ${POSTGRES_PASSWORD:-blog-local}
-      READER_PASSWORD: ${ANALYTICS_DB_PASSWORD:-analytics-local}
+      PGPASSWORD_FILE: /run/secrets/db_password
+      READER_PASSWORD_FILE: /run/secrets/analytics_db_password
+    secrets: [db_password, analytics_db_password]
     volumes:
       - ./analytics/create-reader.sh:/setup/create-reader.sh:ro
     command: [sh, /setup/create-reader.sh]
@@ -20,16 +21,19 @@ services:
     profiles: [analytics]
     environment:
       CLICKHOUSE_USER: analyst
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse-local}
+      CLICKHOUSE_PASSWORD_FILE: /run/secrets/clickhouse_password
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "0"
       PG_DATABASE: ${POSTGRES_DB:-blog}
-      PG_READER_PASSWORD: ${ANALYTICS_DB_PASSWORD:-analytics-local}
+      PG_READER_PASSWORD_FILE: /run/secrets/analytics_db_password
+    secrets: [analytics_db_password, clickhouse_password]
+    entrypoint: [sh, /setup/start-clickhouse.sh]
     ports:
       - "127.0.0.1:8123:8123"
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - ./analytics/postgresql.xml:/etc/clickhouse-server/config.d/postgresql.xml:ro
       - ./analytics/readonly.xml:/etc/clickhouse-server/users.d/readonly.xml:ro
+      - ./analytics/start-clickhouse.sh:/setup/start-clickhouse.sh:ro
     depends_on:
       analytics-reader:
         condition: service_completed_successfully
@@ -41,3 +45,9 @@ services:
 
 volumes:
   clickhouse-data:
+
+secrets:
+  analytics_db_password:
+    file: ${BLOG_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint03}/analytics_db_password
+  clickhouse_password:
+    file: ${BLOG_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint03}/clickhouse_password

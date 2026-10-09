@@ -48,12 +48,13 @@ Spring Data JDBC подключён по требованиям задания; 
 
 ### Этап 2: Запуск инфраструктуры
 
-Первая сборка требует интернет для зависимостей и [предоставленного фронтенда](https://code.s3.yandex.net/middle-java/my-blog-front-app.zip). Архив проверяется SHA256, готовая сборка React не хранится в Git.
+Для подготовки secrets нужен Python 3.9+. Первая сборка требует интернет для зависимостей и [предоставленного фронтенда](https://code.s3.yandex.net/middle-java/my-blog-front-app.zip). Архив проверяется SHA256, готовая сборка React не хранится в Git.
 
 Из корня репозитория:
 
 ```sh
 cd projects/sprint03-spring-blog
+python3 scripts/init-secrets.py
 docker compose up -d --build --wait
 ```
 
@@ -65,7 +66,9 @@ docker compose logs backend
 docker compose down
 ```
 
-`down` сохраняет том БД. Пароль `blog-local` и пользователь `blog` — локальные значения; для изменения задайте `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` в `.env`. Порты опубликованы только на `127.0.0.1`; PostgreSQL доступен внутри Docker-сети. Аутентификация пользователей в этом спринте не реализована.
+`down` сохраняет том БД. `POSTGRES_DB` и `POSTGRES_USER` меняют локальные имя БД и пользователя `blog`. Пароли создаются случайными файлами вне Git: по умолчанию `~/.config/java-engineering-course/sprint03/`, другой каталог задаётся `BLOG_SECRETS_DIR`. Генератор выставляет права `0700` каталогу и `0600` файлам, сохраняет существующие значения, отклоняет пустые файлы и симлинки.
+
+Docker Compose монтирует `db_password` только в PostgreSQL и бэкенд. Пароль не передаётся через `environment`; сервисы читают `/run/secrets/db_password`. PostgreSQL применяет пароль при первичной инициализации: для существующего тома файл должен соответствовать действующему паролю роли либо пароль нужно отдельно изменить. Генератор роли и данные БД не меняет. Порты опубликованы только на `127.0.0.1`; PostgreSQL доступен внутри Docker-сети. Аутентификация пользователей блога в этом спринте не реализована.
 
 ![Контейнеры блога в OrbStack и состояние Tomcat](../../screenshots/sprint03-spring-blog/04_orbstack_backend_healthy.png)
 
@@ -98,6 +101,7 @@ docker compose down
 ```sh
 java -version                  # требуется JDK 21
 ./mvnw -B --no-transfer-progress verify
+python3 -m unittest discover -s src/test/python
 python3 scripts/smoke.py        # после запуска Compose
 ```
 
@@ -110,9 +114,23 @@ export PATH="$JAVA_HOME/bin:$PATH"
 
 В IntelliJ IDEA откройте `pom.xml` как Maven-проект и выберите JDK 21 в SDK проекта и настройках Maven Runner. Проверки ниже выполнены Maven на JDK 21, а не запуском JUnit из IDE.
 
-27 сценариев JUnit проверяют модель, сервис, MVC и DAO. Интеграционные классы используют один кешируемый Spring TestContext и H2 в режиме совместимости с PostgreSQL. Откат сервиса проверяется настоящей ошибкой ограничения БД; конкурентные лайки — отдельными соединениями. `smoke.py` проверяет настоящий WAR/PostgreSQL и удаляет только созданный им пост. [GitHub Actions](../../.github/workflows/java.yml) повторяет сборку, проверки JavaScript и REST в контейнерах, сохраняет WAR и отчёты JUnit в артефакте `sprint03-java21` на 14 дней.
+34 сценария JUnit проверяют модель, сервис, MVC, DAO и конфигурацию. Тестовые пакеты повторяют слои приложения; общая база остаётся в `dev.principalwater.blog`. Интеграционные классы используют один кешируемый Spring TestContext и H2 в режиме совместимости с PostgreSQL. Откат сервиса проверяется настоящей ошибкой ограничения БД; конкурентные лайки — отдельными соединениями. Проверки конфигурации открывают JDBC-соединение с файловыми credentials, сохраняют значимые пробелы пароля и отклоняют конфликт источников и небезопасную CORS-политику. Две Python CLI-проверки защищают права файлов secrets, сохранение действующих паролей и отказ пустым файлам/симлинкам. `smoke.py` проверяет настоящий WAR/PostgreSQL и удаляет только созданный им пост. [GitHub Actions](../../.github/workflows/java.yml) повторяет сборку, проверки JavaScript, подготовки secrets и REST в контейнерах, сохраняет WAR и отчёты JUnit в артефакте `sprint03-java21` на 14 дней.
 
-Артефакт: `target/blog.war`. Для собственного Tomcat 10.1 скопируйте его в `webapps/ROOT.war`, задайте `DB_URL`, `DB_USER`, `DB_PASSWORD`, `CORS_ORIGINS` и запустите `bin/catalina.sh run`. Без `DB_URL` используется файловая H2 `./data/blog` относительно рабочего каталога контейнера. Для PostgreSQL пример URL: `jdbc:postgresql://localhost:5432/blog`. CORS принимает точные адреса источников, по умолчанию `http://localhost,http://127.0.0.1`.
+Артефакт: `target/blog.war`. Для собственного Tomcat 10.1 скопируйте его в `webapps/ROOT.war`, задайте параметры ниже и запустите `bin/catalina.sh run`. Локальные defaults находятся в `src/main/resources/blog.properties`; системные свойства и переменные окружения имеют приоритет.
+
+| Параметр | Значение и назначение |
+| --- | --- |
+| `DB_URL` | Без переопределения — файловая H2 `./data/blog` относительно рабочего каталога. PostgreSQL: `jdbc:postgresql://localhost:5432/blog` |
+| `DB_DRIVER` | H2 и PostgreSQL определяются по URL; явное значение задаёт класс установленного JDBC-драйвера |
+| `DB_USER`, `DB_PASSWORD` | Credentials из окружения; для PostgreSQL обязательны и непустые. Для локальной H2 defaults — `sa` и пустой пароль |
+| `DB_USER_FILE`, `DB_PASSWORD_FILE` | UTF-8-файлы вместо соответствующей переменной: нельзя задавать оба источника одновременно |
+| `DB_MAX_POOL_SIZE`, `DB_POOL_NAME` | Максимум соединений и имя HikariCP-пула: `5`, `blog-database` |
+| `CORS_ORIGINS` | Точные адреса через запятую: `http://localhost,http://127.0.0.1`; wildcard запрещён |
+| `CORS_MAX_AGE_SECONDS` | Срок кеширования preflight: `3600` секунд; отрицательное значение запрещено |
+
+`JdbcDataSources` создаёт пул по префиксу настроек; `DataConfig` собирает бины. `SecretValues` читает credentials отдельно: удаляет один конечный LF/CRLF файла, сохраняя пробелы. Ошибка чтения или конфликт источников останавливает запуск. Не включайте пароль в JDBC URL, Git или логи.
+
+Compose задаёт `DB_PASSWORD_FILE=/run/secrets/db_password`; для своего Tomcat укажите доступный процессу файл и уберите `DB_PASSWORD`. [Docker Compose secrets](https://docs.docker.com/compose/how-tos/use-secrets/) разграничивают доступ к файлам, сохраняя plaintext на хосте. Это локальное решение, проверенное в OrbStack; для рабочего окружения предпочтителен внешний Vault или secret manager с ротацией. Шифрование хранения и TLS соединения настраиваются отдельно.
 
 ### Этап 5: Аналитика PostgreSQL в ClickHouse
 
@@ -121,11 +139,11 @@ export PATH="$JAVA_HOME/bin:$PATH"
 ```sh
 docker compose -f compose.yaml -f compose.analytics.yaml --profile analytics up -d --wait
 docker compose -f compose.yaml -f compose.analytics.yaml exec -T clickhouse \
-  sh -c 'clickhouse-client --user analyst --password "$CLICKHOUSE_PASSWORD" --multiquery' \
+  sh -c 'clickhouse-client --user analyst --password "$(cat "$CLICKHOUSE_PASSWORD_FILE")" --multiquery' \
   < analytics/engagement.sql
 ```
 
-`ANALYTICS_DB_PASSWORD` и `CLICKHOUSE_PASSWORD` меняют локальные пароли `analytics-local` / `clickhouse-local`. PostgreSQL-роль `blog_reader` имеет только чтение нужных колонок; ClickHouse-профиль запрещает запись и ограничивает время, память и объём чтения. Это учебное чтение текущих данных: агрегации нагружают источник; при росте данных нужен отдельный контур загрузки/CDC. Прямое чтение источника — решение для малого локального набора, не рекомендация для производственного окружения.
+Файлы `analytics_db_password` и `clickhouse_password` в том же каталоге secrets содержат отдельные пароли роли чтения и ClickHouse. `analytics-reader` получает пароль PostgreSQL и роли чтения, ClickHouse — только пароль роли чтения и свой пароль. PostgreSQL-роль `blog_reader` имеет только чтение нужных колонок; ClickHouse-профиль запрещает запись и ограничивает время, память и объём чтения. Это учебное чтение текущих данных: агрегации нагружают источник; при росте данных нужен отдельный контур загрузки/CDC. Прямое чтение источника — решение для малого локального набора, не рекомендация для производственного окружения.
 
 ![Рейтинг постов PostgreSQL в ClickHouse](../../screenshots/sprint03-spring-blog/05_clickhouse_postgres_analytics.jpg)
 

@@ -1,6 +1,14 @@
 #!/bin/sh
 set -eu
-psql -v ON_ERROR_STOP=1 -v reader_password="$READER_PASSWORD" -v db_name="$PGDATABASE" <<'SQL'
+PGPASSWORD=$(cat "${PGPASSWORD_FILE:?}")
+READER_PASSWORD=$(cat "${READER_PASSWORD_FILE:?}")
+: "${PGPASSWORD:?Файл пароля PostgreSQL пуст}"
+: "${READER_PASSWORD:?Файл пароля роли чтения пуст}"
+export PGPASSWORD READER_PASSWORD
+# psql получает пароль через окружение, а не через аргументы процесса.
+psql -v ON_ERROR_STOP=1 <<'SQL'
+\getenv reader_password READER_PASSWORD
+\getenv db_name PGDATABASE
 SELECT 'CREATE ROLE blog_reader LOGIN' WHERE NOT EXISTS (
     SELECT 1 FROM pg_roles WHERE rolname = 'blog_reader'
 ) \gexec

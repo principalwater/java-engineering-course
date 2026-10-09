@@ -5,7 +5,8 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-blog}
       POSTGRES_USER: ${POSTGRES_USER:-blog}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-blog-local}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
     volumes:
       - blog-data:/var/lib/postgresql/data
     healthcheck:
@@ -20,8 +21,9 @@ services:
     environment:
       DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-blog}
       DB_USER: ${POSTGRES_USER:-blog}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-blog-local}
+      DB_PASSWORD_FILE: /run/secrets/db_password
       CORS_ORIGINS: http://localhost,http://127.0.0.1
+    secrets: [db_password]
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
@@ -51,3 +53,7 @@ services:
 
 volumes:
   blog-data:
+
+secrets:
+  db_password:
+    file: ${BLOG_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint03}/db_password

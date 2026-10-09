@@ -1,0 +1,6 @@
+target/
+frontend/
+docs/
+*.md
+.env
+.DS_Store

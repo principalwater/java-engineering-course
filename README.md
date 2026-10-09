@@ -1,10 +1,14 @@
 # Java Engineering Course
 
-[Русский](#-о-курсе) · [English](#-about-the-course)
+[![CI](https://github.com/principalwater/java-engineering-course/actions/workflows/java.yml/badge.svg?branch=main)](https://github.com/principalwater/java-engineering-course/actions/workflows/java.yml)
+
+[Русский](#java-engineering-course) · [English](#homework-projects-for-the-java-engineering-course)
+
+**[Проекты](projects/) · [Упражнения в IDE](exercises/) · [Сборка и тесты](#-запуск-тестирование-и-сдача)**
 
 Проектные и домашние работы по курсу [Java Middle](https://practicum.yandex.ru/middle-java/) Яндекс Практикума.
 
-Репозиторий организован по спринтам: от приложения на Spring Framework до взаимодействия микросервисов, логирования и мониторинга. Здесь размещаются полноценные приложения с описанием решения, инструкциями по запуску и тестами.
+Репозиторий организован по спринтам: от приложения на Spring Framework до взаимодействия микросервисов, логирования и мониторинга.
 
 ## 📚 О курсе
 
@@ -18,19 +22,21 @@
 
 ## 📁 Структура репозитория
 
-Полноценные приложения размещаются в `projects/`, внешние упражнения для IDE - в `exercises/`. Упражнения сгруппированы по спринтам и содержат решение, команды запуска и результаты проверки.
+Полноценные приложения размещаются в [projects/](projects/), внешние упражнения для IDE - в [exercises/](exercises/). Упражнения сгруппированы по спринтам и содержат решение, команды запуска и результаты проверки.
 
-| Спринт | Проект | Планируемый каталог |
+### Проектные работы
+
+| Спринт | Проект | Каталог |
 | --- | --- | --- |
-| 3 | Приложение-блог на Spring Framework | `projects/sprint03-spring-blog/` |
-| 4 | Перевод блога на Spring Boot | `projects/sprint04-spring-boot-blog/` |
-| 5 | Витрина магазина на Spring Data JPA и Spring Web | `projects/sprint05-storefront/` |
-| 6 | Витрина магазина на реактивном стеке | `projects/sprint06-reactive-storefront/` |
-| 7 | RESTful-сервис, OpenAPI и Redis | `projects/sprint07-rest-service/` |
-| 8 | Spring Security | `projects/sprint08-security/` |
-| 9 | Микросервисное приложение банка | `projects/sprint09-bank/` |
-| 10 | Взаимодействие микросервисов через Apache Kafka | `projects/sprint10-kafka/` |
-| 11 | Логирование и мониторинг | `projects/sprint11-observability/` |
+| 3 | Приложение-блог на Spring Framework | [sprint03-spring-blog](projects/sprint03-spring-blog/) |
+| 4 | Перевод блога на Spring Boot | [sprint04-spring-boot-blog](projects/sprint04-spring-boot-blog/) |
+| 5 | Витрина магазина на Spring Data JPA и Spring Web | [sprint05-storefront](projects/sprint05-storefront/) |
+| 6 | Витрина магазина на реактивном стеке | [sprint06-reactive-storefront](projects/sprint06-reactive-storefront/) |
+| 7 | RESTful-сервис, OpenAPI и Redis | [sprint07-rest-service](projects/sprint07-rest-service/) |
+| 8 | Spring Security | [sprint08-security](projects/sprint08-security/) |
+| 9 | Микросервисное приложение банка | [sprint09-bank](projects/sprint09-bank/) |
+| 10 | Взаимодействие микросервисов через Apache Kafka | [sprint10-kafka](projects/sprint10-kafka/) |
+| 11 | Логирование и мониторинг | [sprint11-observability](projects/sprint11-observability/) |
 
 Каталоги появляются по мере выполнения работ. README каждого проекта содержит описание решения, команды сборки, запуска и тестирования.
 
@@ -67,9 +73,13 @@ CI обнаруживает проекты и выполняет их реаль
 
 # Homework Projects for the Java Engineering Course
 
+[Русский](#java-engineering-course) · [English](#homework-projects-for-the-java-engineering-course)
+
+**[Projects](projects/) · [IDE exercises](exercises/) · [Build and tests](#-running-testing-and-submission)**
+
 Sprint projects and homework applications for the [Middle Java Developer course](https://practicum.yandex.ru/middle-java/) at Yandex Practicum.
 
-The repository follows the sprint sequence, from a Spring Framework application to microservice communication, logging, and monitoring. Each application will include a solution overview, setup instructions, and tests.
+The repository follows the sprint sequence, from a Spring Framework application to microservice communication, logging, and monitoring.
 
 ## 📚 About the Course
 
@@ -83,19 +93,21 @@ Key learning areas:
 
 ## 📁 Repository Structure
 
-Sprint applications use `projects/`; external IDE exercises use `exercises/`. Exercises are grouped by sprint, with solutions, run commands, and verification results.
+Sprint applications use [projects/](projects/); external IDE exercises use [exercises/](exercises/). Exercises are grouped by sprint, with solutions, run commands, and verification results.
 
-| Sprint | Project | Planned Directory |
+### Sprint Projects
+
+| Sprint | Project | Directory |
 | --- | --- | --- |
-| 3 | Blog application with Spring Framework | `projects/sprint03-spring-blog/` |
-| 4 | Blog migration to Spring Boot | `projects/sprint04-spring-boot-blog/` |
-| 5 | Storefront with Spring Data JPA and Spring Web | `projects/sprint05-storefront/` |
-| 6 | Storefront on the reactive stack | `projects/sprint06-reactive-storefront/` |
-| 7 | REST service with OpenAPI and Redis | `projects/sprint07-rest-service/` |
-| 8 | Spring Security | `projects/sprint08-security/` |
-| 9 | Banking microservices | `projects/sprint09-bank/` |
-| 10 | Microservice communication with Apache Kafka | `projects/sprint10-kafka/` |
-| 11 | Logging and monitoring | `projects/sprint11-observability/` |
+| 3 | Blog application with Spring Framework | [sprint03-spring-blog](projects/sprint03-spring-blog/) |
+| 4 | Blog migration to Spring Boot | [sprint04-spring-boot-blog](projects/sprint04-spring-boot-blog/) |
+| 5 | Storefront with Spring Data JPA and Spring Web | [sprint05-storefront](projects/sprint05-storefront/) |
+| 6 | Storefront on the reactive stack | [sprint06-reactive-storefront](projects/sprint06-reactive-storefront/) |
+| 7 | REST service with OpenAPI and Redis | [sprint07-rest-service](projects/sprint07-rest-service/) |
+| 8 | Spring Security | [sprint08-security](projects/sprint08-security/) |
+| 9 | Banking microservices | [sprint09-bank](projects/sprint09-bank/) |
+| 10 | Microservice communication with Apache Kafka | [sprint10-kafka](projects/sprint10-kafka/) |
+| 11 | Logging and monitoring | [sprint11-observability](projects/sprint11-observability/) |
 
 Project directories are added with their implementations. Each project README provides its solution overview and build, run, and test commands.
 

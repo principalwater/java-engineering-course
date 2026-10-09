@@ -6,7 +6,7 @@
 
 ## Описание
 
-Java 21, Spring Boot 3.4.13, Maven 3.9.16, стартеры Web/Actuator. Стандартная точка входа запускает приложение; профили определяют раскрытие эндпоинтов. Для сборки используется общий Maven Wrapper первого спринта.
+Java 21, Spring Boot 3.4.13, Maven 3.9.16 или Gradle 8.14.3, стартеры Web/Actuator. Сборщики используют общие Java-исходники и ресурсы. Для Maven используется общий wrapper первого спринта, для Gradle - второго.
 
 Spring Initializr при выполнении был недоступен из рабочего окружения. Базовый каркас создан вручную и открыт как Maven-проект в отдельном окне IntelliJ IDEA.
 
@@ -53,9 +53,40 @@ python3 verify.py lab
 curl --fail --silent http://127.0.0.1:18082/actuator/metrics/system.cpu.count
 ```
 
-Проверка требует Python 3.11+ и обращается к настоящему HTTP-серверу. Она подтверждает доступность `env`, имя и описание метрики CPU, положительное число процессоров в `measurements`, артефакт/версию/время в `info.build`. Значение метрики находится внутри `measurements`, отдельного поля `value` в корне ответа нет. Содержимое окружения проверка не выводит.
+Проверка требует Python 3.11+ и обращается к настоящему HTTP-серверу. Она подтверждает доступность `env`, имя и описание метрики CPU, положительное число процессоров в `measurements`, артефакт/версию/время в `info.build`. Время сравнивается с отчётом выбранного сборщика; `BuildProperties` 3.4 нормализует его до миллисекунд. Значение метрики находится внутри `measurements`, отдельного поля `value` в корне ответа нет. Содержимое окружения проверка не выводит.
 
-Оба режима прошли проверку на JDK 21.0.12.1; JAR запущен со встроенным Tomcat 10.1.50. Maven-сборка сама по себе не считается проверкой HTTP: JUnit-тестов в этом небольшом упражнении нет.
+Оба режима прошли проверку на JDK 21.0.12.1; JAR запущен со встроенным Tomcat 10.1.50. Сборка сама по себе не считается проверкой HTTP: JUnit-тестов в этом небольшом упражнении нет.
+
+### 4. Альтернативная сборка Gradle
+
+В `build.gradle` явно подключён `io.spring.dependency-management`: Boot Plugin сам по себе не заменяет политику версий. Стартеры объявлены без версий; `springBoot { buildInfo() }` создаёт метаданные, а `CommandLineRunner` выводит время в консоль.
+
+Из корня репозитория:
+
+```bash
+./exercises/sprint02/file-transformer-gradle-plugin/gradlew --no-daemon \
+  -p exercises/sprint04/boot-actuator build dependencyManagement
+./exercises/sprint02/file-transformer-gradle-plugin/gradlew --no-daemon \
+  -p exercises/sprint04/boot-actuator bootRun --args='--spring.profiles.active=lab'
+```
+
+В другом терминале, из каталога упражнения:
+
+```bash
+python3 verify.py lab gradle
+```
+
+`build` и `bootRun` прошли проверку. Время из консоли совпало с `build/resources/main/META-INF/build-info.properties` до миллисекунд; HTTP-проверка подтвердила именно метаданные Gradle.
+
+В `bootJar` добавлены атрибут `Implementation-Title` и `launchScript()`. Commons Collections 4.4 объявлен как `runtimeOnly` специально для проверки упаковки, бизнес-код его не использует. В архиве подтверждены `BOOT-INF/lib/commons-collections4-4.4.jar`, атрибут манифеста и начало shell script.
+
+После остановки `bootRun` готовый Gradle JAR запускается напрямую из каталога упражнения, с выбранным JDK 21:
+
+```bash
+./build/libs/boot-actuator-practice-1.0-SNAPSHOT.jar --spring.profiles.active=lab
+```
+
+Этот запуск также прошёл `python3 verify.py lab gradle`; прямое исполнение shell script проверено на macOS.
 
 Профиль `lab` раскрывает все доступные эндпоинты только для локальной практики; стандартный запуск сохраняет раскрытие `health`. Для остановки используется Ctrl+C в терминале сервера.
 
@@ -64,3 +95,4 @@ curl --fail --silent http://127.0.0.1:18082/actuator/metrics/system.cpu.count
 - [Spring Boot Maven Plugin: упаковка](https://docs.spring.io/spring-boot/3.4/maven-plugin/packaging.html).
 - [Информация о сборке](https://docs.spring.io/spring-boot/3.4/maven-plugin/build-info.html).
 - [Actuator: эндпоинты и раскрытие](https://docs.spring.io/spring-boot/3.4/reference/actuator/endpoints.html).
+- [Gradle: управление зависимостями](https://docs.spring.io/spring-boot/3.4/gradle-plugin/managing-dependencies.html).

@@ -1,4 +1,4 @@
-package dev.principalwater.blog;
+package dev.principalwater.blog.model;
 
 import dev.principalwater.blog.model.Post;
 import dev.principalwater.blog.model.SearchFilter;

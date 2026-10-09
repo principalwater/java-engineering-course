@@ -18,7 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
         "DB_USER=sa", "DB_PASSWORD=", "CORS_ORIGINS=http://localhost"
 })
 @Transactional
-abstract class BlogIntegrationTest {
+public abstract class BlogIntegrationTest {
     protected static final byte[] IMAGE = Base64.getDecoder().decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=");
 

@@ -1,5 +1,6 @@
-package dev.principalwater.blog;
+package dev.principalwater.blog.service;
 
+import dev.principalwater.blog.BlogIntegrationTest;
 import dev.principalwater.blog.model.CommentRequest;
 import dev.principalwater.blog.model.PostRequest;
 import java.util.List;

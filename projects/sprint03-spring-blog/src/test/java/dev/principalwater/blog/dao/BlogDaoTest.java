@@ -1,5 +1,6 @@
-package dev.principalwater.blog;
+package dev.principalwater.blog.dao;
 
+import dev.principalwater.blog.BlogIntegrationTest;
 import dev.principalwater.blog.dao.BlogDao;
 import dev.principalwater.blog.model.PostRequest;
 import dev.principalwater.blog.model.SearchFilter;

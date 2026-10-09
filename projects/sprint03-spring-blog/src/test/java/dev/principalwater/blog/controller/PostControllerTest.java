@@ -1,5 +1,6 @@
-package dev.principalwater.blog;
+package dev.principalwater.blog.controller;
 
+import dev.principalwater.blog.BlogIntegrationTest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -109,7 +110,8 @@ class PostControllerTest extends BlogIntegrationTest {
     @Test
     void multipartImageRoundTripsWithItsDetectedTypeAndRejectsForgedContent() throws Exception {
         long id = createPost("Image owner", "Body").id();
-        mvc.perform(get("/api/posts/{id}/image", id)).andExpect(status().isNotFound());
+        mvc.perform(get("/api/posts/{id}/image", id)).andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("Изображение не найдено"));
 
         var image = new MockMultipartFile("image", "photo.png", "application/octet-stream", IMAGE);
         mvc.perform(multipart(HttpMethod.PUT, "/api/posts/{id}/image", id).file(image))

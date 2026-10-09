@@ -1,0 +1,32 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.4.13'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'dev.principalwater.study'
+version = '1.0-SNAPSHOT'
+description = 'Spring Boot Actuator practice'
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+}
+
+repositories { mavenCentral() }
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    // Маркер runtime-зависимости для проверки упаковки.
+    runtimeOnly 'org.apache.commons:commons-collections4:4.4'
+}
+
+springBoot {
+    mainClass = 'dev.principalwater.study.actuator.ActuatorApplication'
+    buildInfo()
+}
+
+tasks.named('bootJar') {
+    manifest { attributes('Implementation-Title': project.description) }
+    launchScript()
+}

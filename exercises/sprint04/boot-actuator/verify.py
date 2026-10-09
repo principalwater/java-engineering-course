@@ -1,0 +1,81 @@
+"""Проверка реального HTTP-приложения; Python 3.11+, без дополнительных библиотек."""
+
+import argparse
+from datetime import datetime
+import json
+from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import urlopen
+
+BASE_URL = "http://127.0.0.1:18082/actuator/"
+
+
+def get(endpoint: str) -> tuple[int, dict | None]:
+    try:
+        with urlopen(BASE_URL + endpoint, timeout=5) as response:
+            return response.status, json.load(response)
+    except HTTPError as error:
+        with error:
+            return error.code, json.load(error)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Actuator profile checks")
+    parser.add_argument("profile", choices=("default", "lab", "probes"))
+    parser.add_argument(
+        "builder", choices=("maven", "gradle"), nargs="?", default="maven"
+    )
+    args = parser.parse_args()
+    profile = args.profile
+    if profile == "probes":
+        status, liveness = get("health/liveness")
+        assert status == 200 and liveness is not None and liveness["status"] == "UP"
+        readings = [get("health/readiness"), get("health/readiness")]
+        assert {status for status, _ in readings} == {200, 503}
+        assert {data["status"] for _, data in readings if data is not None} == {"UP", "DOWN"}
+        for _, data in readings:
+            assert data is not None
+            assert data["components"]["readinessState"]["status"] == "UP"
+            assert data["components"]["cycleCheck"]["status"] == data["status"]
+        status, health = get("health")
+        assert health is not None and health["status"] in ("UP", "DOWN")
+        assert status == (200 if health["status"] == "UP" else 503)
+        print("Actuator: liveness and custom readiness checks passed")
+        return
+    status, health = get("health")
+    assert status == 200 and health is not None and health["status"] == "UP"
+    if profile == "default":
+        for endpoint in ("metrics", "env", "info", "beans", "loggers"):
+            assert get(endpoint)[0] == 404, endpoint
+    else:
+        status, metric = get("metrics/system.cpu.count")
+        assert status == 200 and metric is not None
+        assert metric["name"] == "system.cpu.count" and metric["description"]
+        assert metric["measurements"][0]["value"] >= 1 and "value" not in metric
+        status, environment = get("env")
+        assert status == 200 and environment is not None
+        assert isinstance(environment["propertySources"], list)
+        for endpoint, field in (("beans", "contexts"), ("loggers", "loggers")):
+            status, data = get(endpoint)
+            assert status == 200 and data is not None
+            assert isinstance(data[field], dict)
+        status, info = get("info")
+        assert status == 200 and info is not None
+        assert info["build"]["artifact"] == "boot-actuator-practice"
+        assert info["build"]["version"] == "1.0-SNAPSHOT" and info["build"]["time"]
+        report = Path("target/classes" if args.builder == "maven" else "build/resources/main")
+        properties = (report / "META-INF/build-info.properties").read_text()
+        encoded_time = next(
+            line.split("=", 1)[1]
+            for line in properties.splitlines()
+            if line.startswith("build.time=")
+        )
+        expected_time = datetime.fromisoformat(encoded_time.replace("\\:", ":"))
+        # BuildProperties 3.4 преобразует время к миллисекундам.
+        expected_time = expected_time.replace(microsecond=expected_time.microsecond // 1000 * 1000)
+        assert datetime.fromisoformat(info["build"]["time"]) == expected_time
+    print(f"Actuator: profile {profile}, all checks passed")
+
+
+if __name__ == "__main__":
+    main()

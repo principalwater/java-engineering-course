@@ -61,6 +61,16 @@ jobs:
         run: |
           ./gradlew --no-daemon test validatePlugins
           ./gradlew --no-daemon -p consumer countWords
+      - name: Package Boot exercises with Maven and Gradle
+        run: |
+          exercises/sprint01/junit5/mvnw -B --no-transfer-progress -f exercises/sprint04/boot-actuator/pom.xml verify dependency:build-classpath -Dmdep.outputFile=target/runtime-classpath.txt
+          exercises/sprint02/file-transformer-gradle-plugin/gradlew --no-daemon -p exercises/sprint04/boot-actuator build
+          exercises/sprint01/junit5/mvnw -B --no-transfer-progress -f exercises/sprint04/http-logger/pom.xml verify
+          exercises/sprint01/junit5/mvnw -B --no-transfer-progress -f exercises/sprint04/boot-jdbc/pom.xml verify
+      - name: Verify packaged Actuator distributions and logging starter
+        run: |
+          python3 .github/scripts/verify-boot-actuator.py
+          python3 exercises/sprint04/http-logger/verify.py
       - name: Run Git history exercises
         env:
           GIT_AUTHOR_NAME: Course practice

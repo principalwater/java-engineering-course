@@ -49,8 +49,15 @@ Digest указан без tag: совмещённая запись `mysql:8.4@s
 
 Те же два интеграционных теста прошли на MySQL: commit, полный rollback после ошибки списания и валидация сохранились. Дополнительные тесты, повторяющие прежние проверки, не добавлены.
 
+### 6. Декларативная транзакция
+
+Следующий вариант заменил callback на `@Transactional` у публичного `transfer`. Сервис получает только репозиторий; тест вызывает сервис через внедрённый Spring bean и тем самым проходит через proxy. Обработка исключений не скрывает ошибку от transaction interceptor.
+
+Оба прежних теста вновь прошли на настоящем MySQL. История коммитов сохраняет варианты PlatformTransactionManager и TransactionTemplate для сравнения; окончательный код использует аннотацию. Метод не отправляет JDBC-операции в другой поток.
+
 ## Источники
 
 - [Spring Boot: Testcontainers и ServiceConnection](https://docs.spring.io/spring-boot/3.4/reference/testing/testcontainers.html).
 - [Spring Data JDBC: сохранение сущностей](https://docs.spring.io/spring-data/relational/reference/jdbc/entity-persistence.html).
 - [Программные транзакции](https://docs.spring.io/spring-framework/reference/6.2/data-access/transaction/programmatic.html).
+- [Декларативные транзакции](https://docs.spring.io/spring-framework/reference/6.2/data-access/transaction/declarative/annotations.html).

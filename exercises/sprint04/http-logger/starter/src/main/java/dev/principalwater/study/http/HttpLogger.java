@@ -21,7 +21,7 @@ public class HttpLogger extends OncePerRequestFilter {
             FilterChain chain) throws ServletException, IOException {
         // Query, заголовки и тело могут содержать секреты: записываем только метод и путь.
         String path = request.getRequestURI().replace('\r', '_').replace('\n', '_');
-        LOG.atLevel(level).log("Получен {} запрос {}", request.getMethod(), path);
+        LOG.atLevel(level).log("Received {} request {}", request.getMethod(), path);
         chain.doFilter(request, response);
     }
 }

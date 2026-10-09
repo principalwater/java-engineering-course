@@ -28,13 +28,13 @@ public class UserService {
     public void update(long id, User user) {
         validate(user);
         if (repository.update(id, user) == 0) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Пользователь не найден");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found");
         }
     }
 
     public void delete(long id) {
         if (repository.deleteById(id) == 0) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Пользователь не найден");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found");
         }
     }
 
@@ -42,7 +42,7 @@ public class UserService {
         if (user.firstName() == null || user.firstName().isBlank() || user.firstName().length() > MAX_NAME_LENGTH
                 || user.lastName() == null || user.lastName().isBlank() || user.lastName().length() > MAX_NAME_LENGTH
                 || user.age() == null || user.age() < MIN_AGE || user.age() > MAX_AGE || user.active() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Некорректные данные пользователя");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid user data");
         }
     }
 }

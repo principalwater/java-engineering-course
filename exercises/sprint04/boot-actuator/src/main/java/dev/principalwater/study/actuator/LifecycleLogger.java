@@ -8,10 +8,10 @@ public class LifecycleLogger implements ApplicationListener<ApplicationEvent> {
     @Override
     public void onApplicationEvent(ApplicationEvent event) {
         if (event instanceof AvailabilityChangeEvent<?> availability) {
-            System.out.println("Доступность: " + availability.getState().getClass().getSimpleName()
+            System.out.println("Availability: " + availability.getState().getClass().getSimpleName()
                     + "." + availability.getState());
         } else {
-            System.out.println("Событие: " + event.getClass().getSimpleName());
+            System.out.println("Event: " + event.getClass().getSimpleName());
         }
     }
 }

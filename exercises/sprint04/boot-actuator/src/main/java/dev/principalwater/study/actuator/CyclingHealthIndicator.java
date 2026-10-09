@@ -16,6 +16,6 @@ public class CyclingHealthIndicator implements HealthIndicator {
         // Учебный индикатор показывает агрегацию статусов, реальный сервис так не проверяют.
         boolean healthy = samples.getAndIncrement() % 2 == 0;
         return (healthy ? Health.up() : Health.down())
-                .withDetail("mode", "учебное чередование").build();
+                .withDetail("mode", "alternating demo").build();
     }
 }

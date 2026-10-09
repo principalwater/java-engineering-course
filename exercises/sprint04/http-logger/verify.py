@@ -22,7 +22,7 @@ def main() -> None:
         assert properties["application.http.logging.enabled"]["defaultValue"] is True
     try:
         with socket.create_connection(("127.0.0.1", PORT), timeout=0.2):
-            raise RuntimeError(f"Порт {PORT} занят: остановите свой предыдущий запуск")
+            raise RuntimeError(f"Port {PORT} is already in use; stop your previous server")
     except ConnectionRefusedError:
         pass
     cases = [
@@ -41,13 +41,13 @@ def main() -> None:
                 deadline = time.monotonic() + 30
                 while True:
                     if process.poll() is not None:
-                        raise RuntimeError(f"Сервер завершился: {log}")
+                        raise RuntimeError(f"Server exited; see {log}")
                     try:
                         with socket.create_connection(("127.0.0.1", PORT), timeout=0.2):
                             break
                     except (ConnectionRefusedError, TimeoutError):
                         if time.monotonic() >= deadline:
-                            raise TimeoutError(f"Сервер не запустился: {log}")
+                            raise TimeoutError(f"Server did not start; see {log}")
                         time.sleep(0.1)
                 with urlopen(f"http://127.0.0.1:{PORT}/demo?token={MARKER}", timeout=5) as response:
                     assert response.status == 200 and response.read().decode() == "Hello!"
@@ -59,12 +59,12 @@ def main() -> None:
                     process.kill()
                     process.wait()
         content = log.read_text()
-        lines = [line for line in content.splitlines() if "Получен GET запрос /demo" in line]
+        lines = [line for line in content.splitlines() if "Received GET request /demo" in line]
         assert len(lines) == (1 if level else 0), (name, lines)
         if level:
             assert level in lines[0], lines[0]
         assert MARKER not in content
-        print(f"HTTP-стартер: {name}, проверка прошла")
+        print(f"HTTP starter: {name}, checks passed")
 
 
 if __name__ == "__main__":

@@ -16,6 +16,6 @@ public class ActuatorApplication {
 
     @Bean
     CommandLineRunner showBuildTime(BuildProperties build) {
-        return args -> System.out.println("Время сборки: " + build.getTime());
+        return args -> System.out.println("Build time: " + build.getTime());
     }
 }

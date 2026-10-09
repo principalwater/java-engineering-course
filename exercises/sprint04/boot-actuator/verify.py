@@ -20,7 +20,7 @@ def get(endpoint: str) -> tuple[int, dict | None]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Проверка профиля Actuator")
+    parser = argparse.ArgumentParser(description="Actuator profile checks")
     parser.add_argument("profile", choices=("default", "lab", "probes"))
     parser.add_argument(
         "builder", choices=("maven", "gradle"), nargs="?", default="maven"
@@ -40,7 +40,7 @@ def main() -> None:
         status, health = get("health")
         assert health is not None and health["status"] in ("UP", "DOWN")
         assert status == (200 if health["status"] == "UP" else 503)
-        print("Actuator: liveness и custom readiness, все проверки прошли")
+        print("Actuator: liveness and custom readiness checks passed")
         return
     status, health = get("health")
     assert status == 200 and health is not None and health["status"] == "UP"
@@ -74,7 +74,7 @@ def main() -> None:
         # BuildProperties 3.4 преобразует время к миллисекундам.
         expected_time = expected_time.replace(microsecond=expected_time.microsecond // 1000 * 1000)
         assert datetime.fromisoformat(info["build"]["time"]) == expected_time
-    print(f"Actuator: профиль {profile}, все проверки прошли")
+    print(f"Actuator: profile {profile}, all checks passed")
 
 
 if __name__ == "__main__":

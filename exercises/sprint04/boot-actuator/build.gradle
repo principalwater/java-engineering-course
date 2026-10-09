@@ -6,7 +6,7 @@ plugins {
 
 group = 'dev.principalwater.study'
 version = '1.0-SNAPSHOT'
-description = 'Практика Spring Boot Actuator'
+description = 'Spring Boot Actuator practice'
 
 java {
     toolchain { languageVersion = JavaLanguageVersion.of(21) }

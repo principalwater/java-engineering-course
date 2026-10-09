@@ -27,7 +27,7 @@ public class AvailabilityDemo {
                 AvailabilityChangeEvent.publish(context, ReadinessState.ACCEPTING_TRAFFIC);
                 verify(client, readiness, HttpStatus.OK, Status.UP);
             }
-            System.out.println("Readiness: UP → OUT_OF_SERVICE → UP, HTTP-проверка прошла");
+            System.out.println("Readiness: UP -> OUT_OF_SERVICE -> UP, HTTP check passed");
         }
     }
 
@@ -37,7 +37,7 @@ public class AvailabilityDemo {
                 HttpResponse.BodyHandlers.ofString());
         String status = new ObjectMapper().readTree(response.body()).get("status").asText();
         if (response.statusCode() != http.value() || !status.equals(health.getCode())) {
-            throw new AssertionError("Неожиданный readiness: HTTP " + response.statusCode() + ", " + status);
+            throw new AssertionError("Unexpected readiness: HTTP " + response.statusCode() + ", " + status);
         }
     }
 }

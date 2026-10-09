@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.29.xsd">
+    <changeSet id="004-users" author="principalwater">
+        <preConditions onFail="HALT"><not><tableExists tableName="users"/></not></preConditions>
+        <createTable tableName="users">
+            <column name="id" type="bigint"><constraints primaryKey="true" primaryKeyName="pk_users" nullable="false"/></column>
+            <column name="username" type="varchar(255)"><constraints nullable="false" unique="true" uniqueConstraintName="uq_users_username"/></column>
+            <column name="password" type="varchar(255)"><constraints nullable="false"/></column>
+            <column name="email" type="varchar(255)"><constraints nullable="false" unique="true" uniqueConstraintName="uq_users_email"/></column>
+        </createTable>
+        <rollback><dropTable tableName="users"/></rollback>
+    </changeSet>
+</databaseChangeLog>

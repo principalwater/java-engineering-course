@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{users/common :: head('Форма пользователя')}"></head>
+<body><main><nav th:replace="~{users/common :: nav}"></nav>
+  <header class="page-heading"><p class="eyebrow">Профиль</p><h1>Форма пользователя</h1></header>
+  <form th:action="${action}" method="post" th:object="${user}" class="panel profile-form">
+    <div><label for="firstName">Имя</label><input id="firstName" th:field="*{firstName}" maxlength="256" required>
+      <p class="error" th:if="${#fields.hasErrors('firstName')}" th:errors="*{firstName}"></p></div>
+    <div><label for="lastName">Фамилия</label><input id="lastName" th:field="*{lastName}" maxlength="256" required>
+      <p class="error" th:if="${#fields.hasErrors('lastName')}" th:errors="*{lastName}"></p></div>
+    <div><label for="age">Возраст</label><input id="age" type="number" min="0" th:field="*{age}" required>
+      <p class="error" th:if="${#fields.hasErrors('age')}" th:errors="*{age}"></p></div>
+    <div class="checkbox"><input id="active" type="checkbox" th:field="*{active}"><label for="active">Активен</label></div>
+    <div class="actions"><button>Сохранить</button><a th:href="@{/users}">К списку</a></div>
+  </form>
+  <section th:if="${userId != null}" class="panel photo-panel"><h2>Фото пользователя</h2>
+    <img th:src="@{/users/{id}/photo(id=${userId})}" alt="Фото пользователя" class="portrait">
+    <form th:action="@{/users/{id}/photo(id=${userId})}" method="post" enctype="multipart/form-data">
+      <label for="photo">Изображение до 5 МиБ</label><input id="photo" type="file" name="photo" accept="image/*" required>
+      <button>Загрузить фото</button>
+    </form>
+  </section>
+</main></body></html>

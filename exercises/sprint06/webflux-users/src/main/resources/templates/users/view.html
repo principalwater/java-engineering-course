@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{users/common :: head('Профиль пользователя')}"></head>
+<body><main><nav th:replace="~{users/common :: nav}"></nav>
+  <header class="page-heading"><p class="eyebrow">Профиль</p><h1>Профиль пользователя</h1></header>
+  <section class="panel profile"><img th:src="@{/users/{id}/photo(id=${user.id})}" alt="Фото пользователя" class="portrait">
+    <div><h2 th:text="${user.firstName + ' ' + user.lastName}"></h2>
+      <dl><dt>ID</dt><dd class="identifier" th:text="${user.id}"></dd>
+        <dt>Возраст</dt><dd th:text="${user.age}"></dd><dt>Состояние</dt><dd th:text="${user.active} ? 'Активен' : 'Неактивен'"></dd></dl>
+      <a th:href="@{/users/{id}/edit(id=${user.id})}" class="button">Редактировать профиль</a></div>
+  </section>
+  <section class="panel photo-panel"><h2>Загрузить или обновить фото</h2>
+    <form th:action="@{/users/{id}/photo(id=${user.id})}" method="post" enctype="multipart/form-data">
+      <label for="photo">Изображение до 5 МиБ</label><input id="photo" type="file" name="photo" accept="image/*" required><button>Загрузить</button>
+    </form>
+  </section><p><a th:href="@{/users}">К списку</a></p>
+</main></body></html>

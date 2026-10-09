@@ -96,6 +96,25 @@ jobs:
           GIT_COMMITTER_NAME: Course practice
           GIT_COMMITTER_EMAIL: practice@example.invalid
         run: python3 exercises/sprint02/git/practice.py
+      - name: Verify reactive sources, databases and WebFlux users
+        run: |
+          exercises/sprint01/junit5/mvnw -B --no-transfer-progress -f exercises/sprint06/iterator-publisher/pom.xml verify
+          exercises/sprint01/junit5/mvnw -B --no-transfer-progress -f exercises/sprint06/r2dbc-books/pom.xml verify
+          exercises/sprint01/junit5/mvnw -B --no-transfer-progress -f exercises/sprint06/r2dbc-mysql/pom.xml verify
+          exercises/sprint02/file-transformer-gradle-plugin/gradlew --no-daemon -p exercises/sprint06/webflux-users test bootJar
+      - name: Upload sprint 06 reactive test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sprint06-reactive-tests
+          path: |
+            exercises/sprint06/iterator-publisher/target/surefire-reports/
+            exercises/sprint06/r2dbc-books/target/surefire-reports/
+            exercises/sprint06/r2dbc-mysql/target/surefire-reports/
+            exercises/sprint06/webflux-users/build/test-results/test/
+            exercises/sprint06/webflux-users/build/reports/tests/test/
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Prepare the exercise image mirror
         working-directory: exercises/sprint03/spring-mvc-jdbc
         run: python3 ../../../.github/scripts/prepare-sprint03-ci.py --exercise

@@ -38,6 +38,10 @@ git log --oneline
 
 Пустой diff подтверждает сохранность файлов. Переписывается только учебная история; remotes и публикация для упражнения не нужны.
 
+Операция выполнена через IntelliJ IDEA: `Squash Commits` объединила три выбранных коммита. В ветке осталось два коммита с учётом базового; сравнение tree с `archive/pre-ide-squash` подтвердило сохранность содержимого, рабочий каталог чистый.
+
+![Два коммита в Git Log после squash средствами IntelliJ IDEA](../../../screenshots/sprint02-git/01_idea_squash.png)
+
 ## Источники
 
 [Интерактивное индексирование](https://git-scm.com/docs/git-add), [stash](https://git-scm.com/docs/git-stash), [bisect](https://git-scm.com/docs/git-bisect), [rebase](https://git-scm.com/docs/git-rebase).

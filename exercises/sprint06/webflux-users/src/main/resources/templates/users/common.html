@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:fragment="head(title)">
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title th:text="${title}">Пользователи</title><link rel="stylesheet" th:href="@{/users.css}">
+</head>
+<body><nav th:fragment="nav" aria-label="Основная навигация" class="toolbar">
+  <a th:href="@{/users}" class="brand">Люди</a><span>Справочник пользователей</span>
+  <a th:href="@{/users/new}" class="button">Добавить пользователя</a>
+</nav></body>
+</html>

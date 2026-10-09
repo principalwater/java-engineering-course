@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{users/common :: head('Пользователи')}"></head>
+<body><main><nav th:replace="~{users/common :: nav}"></nav>
+  <header class="page-heading"><p class="eyebrow">Справочник</p><h1>Пользователи</h1>
+    <p>Профили, фотографии и состояние учётных записей.</p></header>
+  <form method="get" th:action="@{/users}" class="search" role="search">
+    <label for="lastName">Найти по фамилии</label>
+    <input id="lastName" name="lastName" th:value="${lastName}" placeholder="Например, Иванов">
+    <button>Найти</button><a th:href="@{/users}">Сбросить</a>
+  </form>
+  <section class="panel table-scroll" aria-label="Список пользователей"><table>
+    <thead><tr><th>Пользователь</th><th>ID</th><th>Возраст</th><th>Состояние</th><th>Действия</th></tr></thead>
+    <tbody><tr th:each="user : ${users}">
+      <td><div class="person"><img th:src="@{/users/{id}/photo(id=${user.id})}" alt="" class="avatar">
+        <a th:href="@{/users/{id}(id=${user.id})}" th:text="${user.firstName + ' ' + user.lastName}"></a></div></td>
+      <td class="identifier" th:text="${user.id}"></td><td th:text="${user.age}"></td>
+      <td><span class="badge" th:classappend="${user.active} ? 'active'" th:text="${user.active} ? 'Активен' : 'Неактивен'"></span></td>
+      <td><div class="actions"><a th:href="@{/users/{id}/edit(id=${user.id})}">Редактировать</a>
+        <form th:action="@{/users/{id}/delete(id=${user.id})}" method="post"><button class="quiet danger">Удалить</button></form></div></td>
+    </tr></tbody>
+  </table></section>
+  <p class="hint">Не нашли человека? Измените фамилию в поиске или добавьте новый профиль.</p>
+</main></body></html>

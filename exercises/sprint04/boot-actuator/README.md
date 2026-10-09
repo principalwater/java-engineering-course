@@ -106,9 +106,25 @@ python3 verify.py probes maven
 
 Профиль `lab` раскрывает все доступные эндпоинты только для локальной практики; стандартный запуск сохраняет раскрытие `health`. Для остановки используется Ctrl+C в терминале сервера.
 
+### 6. События запуска и изменение доступности
+
+`LifecycleLogger` подключён через `addListeners` до `run()`: обычный bean listener ещё недоступен для ранних событий. После обновления контекста наблюдалась последовательность `ApplicationStartedEvent` → `LivenessState.CORRECT` → runner с временем сборки → `ApplicationReadyEvent` → `ReadinessState.ACCEPTING_TRAFFIC`.
+
+`AvailabilityDemo` запускает тот же сервер на свободном порту и после завершения `run()` публикует отказ, затем восстановление готовности. Из каталога упражнения:
+
+```bash
+../../sprint01/junit5/mvnw -B --no-transfer-progress verify dependency:build-classpath \
+  -Dmdep.outputFile=target/runtime-classpath.txt
+java -cp "target/classes:$(cat target/runtime-classpath.txt)" \
+  dev.principalwater.study.actuator.AvailabilityDemo
+```
+
+HTTP-проверка прошла: readiness изменился UP/200 → OUT_OF_SERVICE/503 → UP/200. Демонстрация закрывает клиент и контекст сама. Изменение readiness сообщает состояние оркестратору; оно само по себе не запрещает запросы к прикладным контроллерам. Оба сборщика явно выбирают `ActuatorApplication` как основной класс исполняемого JAR.
+
 ## Источники
 
 - [Spring Boot Maven Plugin: упаковка](https://docs.spring.io/spring-boot/3.4/maven-plugin/packaging.html).
 - [Информация о сборке](https://docs.spring.io/spring-boot/3.4/maven-plugin/build-info.html).
 - [Actuator: эндпоинты и раскрытие](https://docs.spring.io/spring-boot/3.4/reference/actuator/endpoints.html).
 - [Gradle: управление зависимостями](https://docs.spring.io/spring-boot/3.4/gradle-plugin/managing-dependencies.html).
+- [Запуск, события и доступность приложения](https://docs.spring.io/spring-boot/3.4/reference/features/spring-application.html).

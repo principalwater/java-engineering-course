@@ -9,7 +9,9 @@ import org.springframework.context.annotation.Bean;
 @SpringBootApplication
 public class ActuatorApplication {
     public static void main(String[] args) {
-        SpringApplication.run(ActuatorApplication.class, args);
+        SpringApplication application = new SpringApplication(ActuatorApplication.class);
+        application.addListeners(new LifecycleLogger());
+        application.run(args);
     }
 
     @Bean

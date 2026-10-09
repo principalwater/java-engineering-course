@@ -14,6 +14,7 @@
   <build><plugins>
     <plugin>
       <groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId>
+      <configuration><mainClass>dev.principalwater.study.actuator.ActuatorApplication</mainClass></configuration>
       <executions><execution><goals><goal>build-info</goal></goals></execution></executions>
     </plugin>
   </plugins></build>

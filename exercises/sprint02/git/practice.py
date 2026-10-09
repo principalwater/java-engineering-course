@@ -79,16 +79,11 @@ def main():
         git(repo, "commit", "-m", f"SPRINT-02: add note {name} after the regression")
     head = git(repo, "rev-parse", "HEAD").stdout.strip()
     assert git(repo, "rev-list", "--count", "HEAD").stdout.strip() == "5"
-    git(repo, "bisect", "start")
-    git(repo, "bisect", "bad")
-    result = git(repo, "bisect", "good", good)
-    steps = 0
-    while "is the first bad commit" not in result.stdout:
-        steps += 1
-        assert steps <= 6
-        verdict = "good" if file.read_text(encoding="utf-8").strip() == "42" else "bad"
-        result = git(repo, "bisect", verdict)
-    assert introduced in result.stdout
+    git(repo, "bisect", "start", head, good)
+    # Текст вывода bisect меняется между версиями Git; результат проверяем по ref, а не по фразе.
+    git(repo, "bisect", "run", sys.executable, "-c",
+        "from pathlib import Path; import sys; "
+        "sys.exit(0 if Path('answer.txt').read_text().strip() == '42' else 1)")
     assert git(repo, "rev-parse", "refs/bisect/bad").stdout.strip() == introduced
     git(repo, "bisect", "reset")
     assert git(repo, "rev-parse", "HEAD").stdout.strip() == head

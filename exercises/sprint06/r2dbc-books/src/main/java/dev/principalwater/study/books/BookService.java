@@ -14,11 +14,15 @@ public class BookService {
         this.books = books;
     }
 
-    public Mono<Void> saveAndDeleteBook(String name) {
+    public Mono<Book> createBook(String name) {
         if (name == null || name.isBlank()) {
             return Mono.error(new IllegalArgumentException("Book title must not be blank"));
         }
-        return books.save(new Book(null, name))
+        return books.save(new Book(null, name));
+    }
+
+    public Mono<Void> saveAndDeleteBook(String name) {
+        return createBook(name)
                 .doOnNext(saved -> LOG.info("Saved book ID: {}", saved.id()))
                 .flatMap(saved -> books.deleteById(saved.id()).then(books.existsById(saved.id())))
                 .flatMap(exists -> {

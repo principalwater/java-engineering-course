@@ -19,6 +19,20 @@ class BookServiceIntegrationTest {
     @Autowired private BookRepository books;
     private static final Duration VERIFY_TIMEOUT = Duration.ofSeconds(5);
 
+    /** Пустое завершение не заменяет созданную книгу: результат содержит ID и читается из настоящей БД. */
+    @Test
+    void createBookReturnsPersistedTitleAndGeneratedId() {
+        Book saved = service.createBook("Java: реактивный доступ").block(VERIFY_TIMEOUT);
+        assertThat(saved).isNotNull();
+        try {
+            assertThat(saved.id()).isPositive();
+            assertThat(saved.title()).isEqualTo("Java: реактивный доступ");
+            assertThat(books.findById(saved.id()).block(VERIFY_TIMEOUT)).isEqualTo(saved);
+        } finally {
+            books.deleteById(saved.id()).block(VERIFY_TIMEOUT);
+        }
+    }
+
     /** Проверяется полный путь Service → reactive repository → H2 и сохранность соседней записи. */
     @Test
     void saveDeleteChainCompletesAndPreservesExistingBook(CapturedOutput output) {

@@ -38,6 +38,10 @@ docker compose -p java-course-sprint03-exercise logs -f web
 
 После сообщения об окончании развёртывания `spring-web-demo.war` можно открыть [страницу приложения](http://localhost:18081/spring-web-demo/home) и [список пользователей](http://localhost:18081/spring-web-demo/users).
 
+![Успешное развёртывание учебного WAR в журнале OrbStack](../../../screenshots/sprint03-spring-mvc-jdbc/01_tomcat_deployment.png)
+
+Журнал подтверждает инициализацию DispatcherServlet и завершение развёртывания WAR. Предупреждения ниже возникли при проверке отказа файлам свыше 5 МиБ.
+
 3. Выполнить HTTP-проверку на Python 3.11+ без дополнительных пакетов:
 
 ```bash

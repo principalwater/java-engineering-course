@@ -1,0 +1,7 @@
+services:
+  web:
+    image: tomcat:10.1-jdk21-temurin@sha256:887953afba0434879427f18d011d4df26d49e1f5c9aad18b779ed738edf22cf3
+    ports:
+      - "127.0.0.1:18081:8080"
+    volumes:
+      - ./target/spring-web-demo.war:/usr/local/tomcat/webapps/spring-web-demo.war:ro

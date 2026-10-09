@@ -9,6 +9,8 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.EmptyResultDataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.containers.MySQLContainer;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -17,48 +19,57 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         webEnvironment = SpringBootTest.WebEnvironment.NONE)
 class MySqlIntegrationTest {
     @Autowired
-    private AccountRepository accounts;
+    private AccountDao accounts;
     @Autowired
-    private TransferService transfers;
+    private AccountService transfers;
+    @Autowired
+    private JdbcTemplate jdbc;
 
     /** Проверяется реальный MySQL: generated key, отображение записи, DECIMAL и удаление. */
     @Test
     void crudPreservesGeneratedIdAndDecimalBalance() {
-        Account saved = accounts.save(new Account("O'Коннор"));
+        accounts.create("O'Коннор");
+        Account saved = accounts.findFirstByName("O'Коннор");
         assertThat(saved.id()).isPositive();
         try {
-            assertThat(accounts.findById(saved.id())).contains(saved);
-            Account updated = accounts.save(new Account(saved.id(), saved.name(), new BigDecimal("123.45")));
-            assertThat(accounts.findById(saved.id())).contains(updated);
+            assertThat(accounts.findAll()).contains(saved);
+            Account updated = new Account(saved.id(), saved.name(), new BigDecimal("123.45"));
+            accounts.update(updated);
+            assertThat(accounts.findFirstByName(saved.name())).isEqualTo(updated);
+            assertThatThrownBy(() -> accounts.findFirstByName("x' OR 1=1 -- "))
+                    .isInstanceOf(EmptyResultDataAccessException.class);
             assertThat(updated.balance()).isEqualByComparingTo("123.45");
         } finally {
-            accounts.deleteById(saved.id());
+            jdbc.update("DELETE FROM account WHERE id = ?", saved.id());
         }
-        assertThat(accounts.existsById(saved.id())).isFalse();
+        assertThatThrownBy(() -> accounts.findFirstByName(saved.name()))
+                .isInstanceOf(EmptyResultDataAccessException.class);
     }
 
     /** Перевод либо изменяет обе записи, либо сохраняет обе после нарушения CHECK у отправителя. */
     @Test
     void transferCommitsBothChangesAndRollsBackOnOverdraft() {
-        Account source = accounts.save(new Account("Отправитель"));
-        Account target = accounts.save(new Account("Получатель"));
+        accounts.create("Отправитель");
+        Account source = accounts.findFirstByName("Отправитель");
+        accounts.create("Получатель");
+        Account target = accounts.findFirstByName("Получатель");
         try {
             transfers.transfer(source.id(), target.id(), new BigDecimal("500.00"));
-            Account committedSource = accounts.findById(source.id()).orElseThrow();
-            Account committedTarget = accounts.findById(target.id()).orElseThrow();
+            Account committedSource = accounts.findFirstByName(source.name());
+            Account committedTarget = accounts.findFirstByName(target.name());
             assertThat(committedSource.balance()).isEqualByComparingTo("9500.00");
             assertThat(committedTarget.balance()).isEqualByComparingTo("10500.00");
             assertThatThrownBy(() -> transfers.transfer(source.id(), target.id(), new BigDecimal("100000.00")))
                     .isInstanceOf(DataAccessException.class).hasRootCauseInstanceOf(SQLException.class);
-            assertThat(accounts.findById(source.id())).contains(committedSource);
-            assertThat(accounts.findById(target.id())).contains(committedTarget);
+            assertThat(accounts.findFirstByName(source.name())).isEqualTo(committedSource);
+            assertThat(accounts.findFirstByName(target.name())).isEqualTo(committedTarget);
             assertThatThrownBy(() -> transfers.transfer(source.id(), target.id(), new BigDecimal("0.001")))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThat(accounts.findById(source.id())).contains(committedSource);
-            assertThat(accounts.findById(target.id())).contains(committedTarget);
+            assertThat(accounts.findFirstByName(source.name())).isEqualTo(committedSource);
+            assertThat(accounts.findFirstByName(target.name())).isEqualTo(committedTarget);
         } finally {
-            accounts.deleteById(source.id());
-            accounts.deleteById(target.id());
+            jdbc.update("DELETE FROM account WHERE id = ?", source.id());
+            jdbc.update("DELETE FROM account WHERE id = ?", target.id());
         }
     }
 

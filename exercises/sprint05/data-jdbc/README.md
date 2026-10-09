@@ -1,4 +1,4 @@
-# Spring Data JDBC и MySQL
+# JDBC и MySQL: от репозитория к собственному SQL
 
 ## Цель
 
@@ -6,13 +6,13 @@
 
 ## Описание
 
-Java 21, Spring Boot 3.4.13, Maven 3.9.16, Testcontainers 1.20.6. Образ MySQL серии 8.4 зафиксирован digest; проверка выполнена на ARM64 через OrbStack. Spring Data JDBC не использует JPA/Hibernate: репозиторий создаёт SQL для простого aggregate `Account`.
+Java 21, Spring Boot 3.4.13, Maven 3.9.16, Testcontainers 1.20.6. Образ MySQL серии 8.4 зафиксирован digest; проверка выполнена на ARM64 через OrbStack. Первые этапы используют Spring Data JDBC без JPA/Hibernate; окончательный вариант - JdbcTemplate и собственный DAO.
 
 ## Этапы выполнения
 
 ### 1. Сущность и схема
 
-`Account` - Java record с Long ID, именем и BigDecimal balance. Имена таблицы/колонок заданы явно. `ListCrudRepository` обеспечивает CRUD без ручного SQL; для вставки ID равен null, после save используется возвращённая сущность.
+В первом варианте `Account` - Java record с Long ID, именем и BigDecimal balance; таблица/колонки заданы явно в Spring Data annotations. `ListCrudRepository` обеспечивал CRUD без ручного SQL; для вставки ID равен null, после save использовалась возвращённая сущность.
 
 MySQL создаёт BIGINT AUTO_INCREMENT, VARCHAR(255) и DECIMAL(15,2). CHECK ограничивает отрицательный баланс. Схема и её автоматическая инициализация находятся только в тестовых ресурсах; обычная конфигурация не создаёт таблицы во внешней БД.
 
@@ -54,6 +54,14 @@ Digest указан без tag: совмещённая запись `mysql:8.4@s
 Следующий вариант заменил callback на `@Transactional` у публичного `transfer`. Сервис получает только репозиторий; тест вызывает сервис через внедрённый Spring bean и тем самым проходит через proxy. Обработка исключений не скрывает ошибку от transaction interceptor.
 
 Оба прежних теста вновь прошли на настоящем MySQL. История коммитов сохраняет варианты PlatformTransactionManager и TransactionTemplate для сравнения; окончательный код использует аннотацию. Метод не отправляет JDBC-операции в другой поток.
+
+### 7. Собственный SQL через JdbcTemplate
+
+Репозиторий заменён на `AccountDao`: findAll, findFirstByName, create и update используют явный SQL и общий RowMapper. FindAll упорядочен по ID; поиск имени передаёт значение отдельным аргументом и выбирает первую запись по ID. Отсутствие записи даёт EmptyResultDataAccessException. Дополнительный adjustBalance нужен реальному AccountService для атомарной арифметики в БД.
+
+`AccountService` сохраняет транзакционную границу; Account стал обычным record без persistence annotations. Стартер Data JDBC заменён на JDBC, так как автоматические Spring Data repositories больше не используются. DEFAULT начального баланса теперь принадлежит схеме MySQL.
+
+Два интеграционных теста адаптированы к DAO и прошли. Они по-прежнему проверяют ID, DECIMAL, commit/rollback, а также подтверждают, что `x' OR 1=1 -- ` воспринимается как буквальное имя, не возвращает чужую запись и не меняет SQL. Тестовые записи удаляются напрямую через JdbcTemplate по собственным ID: дополнительный production API для cleanup не создавался.
 
 ## Источники
 

@@ -5,11 +5,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public class TransferService {
+public class AccountService {
     private static final int CURRENCY_SCALE = 2;
-    private final AccountRepository accounts;
+    private final AccountDao accounts;
 
-    public TransferService(AccountRepository accounts) {
+    public AccountService(AccountDao accounts) {
         this.accounts = accounts;
     }
 

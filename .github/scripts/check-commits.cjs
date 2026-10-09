@@ -6,7 +6,7 @@ function git(...args) {
 }
 
 function sha(value) {
-  if (!/^[a-f0-9]{40}$/.test(value ?? '')) throw new Error('Некорректный SHA в событии GitHub');
+  if (!/^[a-f0-9]{40}$/.test(value ?? '')) throw new Error('Invalid SHA in the GitHub event');
   return value;
 }
 
@@ -29,18 +29,18 @@ try {
   } else if (process.env.GITHUB_EVENT_NAME === 'workflow_dispatch') {
     commits = git('rev-parse', 'HEAD').trim();
   } else {
-    throw new Error('Неподдерживаемое событие проверки коммитов');
+    throw new Error('Unsupported event for commit validation');
   }
   const revisions = commits ? commits.split('\n') : [];
   for (const revision of revisions) {
-    // Удаляем только терминальный перевод строки Git, сохраняя тело и трейлеры для проверки.
+    // Remove only Git's trailing newline, preserving the body and trailers for validation.
     const message = git('show', '--no-patch', '--format=format:%B', revision).replace(/\n$/, '');
     if (!/^SPRINT-\d{2}: [a-z][\x20-\x7e]*$/.test(message)) {
-      throw new Error('Коммит ' + revision.slice(0, 12) +
-        ': нужна одна английская строка SPRINT-NN: description, без тела и трейлеров');
+      throw new Error('Commit ' + revision.slice(0, 12) +
+        ': use a single English line, SPRINT-NN: description, without a body or trailers');
     }
   }
-  console.log('Проверено коммитов: ' + revisions.length);
+  console.log('Commits checked: ' + revisions.length);
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;

@@ -38,7 +38,7 @@ function scenario() {
         getContent: async parameters => {
           if (state.contentError) throw state.contentError;
           if (parameters.ref !== 'head' || state.absentMarkers?.has(parameters.path)) {
-            throw Object.assign(new Error('Не найдено'), {status: 404});
+            throw Object.assign(new Error('Not found'), {status: 404});
           }
           return {data: {type: 'file'}};
         },
@@ -70,30 +70,30 @@ function scenario() {
   return {...state, state, github, bot};
 }
 
-// Ни чужая команда, ни красный CI, ни сменившийся head не дают слияние от имени владельца.
-test('согласование допускает только проверенный head и сохраняет историю merge', async t => {
+// An unauthorized command, failed CI or changed head cannot permit merging on behalf of the owner.
+test('approval accepts only a verified head and preserves merge history', async t => {
   const denials = [
-    ['чужой actor', fixture => {fixture.context.actor = 'other';}, /только владельцу/],
-    ['другая команда', fixture => {fixture.context.payload.comment.body = '/approve now';}, /только владельцу/],
-    ['многострочный title', fixture => {fixture.pull.title += '\n';}, /Заголовок PR/],
-    ['токен владельца вместо bot', fixture => {fixture.state.botLogin = 'principalwater';}, /elementary-flow-bot/],
-    ['красный CI', fixture => {fixture.run.conclusion = 'failure';}, /Последний CI/],
-    ['push вместо полного PR CI', fixture => {fixture.run.event = 'push';}, /Последний CI/],
-    ['CI другого PR', fixture => {fixture.run.pull_requests = [{number: 8}];}, /Последний CI/],
-    ['старый CI', fixture => {fixture.run.head_sha = 'previous';}, /Последний CI/],
-    ['непройденный job', fixture => {fixture.jobs[1].conclusion = 'failure';}, /Обязательная проверка/],
-    ['пропущен существующий модуль', fixture => {
+    ['unauthorized actor', fixture => {fixture.context.actor = 'other';}, /Only the owner/],
+    ['different command', fixture => {fixture.context.payload.comment.body = '/approve now';}, /Only the owner/],
+    ['multiline title', fixture => {fixture.pull.title += '\n';}, /pull request title/],
+    ['owner token instead of bot token', fixture => {fixture.state.botLogin = 'principalwater';}, /elementary-flow-bot/],
+    ['failed CI', fixture => {fixture.run.conclusion = 'failure';}, /latest pull request CI/],
+    ['push run instead of full pull request CI', fixture => {fixture.run.event = 'push';}, /latest pull request CI/],
+    ['CI for another pull request', fixture => {fixture.run.pull_requests = [{number: 8}];}, /latest pull request CI/],
+    ['stale CI', fixture => {fixture.run.head_sha = 'previous';}, /latest pull request CI/],
+    ['failed job', fixture => {fixture.jobs[1].conclusion = 'failure';}, /Required check/],
+    ['existing module skipped', fixture => {
       fixture.jobs[2].conclusion = 'skipped'; fixture.checks[2].conclusion = 'skipped';
-    }, /Обязательная проверка/],
-    ['403 не означает отсутствующий модуль', fixture => {
-      fixture.state.contentError = Object.assign(new Error('Доступ запрещён'), {status: 403});
-    }, /Доступ запрещён/],
-    ['поддельный check app', fixture => {fixture.checks[0].app.id = 1;}, /GitHub Actions/],
-    ['отставание от main', fixture => {fixture.state.behind = 1;}, /отстаёт/],
-    ['запрошенные изменения', fixture => {fixture.reviews.push({id: 1, user: {login: 'reviewer'}, state: 'CHANGES_REQUESTED'});}, /запрошенные изменения/],
-    ['незавершённое обсуждение', fixture => {fixture.state.unresolved = true;}, /незавершённые обсуждения/],
-    ['main сменился во время проверки', fixture => {fixture.state.staleBase = true;}, /изменились/],
-    ['head сменился до review', fixture => {fixture.state.staleBeforeReview = true;}, /изменились/],
+    }, /Required check/],
+    ['403 does not mean the module is absent', fixture => {
+      fixture.state.contentError = Object.assign(new Error('Access denied'), {status: 403});
+    }, /Access denied/],
+    ['spoofed check app', fixture => {fixture.checks[0].app.id = 1;}, /GitHub Actions/],
+    ['branch behind main', fixture => {fixture.state.behind = 1;}, /behind main/],
+    ['requested changes', fixture => {fixture.reviews.push({id: 1, user: {login: 'reviewer'}, state: 'CHANGES_REQUESTED'});}, /requested changes/],
+    ['unresolved review thread', fixture => {fixture.state.unresolved = true;}, /unresolved review threads/],
+    ['main changed during validation', fixture => {fixture.state.staleBase = true;}, /changed during validation/],
+    ['head changed before review', fixture => {fixture.state.staleBeforeReview = true;}, /changed during validation/],
   ];
   for (const [name, configure, message] of denials) {
     await t.test(name, async () => {
@@ -103,15 +103,15 @@ test('согласование допускает только проверен�
       assert.deepEqual(fixture.effects, []);
     });
   }
-  await t.test('head сменился после review', async () => {
+  await t.test('head changed after review', async () => {
     const fixture = scenario();
     fixture.state.staleAfterReview = true;
-    await assert.rejects(approveAndMerge(fixture), /Head PR изменился/);
+    await assert.rejects(approveAndMerge(fixture), /pull request head changed/);
     assert.equal(fixture.effects.length, 1);
     assert.equal(fixture.effects[0][0], 'review');
     assert.equal(fixture.effects[0][1].commit_id, 'head');
   });
-  await t.test('IDE PR без проекта допускает честный skipped', async () => {
+  await t.test('an IDE pull request without a project allows a legitimate skipped job', async () => {
     const fixture = scenario();
     fixture.state.absentMarkers = new Set(['projects/sprint03-spring-blog/pom.xml']);
     fixture.jobs[2].conclusion = 'skipped';
@@ -119,7 +119,7 @@ test('согласование допускает только проверен�
     await approveAndMerge(fixture);
     assert.deepEqual(fixture.effects.map(effect => effect[0]), ['review', 'merge']);
   });
-  await t.test('авторизованная команда', async () => {
+  await t.test('authorized command', async () => {
     const fixture = scenario();
     await approveAndMerge(fixture);
     assert.equal(fixture.effects[0][0], 'review');

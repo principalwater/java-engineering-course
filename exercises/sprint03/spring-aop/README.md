@@ -25,7 +25,7 @@ exercises/sprint01/junit5/mvnw -B --no-transfer-progress \
 
 ## Уточнения реализации
 
-В примере для `@Around` нужен `ProceedingJoinPoint`, а возвращаемый тип — `Object`: обычный `JoinPoint` не имеет `proceed()`, и `void` не сохраняет результат чтения. Использован `proxyBeanMethods`, корректное имя атрибута `@Configuration`; DELETE получил путь `/{name}` для соответствующего `@PathVariable`. Поддержка аннотаций AspectJ здесь включает Spring-прокси, а не weaving байт-кода.
+В примере для `@Around` нужен `ProceedingJoinPoint`, а возвращаемый тип — `Object`: обычный `JoinPoint` не имеет `proceed()`, и `void` не сохраняет результат чтения. Использован `proxyBeanMethods`, корректное имя атрибута `@Configuration`; DELETE получил путь `/{name}`. Имя `@PathVariable` задано явно, без зависимости от compiler flag `-parameters`. Поддержка аннотаций AspectJ здесь включает Spring-прокси, а не weaving байт-кода.
 
 ## Источники
 

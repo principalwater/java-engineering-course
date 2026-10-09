@@ -18,7 +18,7 @@ public class UserController {
     }
 
     @GetMapping("/{name}")
-    public User getUser(@PathVariable String name) {
+    public User getUser(@PathVariable("name") String name) {
         return userService.getUserByName(name);
     }
 
@@ -28,7 +28,7 @@ public class UserController {
     }
 
     @DeleteMapping("/{name}")
-    public void deleteUser(@PathVariable String name) {
+    public void deleteUser(@PathVariable("name") String name) {
         userService.deleteUserByName(name);
     }
 }

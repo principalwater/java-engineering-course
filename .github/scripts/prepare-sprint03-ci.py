@@ -27,9 +27,11 @@ for service, context in (("backend", project), ("frontend", project / "frontend"
                              source, flags=re.MULTILINE)
     if not count:
         raise ValueError("Expected uppercase FROM statements without platform flags")
-    dockerfile = output / (service + ".Dockerfile")
+    # Bake reads Dockerfiles within their build context without extra filesystem privileges.
+    dockerfile = context / "target/ci.Dockerfile"
+    dockerfile.parent.mkdir(parents=True, exist_ok=True)
     dockerfile.write_text(rendered)
-    services[service] = {"build": {"context": str(context), "dockerfile": str(dockerfile)}}
+    services[service] = {"build": {"context": str(context), "dockerfile": "target/ci.Dockerfile"}}
 override = output / "compose.json"
 override.write_text(json.dumps({"services": services}))
 with Path(os.environ["GITHUB_ENV"]).open("a") as environment:

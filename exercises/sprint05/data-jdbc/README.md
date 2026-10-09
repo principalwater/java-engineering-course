@@ -63,9 +63,18 @@ Digest указан без tag: совмещённая запись `mysql:8.4@s
 
 Два интеграционных теста адаптированы к DAO и прошли. Они по-прежнему проверяют ID, DECIMAL, commit/rollback, а также подтверждают, что `x' OR 1=1 -- ` воспринимается как буквальное имя, не возвращает чужую запись и не меняет SQL. Тестовые записи удаляются напрямую через JdbcTemplate по собственным ID: дополнительный production API для cleanup не создавался.
 
+### 8. Три API вставки уведомлений
+
+Добавлена таблица notification с BIGINT AUTO_INCREMENT и VARCHAR(255) NOT NULL. Стартер Data JDBC снова подключён для NotificationRepository; доступ к account остаётся через собственный DAO. NotificationDao предлагает два варианта вставки: JdbcTemplate.batchUpdate и заранее настроенный SimpleJdbcInsert. В обоих идентификаторы должны отсутствовать, их выдаёт БД; пустой список не отправляется драйверу. SimpleJdbcInsert использует только message, id объявлен generated-key column.
+
+Один параметризованный тест сравнивает saveAll, batchUpdate и executeBatch: каждый сохраняет 100 сообщений с проверкой всего содержимого и уникальных ID. Отдельный сценарий подтверждает rollback batchUpdate после NOT NULL ошибки во второй записи: первая запись также не остаётся в БД. DAO-методы помечены Transactional - batch сам по себе не обеспечивает атомарность.
+
+Итоговый прогон: шесть тестовых случаев, ошибок и пропусков нет, один Spring-контекст и один MySQL-контейнер. Сетевые round-trip и ускорение не измерялись; форма batching зависит от JDBC-драйвера.
+
 ## Источники
 
 - [Spring Boot: Testcontainers и ServiceConnection](https://docs.spring.io/spring-boot/3.4/reference/testing/testcontainers.html).
 - [Spring Data JDBC: сохранение сущностей](https://docs.spring.io/spring-data/relational/reference/jdbc/entity-persistence.html).
 - [Программные транзакции](https://docs.spring.io/spring-framework/reference/6.2/data-access/transaction/programmatic.html).
 - [Декларативные транзакции](https://docs.spring.io/spring-framework/reference/6.2/data-access/transaction/declarative/annotations.html).
+- [JDBC batch operations](https://docs.spring.io/spring-framework/reference/6.2/data-access/jdbc/advanced.html).

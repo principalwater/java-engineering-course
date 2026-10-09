@@ -2,7 +2,12 @@ package dev.principalwater.study.data;
 
 import java.math.BigDecimal;
 import java.sql.SQLException;
+import java.util.List;
+import java.util.UUID;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -24,6 +29,13 @@ class MySqlIntegrationTest {
     private AccountService transfers;
     @Autowired
     private JdbcTemplate jdbc;
+    @Autowired
+    private NotificationRepository notifications;
+    @Autowired
+    private NotificationDao notificationDao;
+
+    private static final int BATCH_SIZE = 100;
+    private enum BatchMethod { REPOSITORY, JDBC, SIMPLE_INSERT }
 
     /** Проверяется реальный MySQL: generated key, отображение записи, DECIMAL и удаление. */
     @Test
@@ -70,6 +82,45 @@ class MySqlIntegrationTest {
         } finally {
             jdbc.update("DELETE FROM account WHERE id = ?", source.id());
             jdbc.update("DELETE FROM account WHERE id = ?", target.id());
+        }
+    }
+
+    /** Разные API должны сохранять содержимое и выдавать уникальные ID в настоящей БД. */
+    @ParameterizedTest
+    @EnumSource(BatchMethod.class)
+    void batchApisPreserveMessagesAndGeneratedIds(BatchMethod method) {
+        String prefix = UUID.randomUUID() + ":";
+        List<Notification> input = IntStream.range(0, BATCH_SIZE)
+                .mapToObj(index -> new Notification(null, prefix + index)).toList();
+        try {
+            switch (method) {
+                case REPOSITORY -> notifications.saveAll(input);
+                case JDBC -> notificationDao.saveNotificationsWithJdbcTemplate(input);
+                case SIMPLE_INSERT -> notificationDao.saveNotificationsWithSimpleJdbcInsert(input);
+            }
+            List<Notification> saved = notifications.findAll().stream()
+                    .filter(item -> item.message().startsWith(prefix)).toList();
+            assertThat(saved).hasSize(BATCH_SIZE);
+            assertThat(saved).extracting(Notification::message)
+                    .containsExactlyInAnyOrderElementsOf(input.stream().map(Notification::message).toList());
+            assertThat(saved).extracting(Notification::id).doesNotContainNull().doesNotHaveDuplicates();
+        } finally {
+            jdbc.update("DELETE FROM notification WHERE message LIKE ?", prefix + "%");
+        }
+    }
+
+    /** Сам batch не атомарен: scope должен отменить вставку перед ошибкой NOT NULL. */
+    @Test
+    void failedBatchRollsBackEarlierRows() {
+        String marker = UUID.randomUUID().toString();
+        List<Notification> input = List.of(new Notification(null, marker), new Notification(null, null));
+        try {
+            assertThatThrownBy(() -> notificationDao.saveNotificationsWithJdbcTemplate(input))
+                    .isInstanceOf(DataAccessException.class);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notification WHERE message = ?", Long.class, marker))
+                    .isZero();
+        } finally {
+            jdbc.update("DELETE FROM notification WHERE message = ?", marker);
         }
     }
 

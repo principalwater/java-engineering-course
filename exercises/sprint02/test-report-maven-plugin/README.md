@@ -36,6 +36,8 @@
 
 Три проверки защищают полный XML→HTML/TXT отчёт, учебный текстовый формат и отказ от внешних XML entities. На JDK 21 все три прошли; установленный локально JAR сформировал HTML/TXT по четырём тестам отдельного проекта-потребителя. Несуществующий входной каталог дал ожидаемый BUILD FAILURE.
 
+![HTML-отчёт плагина по четырём тестам JUnit-проекта](../../../screenshots/sprint02-maven-report/01_test_report.jpg)
+
 Источники: [Surefire](https://maven.apache.org/surefire-archives/surefire-3.2.5/maven-surefire-plugin/), [descriptor Maven-плагина](https://maven.apache.org/plugin-tools/maven-plugin-plugin/).
 
 Scripts Maven Wrapper сохранены с исходными уведомлениями; [Apache License 2.0](.mvn/wrapper/LICENSE) относится к ним, а не ко всему решению.

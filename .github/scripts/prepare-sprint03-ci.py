@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import re
@@ -12,14 +13,18 @@ def mirrored(image):
     return MIRROR + image
 
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--exercise", action="store_true")
+exercise = parser.parse_args().exercise
 project = Path.cwd()
 output = Path(os.environ["RUNNER_TEMP"]) / "sprint03-compose"
 output.mkdir(parents=True, exist_ok=True)
 images = re.findall(r"^    image: (\S+)$", (project / "compose.yaml").read_text(), re.MULTILINE)
 if len(images) != 1:
-    raise ValueError("Expected one database image in the sprint 03 Compose file")
-services = {"db": {"image": mirrored(images[0])}}
-for service, context in (("backend", project), ("frontend", project / "frontend")):
+    raise ValueError("Expected one pinned image in the sprint 03 Compose file")
+services = {"web" if exercise else "db": {"image": mirrored(images[0])}}
+builds = () if exercise else (("backend", project), ("frontend", project / "frontend"))
+for service, context in builds:
     source = (context / "Dockerfile").read_text()
     # Keep digests while avoiding anonymous Docker Hub pull limits.
     rendered, count = re.subn(r"^FROM (\S+)(.*)$",

@@ -93,6 +93,9 @@ jobs:
           GIT_COMMITTER_NAME: Course practice
           GIT_COMMITTER_EMAIL: practice@example.invalid
         run: python3 exercises/sprint02/git/practice.py
+      - name: Prepare the exercise image mirror
+        working-directory: exercises/sprint03/spring-mvc-jdbc
+        run: python3 ../../../.github/scripts/prepare-sprint03-ci.py --exercise
       - name: Start an isolated exercise Tomcat
         id: servlet
         working-directory: exercises/sprint03/spring-mvc-jdbc

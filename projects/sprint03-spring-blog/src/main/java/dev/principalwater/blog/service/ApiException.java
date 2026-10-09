@@ -1,5 +1,6 @@
 package dev.principalwater.blog.service;
 
+import dev.principalwater.blog.model.BlogEntity;
 import org.springframework.http.HttpStatus;
 
 public class ApiException extends RuntimeException {
@@ -14,11 +15,11 @@ public class ApiException extends RuntimeException {
         return status;
     }
 
-    public static ApiException notFound(String entity) {
-        return new ApiException(HttpStatus.NOT_FOUND, entity + " не найден");
+    public static ApiException notFound(BlogEntity entity) {
+        return new ApiException(HttpStatus.NOT_FOUND, entity.notFoundMessage());
     }
 
-    public static ApiException badRequest(String message) {
-        return new ApiException(HttpStatus.BAD_REQUEST, message);
+    public static ApiException badRequest(RequestError error) {
+        return new ApiException(HttpStatus.BAD_REQUEST, error.message());
     }
 }

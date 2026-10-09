@@ -1,6 +1,7 @@
 package dev.principalwater.blog.service;
 
 import dev.principalwater.blog.dao.BlogDao;
+import dev.principalwater.blog.model.BlogEntity;
 import dev.principalwater.blog.model.Comment;
 import dev.principalwater.blog.model.CommentRequest;
 import dev.principalwater.blog.model.Post;
@@ -16,16 +17,25 @@ import java.util.Locale;
 import java.util.Map;
 import javax.imageio.ImageIO;
 import javax.imageio.stream.MemoryCacheImageInputStream;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import static dev.principalwater.blog.model.BlogLimits.MAX_IMAGE_BYTES;
+import static dev.principalwater.blog.model.BlogLimits.MAX_IMAGE_PIXELS;
+import static dev.principalwater.blog.model.BlogLimits.MAX_PAGE_SIZE;
+import static dev.principalwater.blog.model.BlogLimits.MAX_SEARCH_LENGTH;
+import static dev.principalwater.blog.model.BlogLimits.MAX_TAG_COUNT;
+import static dev.principalwater.blog.model.BlogLimits.MAX_TAG_LENGTH;
+import static dev.principalwater.blog.model.BlogLimits.MAX_TEXT_LENGTH;
+import static dev.principalwater.blog.model.BlogLimits.MAX_TITLE_LENGTH;
 
 @Service
 @Transactional(readOnly = true)
 public class BlogService {
-    public static final int MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-    private static final int MAX_TEXT_LENGTH = 1_000_000;
     private static final Map<String, String> IMAGE_TYPES = Map.of(
-            "png", "image/png", "jpeg", "image/jpeg", "gif", "image/gif", "bmp", "image/bmp");
+            "png", MediaType.IMAGE_PNG_VALUE, "jpeg", MediaType.IMAGE_JPEG_VALUE,
+            "gif", MediaType.IMAGE_GIF_VALUE, "bmp", "image/bmp");
     private final BlogDao dao;
 
     public BlogService(BlogDao dao) {
@@ -33,8 +43,9 @@ public class BlogService {
     }
 
     public PostPage list(String search, int pageNumber, int pageSize) {
-        if (search == null || search.length() > 1000 || pageNumber < 1 || pageSize < 1 || pageSize > 100) {
-            throw ApiException.badRequest("Поиск до 1000 символов, номер страницы от 1, размер от 1 до 100");
+        if (search == null || search.length() > MAX_SEARCH_LENGTH
+                || pageNumber < 1 || pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
+            throw ApiException.badRequest(RequestError.INVALID_SEARCH);
         }
         var filter = SearchFilter.parse(search);
         long total = dao.count(filter);
@@ -46,7 +57,7 @@ public class BlogService {
 
     public Post get(long id) {
         requirePositive(id);
-        return dao.get(id).orElseThrow(() -> ApiException.notFound("Пост"));
+        return dao.get(id).orElseThrow(() -> ApiException.notFound(BlogEntity.POST));
     }
 
     @Transactional
@@ -59,34 +70,34 @@ public class BlogService {
     public Post update(long id, PostRequest request) {
         requirePositive(id);
         PostRequest post = validatePost(request);
-        requireId(id, request.id(), "Идентификатор поста в URL и теле должен совпадать");
-        requireUpdated(dao.update(id, post), "Пост");
+        requireId(id, request.id(), RequestError.POST_ID_MISMATCH);
+        requireUpdated(dao.update(id, post), BlogEntity.POST);
         return get(id);
     }
 
     @Transactional
     public void delete(long id) {
         requirePositive(id);
-        requireUpdated(dao.delete(id), "Пост");
+        requireUpdated(dao.delete(id), BlogEntity.POST);
     }
 
     @Transactional
     public long like(long id) {
         requirePositive(id);
-        requireUpdated(dao.incrementLikes(id), "Пост");
+        requireUpdated(dao.incrementLikes(id), BlogEntity.POST);
         return dao.likes(id);
     }
 
     public StoredImage image(long id) {
         requirePositive(id);
-        return dao.image(id).orElseThrow(() -> ApiException.notFound("Изображение"));
+        return dao.image(id).orElseThrow(() -> ApiException.notFound(BlogEntity.IMAGE));
     }
 
     @Transactional
     public void updateImage(long id, byte[] bytes, String contentType) {
         requirePositive(id);
         String actualType = validateImage(bytes);
-        requireUpdated(dao.updateImage(id, bytes, actualType), "Пост");
+        requireUpdated(dao.updateImage(id, bytes, actualType), BlogEntity.POST);
     }
 
     public List<Comment> comments(long postId) {
@@ -97,7 +108,7 @@ public class BlogService {
     public Comment comment(long postId, long id) {
         requirePositive(postId);
         requirePositive(id);
-        return dao.comment(postId, id).orElseThrow(() -> ApiException.notFound("Комментарий"));
+        return dao.comment(postId, id).orElseThrow(() -> ApiException.notFound(BlogEntity.COMMENT));
     }
 
     @Transactional
@@ -111,8 +122,8 @@ public class BlogService {
     public Comment updateComment(long postId, long id, CommentRequest request) {
         requirePositive(id);
         validateComment(postId, request);
-        requireId(id, request.id(), "Идентификатор комментария в URL и теле должен совпадать");
-        requireUpdated(dao.updateComment(postId, id, request.text()), "Комментарий");
+        requireId(id, request.id(), RequestError.COMMENT_ID_MISMATCH);
+        requireUpdated(dao.updateComment(postId, id, request.text()), BlogEntity.COMMENT);
         return comment(postId, id);
     }
 
@@ -120,20 +131,21 @@ public class BlogService {
     public void deleteComment(long postId, long id) {
         requirePositive(postId);
         requirePositive(id);
-        requireUpdated(dao.deleteComment(postId, id), "Комментарий");
+        requireUpdated(dao.deleteComment(postId, id), BlogEntity.COMMENT);
     }
 
     private PostRequest validatePost(PostRequest request) {
         if (request == null || request.title() == null || request.title().isBlank()
-                || request.title().length() > 500 || request.text() == null || request.text().isBlank()
+                || request.title().length() > MAX_TITLE_LENGTH || request.text() == null || request.text().isBlank()
                 || request.text().length() > MAX_TEXT_LENGTH || request.tags() == null
-                || request.tags().size() > 50) {
-            throw ApiException.badRequest("Нужны название до 500 символов, текст до 1000000 символов и массив до 50 тегов");
+                || request.tags().size() > MAX_TAG_COUNT) {
+            throw ApiException.badRequest(RequestError.INVALID_POST);
         }
         var tags = new LinkedHashSet<String>();
         for (String tag : request.tags()) {
-            if (tag == null || tag.isBlank() || tag.length() > 100 || tag.chars().anyMatch(Character::isWhitespace)) {
-                throw ApiException.badRequest("Тег должен содержать от 1 до 100 символов без пробелов");
+            if (tag == null || tag.isBlank() || tag.length() > MAX_TAG_LENGTH
+                    || tag.chars().anyMatch(Character::isWhitespace)) {
+                throw ApiException.badRequest(RequestError.INVALID_TAG);
             }
             tags.add(tag);
         }
@@ -144,50 +156,50 @@ public class BlogService {
         requirePositive(postId);
         if (request == null || request.text() == null || request.text().isBlank()
                 || request.text().length() > MAX_TEXT_LENGTH) {
-            throw ApiException.badRequest("Нужен текст комментария до 1000000 символов");
+            throw ApiException.badRequest(RequestError.INVALID_COMMENT);
         }
-        requireId(postId, request.postId(), "Идентификатор поста в URL и теле должен совпадать");
+        requireId(postId, request.postId(), RequestError.POST_ID_MISMATCH);
     }
 
     private String validateImage(byte[] bytes) {
         if (bytes == null || bytes.length == 0 || bytes.length > MAX_IMAGE_BYTES) {
-            throw ApiException.badRequest("Размер изображения должен быть от 1 байта до 5 МиБ");
+            throw ApiException.badRequest(RequestError.INVALID_IMAGE_SIZE);
         }
         try (var input = new MemoryCacheImageInputStream(new ByteArrayInputStream(bytes))) {
             var readers = ImageIO.getImageReaders(input);
             if (!readers.hasNext()) {
-                throw ApiException.badRequest("Нужно изображение PNG, JPEG, GIF или BMP");
+                throw ApiException.badRequest(RequestError.UNSUPPORTED_IMAGE_FORMAT);
             }
             var reader = readers.next();
             try {
                 reader.setInput(input);
                 String type = IMAGE_TYPES.get(reader.getFormatName().toLowerCase(Locale.ROOT));
                 long pixels = (long) reader.getWidth(0) * reader.getHeight(0);
-                if (type == null || pixels < 1 || pixels > 16_000_000 || reader.read(0) == null) {
-                    throw ApiException.badRequest("Некорректное изображение или разрешение больше 16 мегапикселей");
+                if (type == null || pixels < 1 || pixels > MAX_IMAGE_PIXELS || reader.read(0) == null) {
+                    throw ApiException.badRequest(RequestError.INVALID_IMAGE);
                 }
                 return type;
             } finally {
                 reader.dispose();
             }
         } catch (IOException exception) {
-            throw ApiException.badRequest("Не удалось прочитать изображение");
+            throw ApiException.badRequest(RequestError.UNREADABLE_IMAGE);
         }
     }
 
     private void requirePositive(long id) {
         if (id < 1) {
-            throw ApiException.badRequest("Идентификатор должен быть положительным");
+            throw ApiException.badRequest(RequestError.NON_POSITIVE_ID);
         }
     }
 
-    private void requireId(long expected, Long actual, String message) {
+    private void requireId(long expected, Long actual, RequestError error) {
         if (actual == null || expected != actual) {
-            throw ApiException.badRequest(message);
+            throw ApiException.badRequest(error);
         }
     }
 
-    private void requireUpdated(int affected, String entity) {
+    private void requireUpdated(int affected, BlogEntity entity) {
         if (affected == 0) {
             throw ApiException.notFound(entity);
         }

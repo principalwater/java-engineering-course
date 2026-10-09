@@ -102,7 +102,7 @@ java -jar target/boot-actuator-practice-1.0-SNAPSHOT.jar --spring.profiles.activ
 python3 verify.py probes maven
 ```
 
-Проверка прошла на настоящем HTTP-сервере: liveness остался UP/200, два последовательных ответа readiness дали UP/200 и DOWN/503. В подробностях readiness собственный `cycleCheck` определял общий статус при UP у `readinessState`; общий health также учитывал этот индикатор. Симуляция не включается в `default` или `lab`.
+Проверка прошла на настоящем HTTP-сервере для Maven и Gradle JAR: liveness остался UP/200, два последовательных ответа readiness дали UP/200 и DOWN/503. В подробностях readiness собственный `cycleCheck` определял общий статус при UP у `readinessState`; общий health также учитывал этот индикатор. Симуляция не включается в `default` или `lab`.
 
 Профиль `lab` раскрывает все доступные эндпоинты только для локальной практики; стандартный запуск сохраняет раскрытие `health`. Для остановки используется Ctrl+C в терминале сервера.
 

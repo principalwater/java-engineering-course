@@ -22,8 +22,16 @@ module.exports = async function approveAndMerge({github, bot, context}) {
   requireCondition(identity.data.login === REVIEW_BOT,
     'The approval token must belong to elementary-flow-bot');
 
-  async function inspect(expectedSha) {
-    const {data: pull} = await github.rest.pulls.get(pullRequest);
+  const {data: initial} = await github.rest.pulls.get(pullRequest);
+  if (initial.merged) {
+    requireCondition(initial.user.login === OWNER && initial.base.ref === 'main' &&
+      initial.head.repo?.full_name === repository.owner + '/' + repository.repo,
+    'The merged pull request must belong to the owner within this repository');
+    return initial.merge_commit_sha;
+  }
+
+  async function inspect(expectedSha, initialPull) {
+    const pull = initialPull ?? (await github.rest.pulls.get(pullRequest)).data;
     requireCondition(pull.state === 'open' && !pull.draft && pull.base.ref === 'main' &&
       pull.user.login === OWNER && pull.head.ref !== 'main' &&
       pull.head.repo?.full_name === repository.owner + '/' + repository.repo,
@@ -45,6 +53,13 @@ module.exports = async function approveAndMerge({github, bot, context}) {
     requireCondition(run && run.head_sha === sha && run.event === 'pull_request' &&
       run.pull_requests.some(candidate => candidate.number === issue.number) && run.status === 'completed' &&
       run.conclusion === 'success', 'The latest pull request CI run for the current head must complete successfully');
+    const {data: pushes} = await github.rest.actions.listWorkflowRuns({
+      ...repository, workflow_id: 'java.yml', branch: pull.head.ref, head_sha: sha, event: 'push', per_page: 1,
+    });
+    const push = pushes.workflow_runs[0];
+    requireCondition(push && push.head_sha === sha && push.head_branch === pull.head.ref && push.event === 'push' &&
+      push.status === 'completed' && push.conclusion === 'success',
+    'The latest push CI run for the current head must complete successfully');
     const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
       ...repository, run_id: run.id, filter: 'latest', per_page: 100,
     });
@@ -105,19 +120,23 @@ module.exports = async function approveAndMerge({github, bot, context}) {
       fresh.head.sha === sha && fresh.base.sha === pull.base.sha &&
       fresh.state === 'open' && !fresh.draft && fresh.title === pull.title && fresh.base.ref === 'main',
     'The pull request or main changed during validation; run /approve again');
-    return pull;
+    return {pull, alreadyApproved: reviews.some(review => review.user?.login === REVIEW_BOT &&
+      review.commit_id === sha && review.state === 'APPROVED')};
   }
 
-  const approved = await inspect();
-  await bot.rest.pulls.createReview({
-    ...pullRequest, event: 'APPROVE', commit_id: approved.head.sha,
-    body: 'The owner authorized merging with /approve. CI for the current head passed validation.',
-  });
+  const approved = await inspect(undefined, initial);
+  if (!approved.alreadyApproved) {
+    await bot.rest.pulls.createReview({
+      ...pullRequest, event: 'APPROVE', commit_id: approved.pull.head.sha,
+      body: 'The owner authorized merging with /approve. Pull request and push CI for the current head passed validation.',
+    });
+  }
   // Approval does not authorize merging a new commit or bypassing branch protection.
-  const mergeable = await inspect(approved.head.sha);
+  const {pull: mergeable} = await inspect(approved.pull.head.sha);
   const {data: merged} = await bot.rest.pulls.merge({
-    ...pullRequest, sha: approved.head.sha, merge_method: 'merge',
+    ...pullRequest, sha: approved.pull.head.sha, merge_method: 'merge',
     commit_title: mergeable.title, commit_message: '',
   });
   requireCondition(merged.merged, 'GitHub rejected the merge; check the required pull request rules');
+  return merged.sha;
 };

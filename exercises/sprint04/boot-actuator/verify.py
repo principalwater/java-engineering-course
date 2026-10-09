@@ -16,17 +16,32 @@ def get(endpoint: str) -> tuple[int, dict | None]:
             return response.status, json.load(response)
     except HTTPError as error:
         with error:
-            return error.code, None
+            return error.code, json.load(error)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Проверка профиля Actuator")
-    parser.add_argument("profile", choices=("default", "lab"))
+    parser.add_argument("profile", choices=("default", "lab", "probes"))
     parser.add_argument(
         "builder", choices=("maven", "gradle"), nargs="?", default="maven"
     )
     args = parser.parse_args()
     profile = args.profile
+    if profile == "probes":
+        status, liveness = get("health/liveness")
+        assert status == 200 and liveness is not None and liveness["status"] == "UP"
+        readings = [get("health/readiness"), get("health/readiness")]
+        assert {status for status, _ in readings} == {200, 503}
+        assert {data["status"] for _, data in readings if data is not None} == {"UP", "DOWN"}
+        for _, data in readings:
+            assert data is not None
+            assert data["components"]["readinessState"]["status"] == "UP"
+            assert data["components"]["cycleCheck"]["status"] == data["status"]
+        status, health = get("health")
+        assert health is not None and health["status"] in ("UP", "DOWN")
+        assert status == (200 if health["status"] == "UP" else 503)
+        print("Actuator: liveness и custom readiness, все проверки прошли")
+        return
     status, health = get("health")
     assert status == 200 and health is not None and health["status"] == "UP"
     if profile == "default":

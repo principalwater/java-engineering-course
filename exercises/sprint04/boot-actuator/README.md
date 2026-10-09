@@ -88,6 +88,22 @@ python3 verify.py lab gradle
 
 Этот запуск также прошёл `python3 verify.py lab gradle`; прямое исполнение shell script проверено на macOS.
 
+### 5. Liveness и собственный readiness indicator
+
+Профиль `probes` включает две health groups. `CyclingHealthIndicator` зарегистрирован как `cycleCheck` и включён только в readiness вместе с `readinessState`. Он последовательно чередует UP/DOWN, чтобы показать агрегацию статусов; это учебная симуляция, а не оценка готовности реального сервиса.
+
+```bash
+java -jar target/boot-actuator-practice-1.0-SNAPSHOT.jar --spring.profiles.active=probes
+```
+
+В другом терминале:
+
+```bash
+python3 verify.py probes maven
+```
+
+Проверка прошла на настоящем HTTP-сервере: liveness остался UP/200, два последовательных ответа readiness дали UP/200 и DOWN/503. В подробностях readiness собственный `cycleCheck` определял общий статус при UP у `readinessState`; общий health также учитывал этот индикатор. Симуляция не включается в `default` или `lab`.
+
 Профиль `lab` раскрывает все доступные эндпоинты только для локальной практики; стандартный запуск сохраняет раскрытие `health`. Для остановки используется Ctrl+C в терминале сервера.
 
 ## Источники

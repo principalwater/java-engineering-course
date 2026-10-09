@@ -14,6 +14,7 @@ function scenario() {
   };
   const run = {id: 99, head_sha: 'head', event: 'pull_request', pull_requests: [{number: 7}],
     status: 'completed', conclusion: 'success'};
+  const pushRun = {...run, id: 100, event: 'push', head_branch: pull.head.ref, pull_requests: []};
   const jobs = ['projects', 'exercises', 'sprint03'].map((name, index) => ({
     name, status: 'completed', conclusion: 'success', check_run_url: 'https://api.github.com/check-runs/' + index,
   }));
@@ -21,7 +22,7 @@ function scenario() {
   const reviews = [];
   const effects = [];
   let gets = 0;
-  const state = {context, pull, run, jobs, checks, reviews, effects, behind: 0, botLogin: 'elementary-flow-bot'};
+  const state = {context, pull, run, pushRun, jobs, checks, reviews, effects, behind: 0, botLogin: 'elementary-flow-bot'};
   const github = {
     rest: {
       pulls: {
@@ -44,7 +45,7 @@ function scenario() {
         },
       },
       actions: {
-        listWorkflowRuns: async () => ({data: {workflow_runs: [run]}}),
+        listWorkflowRuns: async parameters => ({data: {workflow_runs: [parameters.event === 'push' ? pushRun : run]}}),
         listJobsForWorkflowRun: async () => ({data: {jobs}}),
       },
       checks: {get: async parameters => ({data: checks[parameters.check_run_id]})},
@@ -60,7 +61,7 @@ function scenario() {
   const bot = {rest: {
     users: {getAuthenticated: async () => ({data: {login: state.botLogin}})},
     pulls: {
-      merge: async parameters => {effects.push(['merge', parameters]); return {data: {merged: true}};},
+      merge: async parameters => {effects.push(['merge', parameters]); return {data: {merged: true, sha: 'merged'}};},
       createReview: async parameters => {
       effects.push(['review', parameters]);
       if (state.staleAfterReview) pull.head.sha = 'changed';
@@ -81,6 +82,10 @@ test('approval accepts only a verified head and preserves merge history', async 
     ['push run instead of full pull request CI', fixture => {fixture.run.event = 'push';}, /latest pull request CI/],
     ['CI for another pull request', fixture => {fixture.run.pull_requests = [{number: 8}];}, /latest pull request CI/],
     ['stale CI', fixture => {fixture.run.head_sha = 'previous';}, /latest pull request CI/],
+    ['failed push CI', fixture => {fixture.pushRun.conclusion = 'failure';}, /latest push CI/],
+    ['pending push CI', fixture => {fixture.pushRun.status = 'in_progress';}, /latest push CI/],
+    ['stale push CI', fixture => {fixture.pushRun.head_sha = 'previous';}, /latest push CI/],
+    ['push CI from another branch', fixture => {fixture.pushRun.head_branch = 'other';}, /latest push CI/],
     ['failed job', fixture => {fixture.jobs[1].conclusion = 'failure';}, /Required check/],
     ['existing module skipped', fixture => {
       fixture.jobs[2].conclusion = 'skipped'; fixture.checks[2].conclusion = 'skipped';
@@ -130,5 +135,17 @@ test('approval accepts only a verified head and preserves merge history', async 
     assert.equal(fixture.effects[1][1].merge_method, 'merge');
     assert.equal(fixture.effects[1][1].commit_title, 'SPRINT-03: add the blog');
     assert.equal(fixture.effects[1][1].commit_message, '');
+  });
+  await t.test('an existing approval for the same head is reused after a retry', async () => {
+    const fixture = scenario();
+    fixture.reviews.push({id: 1, user: {login: 'elementary-flow-bot'}, commit_id: 'head', state: 'APPROVED'});
+    assert.equal(await approveAndMerge(fixture), 'merged');
+    assert.deepEqual(fixture.effects.map(effect => effect[0]), ['merge']);
+  });
+  await t.test('a repeated delivery for a merged pull request has no new review or merge', async () => {
+    const fixture = scenario();
+    Object.assign(fixture.pull, {state: 'closed', merged: true, merge_commit_sha: 'merged'});
+    assert.equal(await approveAndMerge(fixture), 'merged');
+    assert.deepEqual(fixture.effects, []);
   });
 });

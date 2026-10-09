@@ -9,5 +9,6 @@
 | 3 | [Каталог упражнений](sprint03/README.md): Spring AOP, WAR и JDBC |
 | 4 | [Каталог упражнений](sprint04/README.md): Spring Boot, Maven/Gradle и Actuator |
 | 5 | [Каталог упражнений](sprint05/README.md): Spring Data JDBC, MySQL и Liquibase |
+| 6 | [Каталог упражнений](sprint06/README.md): Java Flow, R2DBC, MySQL и HTML-приложение WebFlux |
 
 У каждого решения свои исходники, версии инструментов, команды запуска и результаты проверки. Материалы оформлены как описание выполненной работы, без переноса теории и банка ответов тренажёра.

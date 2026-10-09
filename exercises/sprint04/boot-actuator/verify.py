@@ -30,7 +30,7 @@ def main() -> None:
     status, health = get("health")
     assert status == 200 and health is not None and health["status"] == "UP"
     if profile == "default":
-        for endpoint in ("metrics", "env", "info"):
+        for endpoint in ("metrics", "env", "info", "beans", "loggers"):
             assert get(endpoint)[0] == 404, endpoint
     else:
         status, metric = get("metrics/system.cpu.count")
@@ -40,6 +40,10 @@ def main() -> None:
         status, environment = get("env")
         assert status == 200 and environment is not None
         assert isinstance(environment["propertySources"], list)
+        for endpoint, field in (("beans", "contexts"), ("loggers", "loggers")):
+            status, data = get(endpoint)
+            assert status == 200 and data is not None
+            assert isinstance(data[field], dict)
         status, info = get("info")
         assert status == 200 and info is not None
         assert info["build"]["artifact"] == "boot-actuator-practice"

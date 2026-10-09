@@ -1,0 +1,53 @@
+services:
+  analytics-reader:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    profiles: [analytics]
+    environment:
+      PGHOST: db
+      PGDATABASE: ${POSTGRES_DB:-blog}
+      PGUSER: ${POSTGRES_USER:-blog}
+      PGPASSWORD_FILE: /run/secrets/db_password
+      READER_PASSWORD_FILE: /run/secrets/analytics_db_password
+    secrets: [db_password, analytics_db_password]
+    volumes:
+      - ./analytics/create-reader.sh:/setup/create-reader.sh:ro
+    command: [sh, /setup/create-reader.sh]
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8-alpine@sha256:58f554637bfe3b77e0335b4ff90611279dbdf8d262dc15225ee93901853dfa13
+    profiles: [analytics]
+    environment:
+      CLICKHOUSE_USER: analyst
+      CLICKHOUSE_PASSWORD_FILE: /run/secrets/clickhouse_password
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "0"
+      PG_DATABASE: ${POSTGRES_DB:-blog}
+      PG_READER_PASSWORD_FILE: /run/secrets/analytics_db_password
+    secrets: [analytics_db_password, clickhouse_password]
+    entrypoint: [sh, /setup/start-clickhouse.sh]
+    ports:
+      - "127.0.0.1:${ANALYTICS_PORT:-8124}:8123"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./analytics/postgresql.xml:/etc/clickhouse-server/config.d/postgresql.xml:ro
+      - ./analytics/readonly.xml:/etc/clickhouse-server/users.d/readonly.xml:ro
+      - ./analytics/start-clickhouse.sh:/setup/start-clickhouse.sh:ro
+    depends_on:
+      analytics-reader:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1:8123/ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  clickhouse-data:
+
+secrets:
+  analytics_db_password:
+    file: ${BLOG_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint04}/analytics_db_password
+  clickhouse_password:
+    file: ${BLOG_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint04}/clickhouse_password

@@ -1,0 +1,35 @@
+<clickhouse>
+    <profiles>
+        <blog_analytics>
+            <!-- postgresql() создаёт временную таблицу; readonly=1 блокирует даже SELECT из неё. -->
+            <readonly>2</readonly>
+            <allow_ddl>0</allow_ddl>
+            <max_execution_time>10</max_execution_time>
+            <timeout_before_checking_execution_speed>0</timeout_before_checking_execution_speed>
+            <max_rows_to_read>100000</max_rows_to_read>
+            <max_bytes_to_read>100000000</max_bytes_to_read>
+            <max_result_rows>1000</max_result_rows>
+            <max_memory_usage>268435456</max_memory_usage>
+            <constraints>
+                <readonly><const/></readonly>
+                <allow_ddl><const/></allow_ddl>
+                <max_execution_time><const/></max_execution_time>
+                <timeout_before_checking_execution_speed><const/></timeout_before_checking_execution_speed>
+                <max_rows_to_read><const/></max_rows_to_read>
+                <max_bytes_to_read><const/></max_bytes_to_read>
+                <max_result_rows><const/></max_result_rows>
+                <max_memory_usage><const/></max_memory_usage>
+            </constraints>
+        </blog_analytics>
+    </profiles>
+    <users>
+        <analyst>
+            <profile>blog_analytics</profile>
+            <grants>
+                <query>GRANT NAMED COLLECTION ON blog_pg</query>
+                <query>GRANT READ ON POSTGRES</query>
+                <query>GRANT CREATE TEMPORARY TABLE ON *.*</query>
+            </grants>
+        </analyst>
+    </users>
+</clickhouse>

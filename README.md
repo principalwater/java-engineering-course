@@ -18,6 +18,8 @@
 
 ## 📁 Структура репозитория
 
+Полноценные приложения размещаются в `projects/`, внешние упражнения для IDE - в `exercises/`. Упражнения сгруппированы по спринтам и содержат решение, команды запуска и результаты проверки.
+
 | Спринт | Проект | Планируемый каталог |
 | --- | --- | --- |
 | 3 | Приложение-блог на Spring Framework | `projects/sprint03-spring-blog/` |
@@ -30,7 +32,7 @@
 | 10 | Взаимодействие микросервисов через Apache Kafka | `projects/sprint10-kafka/` |
 | 11 | Логирование и мониторинг | `projects/sprint11-observability/` |
 
-Каталог проекта появляется вместе с реализацией. Пока репозиторий содержит план проектных работ; готовые приложения ещё не опубликованы.
+Каталоги появляются по мере выполнения работ. README каждого проекта содержит описание решения, команды сборки, запуска и тестирования.
 
 ## 🎯 Цели обучения
 
@@ -48,9 +50,9 @@ Java · Spring Framework · Spring Boot · Spring Data JPA · Spring Web · Reac
 
 ## 🚀 Запуск, тестирование и сдача
 
-Каждый проект будет содержать краткое описание требований, архитектуру, конфигурацию окружения и команды сборки, запуска и тестирования. Код и тесты размещаются в стандартных каталогах выбранного сборщика. Секреты передаются через переменные окружения.
+Каждый проект будет содержать краткое описание требований, архитектуру, конфигурацию окружения и команды сборки, запуска и тестирования. Код и тесты размещаются в стандартных каталогах выбранного сборщика. Параметры окружения задаются отдельно; локальные пароли монтируются файлами Docker Compose secrets вне Git.
 
-CI подключается вместе с первым приложением и выполняет его реальные проверки. Формат сдачи определяется заданием на платформе; при необходимости отдельного репозитория или ветки инструкции приводятся в README проекта.
+CI обнаруживает проекты и выполняет их реальные проверки; для ещё не добавленного проекта соответствующая задача пропускается. Формат сдачи определяется заданием на платформе; при необходимости отдельного репозитория или ветки инструкции приводятся в README проекта.
 
 ## 📖 Материалы
 
@@ -81,6 +83,8 @@ Key learning areas:
 
 ## 📁 Repository Structure
 
+Sprint applications use `projects/`; external IDE exercises use `exercises/`. Exercises are grouped by sprint, with solutions, run commands, and verification results.
+
 | Sprint | Project | Planned Directory |
 | --- | --- | --- |
 | 3 | Blog application with Spring Framework | `projects/sprint03-spring-blog/` |
@@ -93,7 +97,7 @@ Key learning areas:
 | 10 | Microservice communication with Apache Kafka | `projects/sprint10-kafka/` |
 | 11 | Logging and monitoring | `projects/sprint11-observability/` |
 
-Project directories are added with their implementations. The repository currently contains the project plan; completed applications have not been published yet.
+Project directories are added with their implementations. Each project README provides its solution overview and build, run, and test commands.
 
 ## 🎯 Learning Objectives
 
@@ -111,9 +115,9 @@ Java 21 is the baseline. Each project's requirements determine its exact JDK, li
 
 ## 🚀 Running, Testing, and Submission
 
-Each project will document its requirements, architecture, environment configuration, and build, run, and test commands. Source code and tests follow the selected build tool's standard layout. Secrets are supplied through environment variables.
+Each project will document its requirements, architecture, environment configuration, and build, run, and test commands. Source code and tests follow the selected build tool's standard layout. Runtime settings are configured separately; local passwords are mounted from Docker Compose secret files outside Git.
 
-CI will be added with the first application and run its actual checks. Submission follows the platform's assignment instructions. Any requirement for a separate repository or branch will be documented in the project's README.
+CI discovers projects and runs their actual checks; jobs for projects not yet added are skipped. Submission follows the platform's assignment instructions. Any requirement for a separate repository or branch will be documented in the project's README.
 
 ## 📖 Additional Resources
 

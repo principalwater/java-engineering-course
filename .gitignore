@@ -1,8 +1,13 @@
+**/target/
+**/build/
 *.class
-build/
-target/
 .idea/
 *.iml
 .DS_Store
 .env
 .env.*
+!.env.example
+*.log
+__pycache__/
+
+.gradle/

@@ -1,0 +1,40 @@
+name: Согласование и слияние
+on:
+  issue_comment:
+    types: [created]
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+  checks: read
+concurrency:
+  group: approve-${{ github.event.issue.number }}
+  cancel-in-progress: false
+jobs:
+  approve:
+    if: >-
+      github.event.issue.pull_request &&
+      github.event.comment.body == '/approve' &&
+      github.actor == 'principalwater' &&
+      github.triggering_actor == 'principalwater' &&
+      github.repository_owner == 'principalwater'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Получение доверенной автоматизации из main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Проверка CI, согласование и слияние
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          BOT_REVIEW_TOKEN: ${{ secrets.ELEMENTARY_FLOW_BOT_PAT }}
+        with:
+          script: |
+            if (!process.env.BOT_REVIEW_TOKEN) {
+              throw new Error('Не настроен ELEMENTARY_FLOW_BOT_PAT; согласование остановлено');
+            }
+            const bot = new github.constructor({auth: process.env.BOT_REVIEW_TOKEN});
+            await require('./.github/scripts/approve.cjs')({github, bot, context});
+            core.notice('CI проверен; elementary-flow-bot согласовал PR, слияние выполнено');

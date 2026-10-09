@@ -12,15 +12,15 @@ jobs:
       sprint03: ${{ steps.detect.outputs.sprint03 }}
       exercises: ${{ steps.detect.outputs.exercises }}
     steps:
-      - name: Получение исходников
+      - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Проверка правил репозитория
+      - name: Test repository rules
         run: node --test .github/tests/*.test.cjs
-      - name: Проверка сообщений новых коммитов
+      - name: Validate new commit messages
         run: node .github/scripts/check-commits.cjs
-      - name: Поиск проектов
+      - name: Detect project modules
         id: detect
         run: |
           if test -f projects/sprint03-spring-blog/pom.xml; then
@@ -39,48 +39,48 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Получение исходников
+      - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Настройка Java 21 и кеша Maven
+      - name: Set up Java 21 and Maven cache
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
           cache-dependency-path: exercises/**/pom.xml
-      - name: Maven-плагин и проект-потребитель JUnit
+      - name: Verify the Maven plugin and JUnit consumer
         run: |
           exercises/sprint01/junit5/mvnw -B --no-transfer-progress -f exercises/sprint02/test-report-maven-plugin/pom.xml install
           exercises/sprint01/junit5/mvnw -B --no-transfer-progress -f exercises/sprint01/junit5/pom.xml test dev.principalwater.study:test-report-maven-plugin:1.0-SNAPSHOT:report
-      - name: Spring AOP и сборка учебного WAR
+      - name: Test Spring AOP and package the exercise WAR
         run: |
           exercises/sprint01/junit5/mvnw -B --no-transfer-progress -f exercises/sprint03/spring-aop/pom.xml verify
           exercises/sprint01/junit5/mvnw -B --no-transfer-progress -f exercises/sprint03/spring-mvc-jdbc/pom.xml package
-      - name: Gradle TestKit, метаданные и проект-потребитель
+      - name: Verify Gradle TestKit, plugin metadata and consumer
         working-directory: exercises/sprint02/file-transformer-gradle-plugin
         run: |
           ./gradlew --no-daemon test validatePlugins
           ./gradlew --no-daemon -p consumer countWords
-      - name: Практика истории Git
+      - name: Run Git history exercises
         env:
           GIT_AUTHOR_NAME: Course practice
           GIT_AUTHOR_EMAIL: practice@example.invalid
           GIT_COMMITTER_NAME: Course practice
           GIT_COMMITTER_EMAIL: practice@example.invalid
         run: python3 exercises/sprint02/git/practice.py
-      - name: Запуск отдельного учебного Tomcat
+      - name: Start an isolated exercise Tomcat
         id: servlet
         working-directory: exercises/sprint03/spring-mvc-jdbc
         run: |
           docker compose -p ci-spring-mvc up -d
           curl --fail --silent --show-error --retry 30 --retry-delay 2 --retry-all-errors --retry-max-time 120 http://127.0.0.1:18081/spring-web-demo/home
-      - name: Проверка MVC, H2 и файлов по HTTP
+      - name: Verify MVC, H2 and files over HTTP
         run: python3 exercises/sprint03/spring-mvc-jdbc/verify.py
-      - name: Диагностика учебного Tomcat при ошибке
+      - name: Collect exercise Tomcat diagnostics on failure
         if: failure() && steps.servlet.outcome != 'skipped'
         working-directory: exercises/sprint03/spring-mvc-jdbc
         run: docker compose -p ci-spring-mvc logs --no-color --tail 200
-      - name: Остановка учебного Tomcat
+      - name: Stop the exercise Tomcat
         if: always() && steps.servlet.outcome != 'skipped'
         working-directory: exercises/sprint03/spring-mvc-jdbc
         run: docker compose -p ci-spring-mvc down
@@ -93,38 +93,38 @@ jobs:
       run:
         working-directory: projects/sprint03-spring-blog
     steps:
-      - name: Получение исходников
+      - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Настройка Java 21 и кеша Maven
+      - name: Set up Java 21 and Maven cache
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
           cache-dependency-path: projects/sprint03-spring-blog/pom.xml
-      - name: Тесты и сборка WAR
+      - name: Run tests and build the WAR
         run: ./mvnw -B --no-transfer-progress verify
-      - name: Подготовка фронтенда
+      - name: Prepare the frontend
         run: python3 frontend/prepare.py target/frontend
-      - name: Проверка JavaScript
+      - name: Check JavaScript
         run: |
           node --check target/frontend/accessibility.js
           node --check target/frontend/assets/index-CdCwR2aM.js
-      - name: Проверка подготовки secrets
+      - name: Test secret initialization
         run: python3 -m unittest discover -s src/test/python
-      - name: Подготовка локальных secrets
+      - name: Initialize local secrets
         run: python3 scripts/init-secrets.py
-      - name: Запуск Tomcat и PostgreSQL
+      - name: Start Tomcat and PostgreSQL
         id: containers
         run: docker compose up -d --build --wait
-      - name: Проверка REST в контейнерах
+      - name: Verify REST endpoints in containers
         run: python3 scripts/smoke.py
-      - name: Диагностика контейнеров при ошибке
+      - name: Collect container diagnostics on failure
         if: failure() && steps.containers.outcome != 'skipped'
         run: |
           docker compose ps -a
           docker compose logs --no-color --tail 200
-      - name: Сохранение WAR и отчётов JUnit
+      - name: Upload the WAR and JUnit reports
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -134,6 +134,6 @@ jobs:
             projects/sprint03-spring-blog/target/surefire-reports/
           if-no-files-found: ignore
           retention-days: 14
-      - name: Остановка контейнеров
+      - name: Stop containers
         if: always() && steps.containers.outcome != 'skipped'
         run: docker compose down

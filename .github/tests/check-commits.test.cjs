@@ -7,8 +7,8 @@ const test = require('node:test');
 
 const SCRIPT = path.resolve(__dirname, '../scripts/check-commits.cjs');
 
-// Проверяется CLI и настоящая Git-история: общий legacy-коммит не входит в новый диапазон.
-test('проверка сообщений учитывает диапазон события и отказывает телу, трейлерам и неверному SHA', () => {
+// Exercise the CLI with real Git history: the shared legacy commit stays outside the new range.
+test('commit validation respects the event range and rejects bodies, trailers and invalid SHAs', () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'course-commit-style-'));
   const git = (...args) => execFileSync('git', args, {cwd: directory, encoding: 'utf8'}).trim();
   try {
@@ -42,27 +42,27 @@ test('проверка сообщений учитывает диапазон с
     ]) {
       const result = invoke(name, event);
       assert.equal(result.status, 0, result.stderr);
-      assert.match(result.stdout, /Проверено коммитов: 1/);
+      assert.match(result.stdout, /Commits checked: 1/);
     }
     let previous = valid;
     for (const message of [
       'No sprint prefix\n',
       'SPRINT-03: Uppercase description\n',
-      'SPRINT-03: описание\n',
+      'SPRINT-03: caf\u00e9\n',
       'SPRINT-03: add source\n\nExtra body\n',
       'SPRINT-03: add source\n\nCo-Authored-By: Fixture <fixture@example.invalid>\n',
     ]) {
       const current = commit(message);
       const result = invoke('push', {before: previous, after: current});
       assert.equal(result.status, 1);
-      assert.match(result.stderr, /нужна одна английская строка.*без тела и трейлеров/);
+      assert.match(result.stderr, /single English line.*without a body or trailers/);
       previous = current;
     }
     const invalidSha = invoke('pull_request', {
       pull_request: {base: {sha: legacy}, head: {sha: '--all'}},
     });
     assert.equal(invalidSha.status, 1);
-    assert.match(invalidSha.stderr, /Некорректный SHA/);
+    assert.match(invalidSha.stderr, /Invalid SHA/);
   } finally {
     rmSync(directory, {recursive: true, force: true});
   }

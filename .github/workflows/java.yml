@@ -139,6 +139,8 @@ jobs:
         run: python3 -m unittest discover -s src/test/python
       - name: Initialize local secrets
         run: python3 scripts/init-secrets.py
+      - name: Prepare pinned CI images from the official mirror
+        run: python3 ../../.github/scripts/prepare-sprint03-ci.py
       - name: Start Tomcat and PostgreSQL
         id: containers
         run: docker compose up -d --build --wait

@@ -2,7 +2,6 @@
 **/build/
 *.class
 .idea/
-.gradle/
 *.iml
 .DS_Store
 .env

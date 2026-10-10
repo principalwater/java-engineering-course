@@ -18,6 +18,8 @@ services:
 
   backend:
     build: .
+    # На Linux bind-mounted secrets сохраняют UID/GID владельца файла на хосте.
+    user: "${BLOG_UID:-10001}:${BLOG_GID:-10001}"
     environment:
       DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-blog}
       DB_USER: ${POSTGRES_USER:-blog}

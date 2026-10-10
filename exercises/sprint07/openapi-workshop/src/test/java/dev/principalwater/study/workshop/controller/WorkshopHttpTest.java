@@ -111,6 +111,12 @@ class WorkshopHttpTest {
                     for (String method : List.of("get", "put", "delete")) {
                         assertThat(paths.get("/api/orders/{id}").has(method)).isTrue();
                     }
+                    paths.properties().forEach(path -> path.getValue().properties().forEach(operation -> {
+                        var tags = operation.getValue().get("tags");
+                        assertThat(tags.size()).isEqualTo(1);
+                        assertThat(tags.get(0).asText()).isEqualTo(
+                                path.getKey().startsWith("/api/orders") ? "Orders" : "Customers");
+                    }));
                     assertThat(document.at("/components/schemas/Order/properties/id/format").asText())
                             .isEqualTo("int64");
                 });

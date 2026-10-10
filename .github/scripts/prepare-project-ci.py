@@ -17,11 +17,11 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--exercise", action="store_true")
 exercise = parser.parse_args().exercise
 project = Path.cwd()
-output = Path(os.environ["RUNNER_TEMP"]) / "sprint03-compose"
+output = Path(os.environ["RUNNER_TEMP"]) / (project.name + "-compose")
 output.mkdir(parents=True, exist_ok=True)
 images = re.findall(r"^    image: (\S+)$", (project / "compose.yaml").read_text(), re.MULTILINE)
 if len(images) != 1:
-    raise ValueError("Expected one pinned image in the sprint 03 Compose file")
+    raise ValueError("Expected one pinned image in the Compose file")
 services = {"web" if exercise else "db": {"image": mirrored(images[0])}}
 builds = () if exercise else (("backend", project), ("frontend", project / "frontend"))
 for service, context in builds:

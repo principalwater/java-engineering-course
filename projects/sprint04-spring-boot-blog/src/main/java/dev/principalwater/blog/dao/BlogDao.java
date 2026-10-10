@@ -1,17 +1,9 @@
 package dev.principalwater.blog.dao;
 
-import dev.principalwater.blog.model.Comment;
-import dev.principalwater.blog.model.Post;
-import dev.principalwater.blog.model.PostRequest;
-import dev.principalwater.blog.model.SearchFilter;
-import dev.principalwater.blog.model.StoredImage;
+import dev.principalwater.blog.model.*;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;

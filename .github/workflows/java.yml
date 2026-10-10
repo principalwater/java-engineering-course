@@ -18,7 +18,9 @@ jobs:
         with:
           fetch-depth: 0
       - name: Test repository rules
-        run: node --test .github/tests/*.test.cjs
+        run: |
+          node --test .github/tests/*.test.cjs
+          python3 -m unittest discover -s .github/tests -p 'test_*.py'
       - name: Validate new commit messages
         run: node .github/scripts/check-commits.cjs
       - name: Detect project modules
@@ -241,7 +243,7 @@ jobs:
         run: python3 -m unittest discover -s src/test/python
       - name: Initialize local secrets
         run: python3 scripts/init-secrets.py
-      - name: Prepare pinned CI images from the official mirror
+      - name: Prepare pinned official images with registry fallback
         run: python3 ../../.github/scripts/prepare-project-ci.py
       - name: Start Tomcat and PostgreSQL
         id: containers
@@ -308,7 +310,7 @@ jobs:
             echo "BLOG_UID=$(id -u)"
             echo "BLOG_GID=$(id -g)"
           } >> "$GITHUB_ENV"
-      - name: Prepare pinned CI images from the official mirror
+      - name: Prepare pinned official images with registry fallback
         run: python3 ../../.github/scripts/prepare-project-ci.py
       - name: Start the executable JAR and PostgreSQL
         id: containers

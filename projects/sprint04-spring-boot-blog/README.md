@@ -24,6 +24,10 @@
 | `blog.properties`, чтение файлов паролей | `application.properties`, профиль PostgreSQL и `configtree:` |
 | Spring TestContext с ручной сборкой MockMvc | `@SpringBootTest`, `@AutoConfigureMockMvc`, общий профиль H2 |
 
+Изменения по файлам: [build.gradle](build.gradle) заменяет `pom.xml`, [BlogApplication](src/main/java/dev/principalwater/blog/BlogApplication.java) — `web.xml`. [WebConfig](src/main/java/dev/principalwater/blog/config/WebConfig.java) и [CorsProperties](src/main/java/dev/principalwater/blog/config/CorsProperties.java) дополняют MVC Boot; [PostgresqlConfig](src/main/java/dev/principalwater/blog/config/PostgresqlConfig.java) и [application properties](src/main/resources/application.properties) заменяют ручную JDBC-конфигурацию. [Профиль PostgreSQL](src/main/resources/application-postgresql.properties) подключает config tree. [BlogIntegrationTest](src/test/java/dev/principalwater/blog/BlogIntegrationTest.java) задаёт общий тестовый контекст; [EmbeddedServerTest](src/test/java/dev/principalwater/blog/controller/EmbeddedServerTest.java) проверяет настоящий servlet-контейнер. [Dockerfile](Dockerfile) упаковывает JAR в образ JRE, [адаптер фронтенда](frontend/prepare.py) сохраняет клиент и исправляет обнаруженные ошибки. Модель, SQL и бизнес-операции перенесены из спринта 3.
+
+Системные ошибки унифицированы на английском: [ApiErrorHandler](src/main/java/dev/principalwater/blog/controller/ApiErrorHandler.java), [RequestError](src/main/java/dev/principalwater/blog/service/RequestError.java) и [BlogEntity](src/main/java/dev/principalwater/blog/model/BlogEntity.java). HTTP-статусы и JSON-поле `error` сохранены; комментарии в коде и интерфейс остаются русскими.
+
 **Используемые технологии:** Java 21 · Spring Boot 3.5.16 · Spring Framework 6.2.19 · Spring Data JDBC 3.5.13 · Gradle 8.14.3 · JUnit Jupiter 5.12.2 · PostgreSQL 17 · встроенный Tomcat 10.1.
 
 Версии библиотек согласованы через native Gradle platform и BOM Boot. Отдельные версии Jackson, HikariCP и JUnit не задаются. Boot 3.5 сохраняет Framework 6 и JUnit 5; переход на Boot 4 и смена поколения тестовой платформы здесь не нужны. Initializr уже предлагает Boot 4, поэтому после генерации каркас адаптирован к Boot 3.5 и совместимому Gradle 8.
@@ -37,6 +41,8 @@ flowchart LR
     dao --> pg[(PostgreSQL)]
     ch[ClickHouse · опционально] -->|только чтение| pg
 ```
+
+Nginx обслуживает только готовую React-сборку и проксирует `/api/` в Java-процесс. Бэкенд запускается командой `java -jar blog.jar` во встроенном Tomcat; Nginx не является servlet-контейнером и не запускает Java-код. Самостоятельный JAR работает без Nginx и Docker, как показано ниже.
 
 `WebConfig` расширяет MVC через `WebMvcConfigurer`, без `@EnableWebMvc`: иначе ручная конфигурация вытеснила бы настройки Boot. CORS связывается с типизированными `CorsProperties`; пустые origins, wildcard и отрицательный срок кеширования отклоняются при старте.
 
@@ -70,6 +76,10 @@ python3 scripts/smoke.py --base-url http://localhost:18085
 
 Проект открыт в отдельном окне IntelliJ IDEA. Для импорта открыть `build.gradle` как проект. Выбрать JDK 21 в Project SDK и Gradle JVM; сборку и тесты запускать через Gradle Wrapper. Если Homebrew JDK не обнаружен автоматически, добавить его каталог через Add JDK. Настройки конкретного компьютера в Git не хранятся.
 
+![Точка входа Boot и успешная сборка в IntelliJ IDEA](../../screenshots/sprint04-spring-boot-blog/04_intellij_boot_project.png)
+
+*`BlogApplication` запускает приложение; `check bootJar` выполнен через терминал проекта с JDK 21.*
+
 > **Примечание об упаковке:** `bootJar` содержит зависимости и загрузчик Boot; внешний servlet-контейнер не нужен. `buildInfo()` добавляет метаданные архива в `/actuator/info`. Docker-сборка извлекает слои стандартным `jarmode=tools`: зависимости кешируются отдельно от классов приложения, а runtime использует JRE 21 без Maven/Gradle.
 
 ### Этап 3: PostgreSQL, Docker secrets и готовность приложения
@@ -90,6 +100,10 @@ docker compose ps
 docker compose logs backend
 docker compose down
 ```
+
+![Контейнеры спринта 4 и запуск встроенного Tomcat в OrbStack](../../screenshots/sprint04-spring-boot-blog/05_orbstack_boot_stack.png)
+
+*В журнале бэкенда видны `/app/blog.jar`, профиль PostgreSQL и встроенный Tomcat 10.1.55. Завершённый `analytics-reader` — одноразовая настройка роли чтения.*
 
 `down` сохраняет том PostgreSQL. `schema.sql` через Boot SQL initialization создаёт отсутствующие таблицы/индексы, не удаляет записи. Для изменения структуры существующей БД позднее нужны версионируемые миграции.
 

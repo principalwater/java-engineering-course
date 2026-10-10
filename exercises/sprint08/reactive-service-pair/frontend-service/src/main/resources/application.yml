@@ -1,0 +1,18 @@
+server:
+  address: 127.0.0.1
+  port: 18181
+spring:
+  security:
+    oauth2:
+      client:
+        provider:
+          keycloak:
+            issuer-uri: http://127.0.0.1:18281/realms/webflux-demo
+        registration:
+          keycloak:
+            provider: keycloak
+            client-id: frontend-service
+            client-secret: ${COURSE_CLIENT_SECRET}
+            authorization-grant-type: client_credentials
+backend:
+  base-url: http://127.0.0.1:18182

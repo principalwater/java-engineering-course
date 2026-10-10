@@ -1,0 +1,108 @@
+{
+  "realm": "webflux-demo",
+  "enabled": true,
+  "sslRequired": "none",
+  "roles": {
+    "realm": [
+      {
+        "name": "SERVICE"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "backend-service",
+      "protocol": "openid-connect",
+      "bearerOnly": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false
+    },
+    {
+      "clientId": "frontend-service",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${COURSE_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "defaultClientScopes": [
+        "roles"
+      ],
+      "protocolMappers": [
+        {
+          "name": "backend-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "backend-service",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "viewer-test",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${COURSE_VIEWER_SECRET}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "defaultClientScopes": [
+        "roles"
+      ],
+      "protocolMappers": [
+        {
+          "name": "backend-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "backend-service",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "wrong-audience-test",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${COURSE_WRONG_AUDIENCE_SECRET}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "defaultClientScopes": [
+        "roles"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-frontend-service",
+      "enabled": true,
+      "serviceAccountClientId": "frontend-service",
+      "realmRoles": [
+        "SERVICE"
+      ]
+    },
+    {
+      "username": "service-account-viewer-test",
+      "enabled": true,
+      "serviceAccountClientId": "viewer-test",
+      "realmRoles": []
+    },
+    {
+      "username": "service-account-wrong-audience-test",
+      "enabled": true,
+      "serviceAccountClientId": "wrong-audience-test",
+      "realmRoles": [
+        "SERVICE"
+      ]
+    }
+  ]
+}

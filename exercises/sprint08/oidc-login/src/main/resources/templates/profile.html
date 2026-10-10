@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Профиль · OIDC</title><link rel="stylesheet" href="/style.css"></head>
+<body><main>
+  <p class="label">ВХОД ПОДТВЕРЖДЁН · KEYCLOAK</p><h1>Здравствуйте,<br><span th:text="${profile.username}">пользователь</span>.</h1>
+  <dl><dt>Пользователь</dt><dd th:text="${profile.username}"></dd><dt>Subject</dt><dd th:text="${profile.subject}"></dd><dt>Issuer</dt><dd th:text="${profile.issuer}"></dd></dl>
+  <p>Локальная сессия создана после проверки OIDC-ответа. Токены не выводятся в интерфейс.</p>
+  <form th:action="@{/logout}" method="post"><button type="submit">Выйти из приложения</button></form>
+  <p class="hint">Выход завершает сессию приложения. Сессия Keycloak сохраняется.</p>
+</main></body></html>

@@ -138,6 +138,54 @@ jobs:
             exercises/sprint07/redis-lab/target/surefire-reports/
           if-no-files-found: ignore
           retention-days: 14
+      - name: Verify Keycloak OIDC login and local logout
+        working-directory: exercises/sprint08/oidc-login
+        run: |
+          python3 init.py
+          ../../sprint01/junit5/mvnw -B --no-transfer-progress verify
+          oidc_pid=""
+          cleanup() {
+            if test -n "$oidc_pid" && kill -0 "$oidc_pid"; then
+              kill "$oidc_pid"
+              wait "$oidc_pid" || true
+            fi
+            docker compose -p ci-sprint08-oidc down
+          }
+          trap cleanup EXIT
+          docker compose -p ci-sprint08-oidc up -d --wait --wait-timeout 180
+          set -a
+          . target/lab.env
+          set +a
+          java -jar target/oidc-login.jar > target/application.log 2>&1 &
+          oidc_pid=$!
+          python3 verify.py
+      - name: Verify the reactive Client Credentials service pair
+        working-directory: exercises/sprint08/reactive-service-pair
+        run: |
+          python3 init.py
+          ../../sprint02/file-transformer-gradle-plugin/gradlew --no-daemon bootJar
+          backend_pid=""
+          frontend_pid=""
+          cleanup() {
+            for pair_pid in "$frontend_pid" "$backend_pid"; do
+              if test -n "$pair_pid" && kill -0 "$pair_pid"; then
+                kill "$pair_pid"
+                wait "$pair_pid" || true
+              fi
+            done
+            docker compose -p ci-sprint08-service-pair down
+          }
+          trap cleanup EXIT
+          docker compose -p ci-sprint08-service-pair up -d --wait --wait-timeout 180
+          java -jar backend-service/build/libs/backend-service.jar > target/backend.log 2>&1 &
+          backend_pid=$!
+          set -a
+          . target/lab.env
+          set +a
+          unset COURSE_VIEWER_SECRET COURSE_WRONG_AUDIENCE_SECRET KC_BOOTSTRAP_ADMIN_PASSWORD
+          java -jar frontend-service/build/libs/frontend-service.jar > target/frontend.log 2>&1 &
+          frontend_pid=$!
+          python3 verify.py
       - name: Prepare the exercise image mirror
         working-directory: exercises/sprint03/spring-mvc-jdbc
         run: python3 ../../../.github/scripts/prepare-sprint03-ci.py --exercise

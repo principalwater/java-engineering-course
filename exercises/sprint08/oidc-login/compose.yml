@@ -1,0 +1,18 @@
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak@sha256:2ce6c7c70994c70dbbd70b372a5422c3b4eebb32583175eac03751320609e52c
+    command: [start-dev, --import-realm]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_HOSTNAME: http://127.0.0.1:18280
+      KC_HEALTH_ENABLED: "true"
+    env_file: target/lab.env
+    ports: ["127.0.0.1:18280:8080"]
+    volumes: ["./study-realm.json:/opt/keycloak/data/import/study-realm.json:ro"]
+    mem_limit: 768m
+    healthcheck:
+      test: [CMD-SHELL, "bash -ec 'exec 3<>/dev/tcp/127.0.0.1/9000; printf \"GET /health/ready HTTP/1.0\\r\\n\\r\\n\" >&3; read -r first <&3; [[ \"$$first\" == *\" 200 \"* ]]'"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+      start_period: 20s

@@ -10,7 +10,13 @@ from zipfile import ZipFile
 URL = "https://code.s3.yandex.net/middle-java/my-blog-front-app.zip"
 SHA256 = "17609f3fd2bb452117583f06e57ccb4f7cdd98b29f43b246c7580c4f9e11003e"
 OLD_API_URL = 'function Xt(){return"http://"+yR()+":"+vR()}function yR(){return"localhost"}function vR(){return"8080"}'
-NEW_API_URL = 'function Xt(){return window.location.origin}'
+NEW_API_URL = (
+    'function Xt(){return window.location.origin}'
+    'function blogJsonResponse(r){return r.json().then(p=>{'
+    'if(!r.ok)throw new Error(p?.error||"Request failed");return p})}'
+)
+JSON_RESPONSE_READ = '.then(r=>r.json())'
+JSON_RESPONSE_COUNT = 6
 OLD_IMAGE_UPLOAD = 'function CR(n,a){const i=new FormData;'
 NEW_IMAGE_UPLOAD = 'function CR(n,a){if(!(n.data instanceof Blob))return;const i=new FormData;'
 OLD_IMAGE_READ = '.then(r=>r.blob()).then(r=>URL.createObjectURL(r))'
@@ -64,6 +70,10 @@ def prepare(output: Path, archive: bytes) -> None:
         if client.count(old) != 1:
             raise ValueError("Client changed; comment loading and routes must be reviewed")
         client = client.replace(old, new, 1)
+    # Шесть JSON-загрузчиков постов/комментариев не должны выдавать HTTP-ошибку за успешную модель.
+    if client.count(JSON_RESPONSE_READ) != JSON_RESPONSE_COUNT:
+        raise ValueError("Client JSON response handlers changed; compatibility must be reviewed")
+    client = client.replace(JSON_RESPONSE_READ, '.then(blogJsonResponse)')
     owners[0].write_text(client)
     index = output / "index.html"
     html = index.read_text()

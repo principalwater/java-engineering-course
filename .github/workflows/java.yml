@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       sprint03: ${{ steps.detect.outputs.sprint03 }}
+      sprint04: ${{ steps.detect.outputs.sprint04 }}
       exercises: ${{ steps.detect.outputs.exercises }}
     steps:
       - name: Check out source
@@ -17,7 +18,9 @@ jobs:
         with:
           fetch-depth: 0
       - name: Test repository rules
-        run: node --test .github/tests/*.test.cjs
+        run: |
+          node --test .github/tests/*.test.cjs
+          python3 -m unittest discover -s .github/tests -p 'test_*.py'
       - name: Validate new commit messages
         run: node .github/scripts/check-commits.cjs
       - name: Detect project modules
@@ -27,6 +30,11 @@ jobs:
             echo "sprint03=true" >> "$GITHUB_OUTPUT"
           else
             echo "sprint03=false" >> "$GITHUB_OUTPUT"
+          fi
+          if test -f projects/sprint04-spring-boot-blog/build.gradle; then
+            echo "sprint04=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sprint04=false" >> "$GITHUB_OUTPUT"
           fi
           if test -f exercises/sprint01/junit5/pom.xml; then
             echo "exercises=true" >> "$GITHUB_OUTPUT"
@@ -123,7 +131,7 @@ jobs:
           retention-days: 14
       - name: Verify OpenAPI contracts and Redis cache exercises
         env:
-          SPRING_DATA_REDIS_PORT: ${{ job.services.redis.ports[6379] }}
+          SPRING_DATA_REDIS_PORT: ${{ job.services.redis.ports['6379'] }}
         run: |
           exercises/sprint01/junit5/mvnw -B --no-transfer-progress -f exercises/sprint07/openapi-workshop/pom.xml verify
           exercises/sprint01/junit5/mvnw -B --no-transfer-progress -f exercises/sprint07/redis-lab/pom.xml verify
@@ -188,7 +196,7 @@ jobs:
           python3 verify.py
       - name: Prepare the exercise image mirror
         working-directory: exercises/sprint03/spring-mvc-jdbc
-        run: python3 ../../../.github/scripts/prepare-sprint03-ci.py --exercise
+        run: python3 ../../../.github/scripts/prepare-project-ci.py --exercise
       - name: Start an isolated exercise Tomcat
         id: servlet
         working-directory: exercises/sprint03/spring-mvc-jdbc
@@ -235,8 +243,8 @@ jobs:
         run: python3 -m unittest discover -s src/test/python
       - name: Initialize local secrets
         run: python3 scripts/init-secrets.py
-      - name: Prepare pinned CI images from the official mirror
-        run: python3 ../../.github/scripts/prepare-sprint03-ci.py
+      - name: Prepare pinned official images with registry fallback
+        run: python3 ../../.github/scripts/prepare-project-ci.py
       - name: Start Tomcat and PostgreSQL
         id: containers
         run: docker compose up -d --build --wait
@@ -255,6 +263,74 @@ jobs:
           path: |
             projects/sprint03-spring-blog/target/blog.war
             projects/sprint03-spring-blog/target/surefire-reports/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Stop containers
+        if: always() && steps.containers.outcome != 'skipped'
+        run: docker compose down
+  sprint04:
+    needs: projects
+    if: needs.projects.outputs.sprint04 == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: projects/sprint04-spring-boot-blog
+    env:
+      COMPOSE_PROJECT_NAME: ci-sprint04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Java 21 and Gradle cache
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: |
+            projects/sprint04-spring-boot-blog/build.gradle
+            projects/sprint04-spring-boot-blog/gradle/wrapper/gradle-wrapper.properties
+      - name: Run Boot tests and package the executable JAR
+        run: ./gradlew --no-daemon --console=plain clean check bootJar
+      - name: Verify the executable JAR with local H2
+        run: python3 scripts/verify-jar.py
+      - name: Prepare and validate the frontend
+        run: |
+          python3 frontend/prepare.py build/frontend
+          node --check build/frontend/accessibility.js
+          for script in build/frontend/assets/*.js; do node --check "$script"; done
+      - name: Test and initialize local secrets
+        env:
+          BLOG_SECRETS_DIR: ${{ runner.temp }}/sprint04-secrets
+        run: |
+          python3 -m unittest discover -s src/test/python
+          python3 scripts/init-secrets.py
+          {
+            echo "BLOG_SECRETS_DIR=$BLOG_SECRETS_DIR"
+            echo "BLOG_UID=$(id -u)"
+            echo "BLOG_GID=$(id -g)"
+          } >> "$GITHUB_ENV"
+      - name: Prepare pinned official images with registry fallback
+        run: python3 ../../.github/scripts/prepare-project-ci.py
+      - name: Start the executable JAR and PostgreSQL
+        id: containers
+        run: docker compose up -d --build --wait
+      - name: Verify REST endpoints in containers
+        run: python3 scripts/smoke.py --frontend-url http://localhost:8084
+      - name: Collect container diagnostics on failure
+        if: failure() && steps.containers.outcome != 'skipped'
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --tail 200
+      - name: Upload the executable JAR and Boot test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sprint04-java21
+          path: |
+            projects/sprint04-spring-boot-blog/build/libs/blog.jar
+            projects/sprint04-spring-boot-blog/build/test-results/test/
+            projects/sprint04-spring-boot-blog/build/reports/tests/test/
           if-no-files-found: ignore
           retention-days: 14
       - name: Stop containers

@@ -63,4 +63,3 @@ def request(opener, url, fields=None, headers=None, *, allowed_origins):
         response = error
     with response:
         return response.status, response.headers, response.read().decode(), response.url
-

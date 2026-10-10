@@ -5,6 +5,7 @@ const REQUIRED_JOBS = new Map([
   ['projects', null],
   ['exercises', 'exercises/sprint01/junit5/pom.xml'],
   ['sprint03', 'projects/sprint03-spring-blog/pom.xml'],
+  ['sprint04', 'projects/sprint04-spring-boot-blog/build.gradle'],
 ]);
 
 function requireCondition(condition, message) {

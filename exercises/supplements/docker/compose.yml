@@ -1,0 +1,30 @@
+services:
+  database:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    env_file: target/lab.env
+    volumes:
+      - movies:/var/lib/postgresql/data
+      - ./movies.sql:/docker-entrypoint-initdb.d/01-movies.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  app:
+    build: .
+    env_file: target/lab.env
+    environment:
+      DB_HOST: database
+    depends_on:
+      database:
+        condition: service_healthy
+  gateway:
+    image: public.ecr.aws/docker/library/nginx@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
+    ports:
+      - "127.0.0.1:18380:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - app
+volumes:
+  movies:

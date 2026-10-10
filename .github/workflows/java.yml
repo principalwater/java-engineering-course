@@ -131,7 +131,7 @@ jobs:
           retention-days: 14
       - name: Verify OpenAPI contracts and Redis cache exercises
         env:
-          SPRING_DATA_REDIS_PORT: ${{ job.services.redis.ports[6379] }}
+          SPRING_DATA_REDIS_PORT: ${{ job.services.redis.ports['6379'] }}
         run: |
           exercises/sprint01/junit5/mvnw -B --no-transfer-progress -f exercises/sprint07/openapi-workshop/pom.xml verify
           exercises/sprint01/junit5/mvnw -B --no-transfer-progress -f exercises/sprint07/redis-lab/pom.xml verify

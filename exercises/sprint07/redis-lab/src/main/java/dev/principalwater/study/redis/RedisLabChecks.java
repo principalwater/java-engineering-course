@@ -2,7 +2,9 @@ package dev.principalwater.study.redis;
 
 import dev.principalwater.study.redis.model.CarPrice;
 import dev.principalwater.study.redis.repository.CarPriceRepository;
+import dev.principalwater.study.redis.service.PopularArticleAware;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.springframework.boot.ApplicationArguments;
@@ -15,14 +17,17 @@ public class RedisLabChecks implements ApplicationRunner {
     private static final long EXPIRATION_MARGIN_SECONDS = 2;
     private final CarPriceRepository cars;
     private final StringRedisTemplate strings;
+    private final PopularArticleAware articles;
 
-    public RedisLabChecks(CarPriceRepository cars, StringRedisTemplate strings) {
+    public RedisLabChecks(CarPriceRepository cars, StringRedisTemplate strings, PopularArticleAware articles) {
         this.cars = cars;
         this.strings = strings;
+        this.articles = articles;
     }
 
     @Override
     public void run(ApplicationArguments args) throws InterruptedException {
+        checkArticleCache();
         var car = new CarPrice("inspection-" + UUID.randomUUID(), new BigDecimal("100000.25"));
         cars.save(car);
         if (!cars.findById(car.name()).orElseThrow().equals(car)) {
@@ -43,5 +48,37 @@ public class RedisLabChecks implements ApplicationRunner {
             }
         }
         System.out.println("Redis repository: round trip, expiration and index cleanup passed");
+    }
+
+    private void checkArticleCache() {
+        String id = UUID.randomUUID().toString();
+        String key = "study:article:" + id;
+        long dailySeconds = Duration.ofDays(1).toSeconds();
+        try {
+            articles.cache(id, "Spring Data Redis: атомарное продление TTL");
+            Long initialTtl = strings.getExpire(key);
+            if (initialTtl == null || initialTtl < dailySeconds - EXPIRATION_MARGIN_SECONDS || initialTtl > dailySeconds) {
+                throw new IllegalStateException("Article was not cached for one day");
+            }
+            strings.expire(key, Duration.ofSeconds(10));
+            if (!"Spring Data Redis: атомарное продление TTL".equals(articles.getArticle(id))) {
+                throw new IllegalStateException("Cached article did not round trip");
+            }
+            Long refreshedTtl = strings.getExpire(key);
+            if (refreshedTtl == null || refreshedTtl < dailySeconds - EXPIRATION_MARGIN_SECONDS) {
+                throw new IllegalStateException("Reading an article did not renew its TTL");
+            }
+            articles.cache(id, "Updated content");
+            if (!"Updated content".equals(articles.getArticle(id))) {
+                throw new IllegalStateException("Article update did not replace its content");
+            }
+            strings.delete(key);
+            if (articles.getArticle(id) != null || Boolean.TRUE.equals(strings.hasKey(key))) {
+                throw new IllegalStateException("Cache miss created a value");
+            }
+            System.out.println("Article cache: content, daily TTL, atomic refresh, update and miss passed");
+        } finally {
+            strings.delete(key);
+        }
     }
 }

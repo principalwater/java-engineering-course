@@ -156,3 +156,4 @@ textarea.form-control { font-family: ui-monospace, "SFMono-Regular", Consolas, m
   .btn { border: 1px solid ButtonText; }
   :is(button, a, input, select, textarea):focus-visible { outline-color: Highlight; }
 }
+.card img:not([src]) { display: none; }

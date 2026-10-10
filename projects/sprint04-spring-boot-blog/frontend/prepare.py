@@ -11,6 +11,12 @@ URL = "https://code.s3.yandex.net/middle-java/my-blog-front-app.zip"
 SHA256 = "17609f3fd2bb452117583f06e57ccb4f7cdd98b29f43b246c7580c4f9e11003e"
 OLD_API_URL = 'function Xt(){return"http://"+yR()+":"+vR()}function yR(){return"localhost"}function vR(){return"8080"}'
 NEW_API_URL = 'function Xt(){return window.location.origin}'
+OLD_IMAGE_UPLOAD = 'function CR(n,a){const i=new FormData;'
+NEW_IMAGE_UPLOAD = 'function CR(n,a){if(!(n.data instanceof Blob))return;const i=new FormData;'
+OLD_IMAGE_READ = '.then(r=>r.blob()).then(r=>URL.createObjectURL(r))'
+NEW_IMAGE_READ = '.then(r=>r.status===404?null:r.blob()).then(r=>r?URL.createObjectURL(r):undefined)'
+OLD_FEED_IMAGE_READ = '.then(o=>o.blob()).then(o=>URL.createObjectURL(o))'
+NEW_FEED_IMAGE_READ = '.then(o=>o.status===404?null:o.blob()).then(o=>o?URL.createObjectURL(o):undefined)'
 OLD_COMMENT_ROUTE = 'function zR(n,a,i){fetch(Xt()+"/api/posts/"+n.id+"/comments/"+n.id,'
 NEW_COMMENT_ROUTE = OLD_COMMENT_ROUTE.replace('+n.id+"/comments/"', '+n.postId+"/comments/"')
 OLD_COMMENT_LOAD = 'function AR(n,a,i){fetch(Xt()+"/api/posts/"+n+"/comments").then(r=>r.json()).then(a).catch(i)}'
@@ -48,6 +54,9 @@ def prepare(output: Path, archive: bytes) -> None:
     # Same-origin запросы проходят через Nginx; сохраняем исправления загрузки и маршрута комментариев.
     for old, new in (
         (OLD_API_URL, NEW_API_URL),
+        (OLD_IMAGE_UPLOAD, NEW_IMAGE_UPLOAD),
+        (OLD_IMAGE_READ, NEW_IMAGE_READ),
+        (OLD_FEED_IMAGE_READ, NEW_FEED_IMAGE_READ),
         (OLD_COMMENT_ROUTE, NEW_COMMENT_ROUTE),
         (OLD_COMMENT_LOAD, NEW_COMMENT_LOAD),
         (OLD_COMMENT_EFFECT, NEW_COMMENT_EFFECT),

@@ -30,7 +30,7 @@ def expect_error(url, method, status, body=None):
         raise AssertionError(f"Expected HTTP {status}")
 
 
-def main(base):
+def main(base, frontend=None):
     assert request(base + "/actuator/health/readiness")["status"] == "UP"
     assert request(base + "/actuator/info")["build"]["name"] == "blog"
     posts = base + "/api/posts"
@@ -61,10 +61,20 @@ def main(base):
         request(path, "DELETE")
     expect_error(path, "GET", 404)
     expect_error(path + "/comments/" + str(comment["id"]), "GET", 404)
+    if frontend:
+        # Публичный origin и Host совпадают, но не входят в CORS allowlist бэкенда.
+        url = frontend.rstrip("/") + "/api/posts?search=&pageNumber=1&pageSize=5"
+        headers = {"Host": "blog.example:8084", "Origin": "http://blog.example:8084"}
+        with urlopen(Request(url, headers=headers), timeout=15) as response:
+            assert response.status == 200
+            assert isinstance(json.load(response)["posts"], list)
+        print("Frontend proxy: same-origin requests preserve the Host port")
     print("Executable JAR: readiness, build metadata, CRUD, Unicode, search, likes, image and cascade passed")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Check the running Spring Boot blog")
     parser.add_argument("--base-url", default="http://localhost:18084")
-    main(parser.parse_args().base_url.rstrip("/"))
+    parser.add_argument("--frontend-url", help="Also check same-origin requests through Nginx")
+    arguments = parser.parse_args()
+    main(arguments.base_url.rstrip("/"), arguments.frontend_url)

@@ -1,0 +1,17 @@
+server:
+  address: 127.0.0.1
+  port: 18180
+spring:
+  security:
+    oauth2:
+      client:
+        provider:
+          keycloak:
+            issuer-uri: http://127.0.0.1:18280/realms/study
+        registration:
+          keycloak:
+            provider: keycloak
+            client-id: study-login
+            client-secret: ${COURSE_CLIENT_SECRET}
+            authorization-grant-type: authorization_code
+            scope: openid,profile,email

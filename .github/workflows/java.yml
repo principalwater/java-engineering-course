@@ -249,7 +249,7 @@ jobs:
         id: containers
         run: docker compose up -d --build --wait
       - name: Verify REST endpoints in containers
-        run: python3 scripts/smoke.py --frontend-url http://localhost:8084
+        run: python3 scripts/smoke.py
       - name: Collect container diagnostics on failure
         if: failure() && steps.containers.outcome != 'skipped'
         run: |

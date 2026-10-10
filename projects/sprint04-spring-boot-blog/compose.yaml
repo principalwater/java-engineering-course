@@ -1,0 +1,65 @@
+name: sprint04-spring-blog
+services:
+  db:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-blog}
+      POSTGRES_USER: ${POSTGRES_USER:-blog}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes:
+      - blog-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  backend:
+    build: .
+    # На Linux bind-mounted secrets сохраняют UID/GID владельца файла на хосте.
+    user: "${BLOG_UID:-10001}:${BLOG_GID:-10001}"
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-blog}
+      DB_USER: ${POSTGRES_USER:-blog}
+      SPRING_PROFILES_ACTIVE: postgresql
+      BLOG_CORS_ORIGINS: http://localhost:${FRONTEND_PORT:-8084},http://127.0.0.1:${FRONTEND_PORT:-8084}
+    secrets:
+      - source: db_password
+        target: spring.datasource.password
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-18084}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health/readiness"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: 512m
+
+  frontend:
+    build: frontend
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-8084}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+
+volumes:
+  blog-data:
+
+secrets:
+  db_password:
+    file: ${BLOG_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint04}/db_password

@@ -1,0 +1,10 @@
+.gradle/
+build/
+data/
+frontend/
+docs/
+analytics/
+scripts/
+*.md
+.env
+.DS_Store

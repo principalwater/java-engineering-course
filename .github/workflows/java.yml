@@ -213,6 +213,15 @@ jobs:
         if: always() && steps.servlet.outcome != 'skipped'
         working-directory: exercises/sprint03/spring-mvc-jdbc
         run: docker compose -p ci-spring-mvc down
+      - name: Verify Docker routing and persistent data
+        working-directory: exercises/supplements/docker
+        run: |
+          ../../sprint01/junit5/mvnw -B --no-transfer-progress verify
+          python3 init.py
+          cleanup() { docker compose -p java-supplement-docker down; }
+          trap cleanup EXIT
+          docker compose -p java-supplement-docker up -d --build --wait --wait-timeout 120
+          python3 verify.py
   sprint03:
     needs: projects
     if: needs.projects.outputs.sprint03 == 'true'

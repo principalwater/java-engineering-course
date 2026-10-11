@@ -215,6 +215,9 @@ jobs:
         run: docker compose -p ci-spring-mvc down
       - name: Verify Docker routing and persistent data
         working-directory: exercises/supplements/docker
+        env:
+          # Image preparation for the preceding exercise exports another COMPOSE_FILE.
+          COMPOSE_FILE: compose.yml
         run: |
           ../../sprint01/junit5/mvnw -B --no-transfer-progress verify
           python3 init.py

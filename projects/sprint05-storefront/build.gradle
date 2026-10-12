@@ -46,6 +46,7 @@ tasks.named('bootJar') {
 
 tasks.named('test') {
     useJUnitPlatform()
+    exclude '**/AnalyticsIntegrationTest.class'
 }
 
 tasks.register('postgresTest', Test) {
@@ -61,6 +62,21 @@ tasks.register('postgresTest', Test) {
         if (!System.getenv('STORE_TEST_DB_URL')?.startsWith('jdbc:postgresql:')
                 || !System.getenv('STORE_TEST_DB_PASSWORD')) {
             throw new GradleException('postgresTest requires an isolated PostgreSQL URL and password')
+        }
+    }
+}
+
+tasks.register('analyticsTest', Test) {
+    description = 'Verify durable delivery and idempotent ClickHouse aggregates'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform()
+    include '**/AnalyticsIntegrationTest.class'
+    outputs.upToDateWhen { false }
+    doFirst {
+        if (!System.getenv('STORE_TEST_ANALYTICS_URL') || !System.getenv('STORE_TEST_CLICKHOUSE_CONTAINER')) {
+            throw new GradleException('analyticsTest requires an isolated ClickHouse deployment')
         }
     }
 }

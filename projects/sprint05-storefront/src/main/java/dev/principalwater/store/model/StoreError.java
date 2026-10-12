@@ -13,7 +13,8 @@ public enum StoreError {
     CART_NOT_FOUND(HttpStatus.NOT_FOUND, "Cart not found"),
     QUANTITY_LIMIT(HttpStatus.CONFLICT, "Product quantity exceeds the cart limit"),
     CART_LIMIT(HttpStatus.CONFLICT, "Cart contains too many different products"),
-    EMPTY_CART(HttpStatus.CONFLICT, "Cannot purchase an empty cart");
+    EMPTY_CART(HttpStatus.CONFLICT, "Cannot purchase an empty cart"),
+    ANALYTICS_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Analytics is temporarily unavailable");
 
     private final HttpStatus status;
     private final String message;

@@ -2,7 +2,6 @@
 """Проверяет ClickHouse на отдельном сервере и наборе данных, не меняя работающий магазин."""
 
 import json
-from http.client import RemoteDisconnected
 import os
 from pathlib import Path
 import secrets
@@ -57,7 +56,8 @@ def main():
                     with urlopen(query, timeout=5) as response:
                         assert response.status == 200
                     break
-                except (URLError, TimeoutError, RemoteDisconnected):
+                # Опубликованный Docker-порт может сбросить TCP до готовности ClickHouse.
+                except (URLError, TimeoutError, ConnectionResetError):
                     if time.monotonic() >= deadline:
                         raise
                     time.sleep(1)

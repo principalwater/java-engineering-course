@@ -11,3 +11,8 @@
 __pycache__/
 
 .gradle/
+
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan

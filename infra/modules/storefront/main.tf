@@ -47,8 +47,13 @@ resource "docker_image" "application" {
 }
 
 resource "docker_container" "application" {
-  name         = "${var.stack_name}-backend"
-  image        = docker_image.application.image_id
+  name  = "${var.stack_name}-backend"
+  image = docker_image.application.image_id
+  # Cookies are not port-scoped; parallel Compose and OpenTofu stores need distinct identities.
+  command = [
+    "--store.cart.cookie-name=${var.stack_name}-cart",
+    "--server.servlet.session.cookie.name=${var.stack_name}-session",
+  ]
   user         = var.runtime_user
   memory       = 512
   memory_swap  = 512

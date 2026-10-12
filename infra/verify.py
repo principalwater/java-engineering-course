@@ -87,6 +87,17 @@ def main():
             read = lambda: request(path)["title"]
             remove = lambda: request(path, "DELETE")
             address = f"module.{args.stack}[0].module.postgres.docker_container.database"
+            if args.analytics:
+                secrets_directory = Path(os.environ.get("COURSE_DEPLOY_SECRETS", Path.home() / ".config/java-engineering-course/tofu")) / args.stack
+                password = (secrets_directory / "clickhouse_password").read_text().rstrip("\r\n")
+
+                def analytics_count():
+                    query = f"SELECT count() FROM postgresql(blog_pg, table='posts') WHERE title='{marker}'"
+                    with urlopen(Request(deployed["analytics_url"], data=query.encode(),
+                                         headers={"X-ClickHouse-User": "analyst", "X-ClickHouse-Key": password}), timeout=15) as response:
+                        return int(response.read())
+
+                assert analytics_count() == 1
         try:
             replacement = plan("--replace", address)
             changes = [item for item in replacement["resource_changes"] if item["change"]["actions"] != ["no-op"]]
@@ -96,6 +107,9 @@ def main():
             new_container = subprocess.check_output(["docker", "inspect", "--format", "{{.Id}}", database], text=True).strip()
             assert old_container != new_container
             await_value(read, marker)
+            if args.analytics:
+                await_value(analytics_count, 1)
+                print("Read-only ClickHouse queries reflect real PostgreSQL writes: passed")
         finally:
             remove()
         print("HTTP/JDBC and retained PostgreSQL data after container recreation: passed")

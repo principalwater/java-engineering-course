@@ -10,6 +10,7 @@ resource "docker_container" "analytics_reader" {
     "PGHOST=db", "PGDATABASE=blog", "PGUSER=blog",
     "PGPASSWORD_FILE=/run/secrets/db_password",
     "READER_PASSWORD_FILE=/run/secrets/analytics_db_password",
+    "COURSE_SETUP_SHA256=${filesha256("${var.project_directory}/analytics/create-reader.sh")}",
   ]
   networks_advanced {
     name = docker_network.application.name
@@ -46,11 +47,15 @@ resource "docker_image" "clickhouse" {
 }
 
 resource "docker_volume" "analytics_data" {
-  count = var.analytics_enabled ? 1 : 0
-  name  = "${var.stack_name}-clickhouse-data"
+  name = "${var.stack_name}-clickhouse-data"
   lifecycle {
     prevent_destroy = true
   }
+}
+
+moved {
+  from = docker_volume.analytics_data[0]
+  to   = docker_volume.analytics_data
 }
 
 resource "docker_container" "clickhouse" {
@@ -68,6 +73,7 @@ resource "docker_container" "clickhouse" {
     "CLICKHOUSE_USER=analyst", "CLICKHOUSE_PASSWORD_FILE=/run/secrets/clickhouse_password",
     "CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=0", "PG_DATABASE=blog",
     "PG_READER_PASSWORD_FILE=/run/secrets/analytics_db_password",
+    "COURSE_CONFIG_SHA256=${sha256(join("", [for name in ["postgresql.xml", "readonly.xml", "start-clickhouse.sh"] : filesha256("${var.project_directory}/analytics/${name}")]))}",
   ]
   networks_advanced {
     name = docker_network.application.name
@@ -78,7 +84,7 @@ resource "docker_container" "clickhouse" {
     ip       = "127.0.0.1"
   }
   volumes {
-    volume_name    = docker_volume.analytics_data[0].name
+    volume_name    = docker_volume.analytics_data.name
     container_path = "/var/lib/clickhouse"
   }
   dynamic "volumes" {

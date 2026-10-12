@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import secrets
 import subprocess
 import sys
 
@@ -74,18 +75,21 @@ def prepare(stack, secrets_directory, environment):
         subprocess.run([sys.executable, "scripts/init-secrets.py"], cwd=project,
                        env={**environment, "BLOG_SECRETS_DIR": str(secrets_directory)}, check=True)
     elif stack == "docker-exercise":
-        # Reuse the existing initializer; only the runtime reads the resulting password.
-        subprocess.run([sys.executable, "init.py"], cwd=project, env=environment, check=True)
-        source = project / "target/lab.env"
-        values = dict(line.split("=", 1) for line in source.read_text().splitlines() if "=" in line)
         destination = secrets_directory / "db_password"
-        if not destination.exists():
+        try:
             descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            if destination.is_symlink() or not destination.is_file() or not destination.read_bytes().strip():
+                raise ValueError("Expected a nonempty regular external password file")
+            destination.chmod(0o600)
+        else:
             with os.fdopen(descriptor, "w") as stream:
-                stream.write(values["POSTGRES_PASSWORD"] + "\n")
+                stream.write(secrets.token_hex(32) + "\n")
     if stack in {"docker-exercise", "mvc-exercise"}:
         wrapper = REPOSITORY / "exercises/sprint01/junit5/mvnw"
-        subprocess.run([str(wrapper), "-B", "--no-transfer-progress", "-f", str(project / "pom.xml"), "verify"],
+        # Pin ZIP timestamps so an unchanged WAR/JAR does not cause deployment churn.
+        subprocess.run([str(wrapper), "-B", "--no-transfer-progress", "-Dproject.build.outputTimestamp=2026-01-01T00:00:00Z",
+                        "-f", str(project / "pom.xml"), "verify"],
                        env=environment, check=True)
 
 

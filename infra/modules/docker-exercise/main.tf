@@ -94,6 +94,7 @@ resource "docker_container" "gateway" {
   restart      = "unless-stopped"
   wait         = true
   wait_timeout = 120
+  env          = ["COURSE_CONFIG_SHA256=${filesha256("${var.project_directory}/nginx.conf")}"]
   networks_advanced {
     name = docker_network.application.name
   }

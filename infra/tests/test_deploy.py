@@ -2,8 +2,11 @@
 
 import copy
 import importlib.util
+import os
 from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
 
 specification = importlib.util.spec_from_file_location("deploy", Path(__file__).parents[1] / "deploy.py")
 deploy = importlib.util.module_from_spec(specification)
@@ -53,3 +56,20 @@ class DeploymentPlanTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "outside the repository"):
             deploy.external_directory(destination)
         self.assertFalse(destination.exists())
+
+    def test_external_password_is_private_preserved_and_validated(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(deploy.subprocess, "run"):
+            path = Path(directory) / "db_password"
+            deploy.prepare("docker-exercise", Path(directory), os.environ)
+            original = path.read_bytes()
+            self.assertTrue(original.strip())
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            deploy.prepare("docker-exercise", Path(directory), os.environ)
+            self.assertEqual(path.read_bytes(), original)
+            path.write_bytes(b"\n")
+            with self.assertRaisesRegex(ValueError, "nonempty regular"):
+                deploy.prepare("docker-exercise", Path(directory), os.environ)
+            path.unlink()
+            path.symlink_to(Path(directory) / "other")
+            with self.assertRaisesRegex(ValueError, "nonempty regular"):
+                deploy.prepare("docker-exercise", Path(directory), os.environ)

@@ -4,7 +4,7 @@
 
 [Русский](#java-engineering-course) · [English](#homework-projects-for-the-java-engineering-course)
 
-**[Проекты](projects/) · [Упражнения в IDE](exercises/) · [Сборка и тесты](#-запуск-тестирование-и-сдача)**
+**[Проекты](projects/) · [Упражнения в IDE](exercises/) · [Развёртывание OpenTofu](infra/) · [Сборка и тесты](#-запуск-тестирование-и-сдача)**
 
 Проектные и домашние работы по курсу [Java Middle](https://practicum.yandex.ru/middle-java/) Яндекс Практикума.
 
@@ -23,6 +23,8 @@
 ## 📁 Структура репозитория
 
 Полноценные приложения размещаются в [projects/](projects/), внешние упражнения для IDE - в [exercises/](exercises/). Упражнения сгруппированы по спринтам и содержат решение, команды запуска и результаты проверки.
+
+Общий каталог [infra/](infra/) разворачивает Docker-окружения отдельными модулями OpenTofu. У каждого стенда собственные state, сеть, контейнеры и данные; принятые проекты сохраняют свои пути и способы запуска через Compose.
 
 ### Проектные работы
 
@@ -75,7 +77,7 @@ CI обнаруживает проекты и выполняет их реаль
 
 [Русский](#java-engineering-course) · [English](#homework-projects-for-the-java-engineering-course)
 
-**[Projects](projects/) · [IDE exercises](exercises/) · [Build and tests](#-running-testing-and-submission)**
+**[Projects](projects/) · [IDE exercises](exercises/) · [OpenTofu deployments](infra/) · [Build and tests](#-running-testing-and-submission)**
 
 Sprint projects and homework applications for the [Middle Java Developer course](https://practicum.yandex.ru/middle-java/) at Yandex Practicum.
 
@@ -94,6 +96,8 @@ Key learning areas:
 ## 📁 Repository Structure
 
 Sprint applications use [projects/](projects/); external IDE exercises use [exercises/](exercises/). Exercises are grouped by sprint, with solutions, run commands, and verification results.
+
+[infra/](infra/) deploys Docker environments through separate OpenTofu modules. Each stack owns its state, network, containers and data; accepted projects retain their paths and Compose workflows.
 
 ### Sprint Projects
 

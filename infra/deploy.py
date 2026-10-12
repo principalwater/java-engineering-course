@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""Run one local stack with external state and an explicitly reviewed saved plan."""
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import secrets
+import subprocess
+import sys
+
+INFRA = Path(__file__).resolve().parent
+REPOSITORY = INFRA.parent
+STACKS = {
+    "sprint03": "projects/sprint03-spring-blog",
+    "sprint04": "projects/sprint04-spring-boot-blog",
+    "docker-exercise": "exercises/supplements/docker",
+    "mvc-exercise": "exercises/sprint03/spring-mvc-jdbc",
+}
+
+
+def external_directory(path):
+    path = Path(path).expanduser()
+    if path.is_symlink() or path.resolve().is_relative_to(REPOSITORY):
+        raise ValueError("Deployment state and secrets must remain outside the repository")
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.chmod(0o700)
+    return path.resolve()
+
+
+def fingerprint(stack, environment):
+    files = list(INFRA.rglob("*.tf")) + [INFRA / ".terraform.lock.hcl", INFRA / "deploy.py"]
+    files += list((REPOSITORY / STACKS[stack]).rglob("*"))
+    digest = hashlib.sha256(json.dumps(environment, sort_keys=True).encode())
+    for path in sorted(files):
+        if path.is_file() and not any(part in {"target", "build", ".gradle", "__pycache__"} for part in path.parts):
+            digest.update(str(path.relative_to(REPOSITORY)).encode())
+            digest.update(path.read_bytes())
+    for name in ["target/docker-study.jar", "target/spring-web-demo.war"]:
+        artifact = REPOSITORY / STACKS[stack] / name
+        if artifact.is_file():
+            digest.update(artifact.read_bytes())
+    return digest.hexdigest()
+
+
+def check_plan(plan, stack):
+    """Reject secret-bearing settings and changes outside this stack's ownership."""
+    prefix = f"java-tofu-{stack}"
+    for change in plan.get("resource_changes", []):
+        kind = change["type"]
+        value = change["change"].get("after") or {}
+        if kind == "docker_volume" and "delete" in change["change"]["actions"]:
+            raise ValueError("A deployment plan must not delete persistent volumes")
+        if kind in {"docker_container", "docker_network", "docker_volume"}:
+            for current in [change["change"].get("before"), value]:
+                if current and current.get("name") != prefix and not current.get("name", "").startswith(prefix + "-"):
+                    raise ValueError("A plan attempted to manage a resource outside this stack")
+        if kind != "docker_container":
+            continue
+        if value.get("privileged") or any(port.get("ip") != "127.0.0.1" for port in value.get("ports") or []):
+            raise ValueError("Containers must be unprivileged with loopback-only published ports")
+        if any("PASSWORD=" in item or "TOKEN=" in item for item in value.get("env") or []):
+            raise ValueError("Secret values must not be stored in container configuration or state")
+        for mount in value.get("volumes") or []:
+            if mount.get("container_path", "").startswith("/run/secrets/"):
+                path = Path(mount["host_path"])
+                if not mount.get("read_only") or path.resolve().is_relative_to(REPOSITORY):
+                    raise ValueError("Secret mounts must be read-only files outside the repository")
+
+
+def prepare(stack, secrets_directory, environment):
+    project = REPOSITORY / STACKS[stack]
+    if stack.startswith("sprint"):
+        subprocess.run([sys.executable, "scripts/init-secrets.py"], cwd=project,
+                       env={**environment, "BLOG_SECRETS_DIR": str(secrets_directory)}, check=True)
+    elif stack == "docker-exercise":
+        destination = secrets_directory / "db_password"
+        try:
+            descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            if destination.is_symlink() or not destination.is_file() or not destination.read_bytes().strip():
+                raise ValueError("Expected a nonempty regular external password file")
+            destination.chmod(0o600)
+        else:
+            with os.fdopen(descriptor, "w") as stream:
+                stream.write(secrets.token_hex(32) + "\n")
+    if stack in {"docker-exercise", "mvc-exercise"}:
+        wrapper = REPOSITORY / "exercises/sprint01/junit5/mvnw"
+        # Pin ZIP timestamps so an unchanged WAR/JAR does not cause deployment churn.
+        subprocess.run([str(wrapper), "-B", "--no-transfer-progress", "-Dproject.build.outputTimestamp=2026-01-01T00:00:00Z",
+                        "-f", str(project / "pom.xml"), "verify"],
+                       env=environment, check=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("stack", choices=STACKS)
+    parser.add_argument("action", choices=["plan", "apply", "status"])
+    parser.add_argument("--analytics", action="store_true", help="Enable the existing blog analytics")
+    parser.add_argument("--replace", action="append", default=[], help="Plan replacement of an exact resource address")
+    args = parser.parse_args()
+    if args.analytics and args.stack not in {"sprint03", "sprint04"}:
+        parser.error("Analytics is available only for blog deployments")
+    if args.replace and args.action != "plan":
+        parser.error("--replace is valid only when preparing a plan")
+
+    state = external_directory(Path(os.environ.get("COURSE_DEPLOY_STATE", Path.home() / ".local/state/java-engineering-course")) / args.stack)
+    secrets_directory = external_directory(Path(os.environ.get("COURSE_DEPLOY_SECRETS", Path.home() / ".config/java-engineering-course/tofu")) / args.stack)
+    docker_host = subprocess.check_output(["docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"], text=True).strip()
+    variables = {
+        "TF_VAR_deployment": args.stack,
+        "TF_VAR_docker_host": docker_host,
+        "TF_VAR_runtime_user": f"{os.getuid()}:{os.getgid()}",
+        "TF_VAR_secrets_directory": str(secrets_directory),
+        "TF_VAR_analytics_enabled": str(args.analytics).lower(),
+    }
+    environment = {**os.environ, **variables, "TF_DATA_DIR": str(state / "providers")}
+    environment.pop("DOCKER_CONTEXT", None)
+    environment["DOCKER_HOST"] = docker_host
+    tool = os.environ.get("TF_CLI", "tofu")
+    command = [tool, f"-chdir={INFRA}"]
+    plan = state / "reviewed.tfplan"
+    receipt = state / "plan-inputs.json"
+    if args.action == "plan":
+        prepare(args.stack, secrets_directory, environment)
+    subprocess.run(command + ["init", "-input=false", "-reconfigure", f"-backend-config=path={state / 'terraform.tfstate'}"], env=environment, check=True)
+    if args.action == "plan":
+        subprocess.run(command + ["validate"], env=environment, check=True)
+        receipt.unlink(missing_ok=True)
+        subprocess.run(command + ["plan", "-input=false", f"-out={plan}"] + [f"-replace={address}" for address in args.replace], env=environment, check=True)
+        check_plan(json.loads(subprocess.check_output(command + ["show", "-json", str(plan)], env=environment)), args.stack)
+        receipt.write_text(json.dumps({"fingerprint": fingerprint(args.stack, variables), "variables": variables}))
+        plan.chmod(0o600)
+        receipt.chmod(0o600)
+        print(f"Review the plan above, then run: python3 infra/deploy.py {args.stack} apply" + (" --analytics" if args.analytics else ""))
+    elif args.action == "apply":
+        if not receipt.exists() or not plan.exists():
+            raise ValueError("Prepare and review a plan before applying")
+        approved = json.loads(receipt.read_text())
+        if approved != {"fingerprint": fingerprint(args.stack, variables), "variables": variables}:
+            raise ValueError("Deployment inputs changed after planning; prepare a new plan")
+        check_plan(json.loads(subprocess.check_output(command + ["show", "-json", str(plan)], env=environment)), args.stack)
+        subprocess.run(command + ["apply", "-input=false", str(plan)], env=environment, check=True)
+        receipt.unlink()
+        plan.unlink()
+    else:
+        subprocess.run(command + ["output", "-json", "deployment"], env=environment, check=True)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+        sys.exit(f"Deployment failed: {error}")

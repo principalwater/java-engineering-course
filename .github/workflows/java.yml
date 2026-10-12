@@ -12,6 +12,7 @@ jobs:
       sprint03: ${{ steps.detect.outputs.sprint03 }}
       sprint04: ${{ steps.detect.outputs.sprint04 }}
       exercises: ${{ steps.detect.outputs.exercises }}
+      infrastructure: ${{ steps.detect.outputs.infrastructure }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -41,6 +42,61 @@ jobs:
           else
             echo "exercises=false" >> "$GITHUB_OUTPUT"
           fi
+          if test -f infra/main.tf; then
+            echo "infrastructure=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "infrastructure=false" >> "$GITHUB_OUTPUT"
+          fi
+  infrastructure:
+    needs: projects
+    if: needs.projects.outputs.infrastructure == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Java 21 and Maven cache
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: "1.11.6"
+          tofu_wrapper: false
+      - name: Validate formatting and deployment safety
+        run: |
+          tofu fmt -check -recursive infra
+          python3 -m unittest discover -s infra/tests -v
+      - name: Plan the isolated Docker exercise
+        run: |
+          {
+            echo "COURSE_DEPLOY_STATE=$RUNNER_TEMP/course-state"
+            echo "COURSE_DEPLOY_SECRETS=$RUNNER_TEMP/course-secrets"
+          } >> "$GITHUB_ENV"
+          COURSE_DEPLOY_STATE="$RUNNER_TEMP/course-state" COURSE_DEPLOY_SECRETS="$RUNNER_TEMP/course-secrets" \
+            python3 infra/deploy.py docker-exercise plan
+      - name: Run native configuration tests
+        env:
+          TF_DATA_DIR: ${{ runner.temp }}/course-state/docker-exercise/providers
+        run: tofu -chdir=infra test
+      - name: Apply the reviewed CI plan
+        run: python3 infra/deploy.py docker-exercise apply
+      - name: Verify routing, persistent data and the repeated plan
+        run: python3 infra/verify.py docker-exercise
+      - name: Collect infrastructure diagnostics on failure
+        if: failure()
+        run: |
+          docker ps -a --filter label=dev.principalwater.deployment=java-tofu-docker-exercise
+          for name in java-tofu-docker-exercise-app java-tofu-docker-exercise-gateway java-tofu-docker-exercise-db; do
+            if docker inspect "$name" >/dev/null 2>&1; then docker logs --tail 100 "$name"; fi
+          done
+      - name: Stop owned CI containers
+        if: always()
+        run: |
+          docker ps -aq --filter label=dev.principalwater.deployment=java-tofu-docker-exercise | xargs -r docker rm -f
   exercises:
     needs: projects
     if: needs.projects.outputs.exercises == 'true'

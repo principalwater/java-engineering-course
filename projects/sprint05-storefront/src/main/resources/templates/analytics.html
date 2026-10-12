@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('Аналитика')}"></head>
+<body>
+<header th:replace="~{fragments :: header('analytics')}"></header>
+<main id="main">
+    <div class="page-heading">
+        <p class="eyebrow">МАСТЕРСКАЯ В ЦИФРАХ</p>
+        <h1>Как живёт коллекция</h1>
+        <p class="lead">Оформленные заказы, выбранные предметы и их стоимость. По всему текущему магазину.</p>
+    </div>
+    <div th:replace="~{fragments :: notice}"></div>
+    <div class="analytics-toolbar">
+        <form method="get" th:action="@{/analytics}" class="period-selector" aria-label="Период аналитики">
+            <button class="secondary" th:each="period : ${periods}" name="days" th:value="${period.days}"
+                    th:classappend="${period == analytics.period} ? 'selected'"
+                    th:attr="aria-pressed=${period == analytics.period}" th:text="|${period.days} дней|"></button>
+        </form>
+        <form th:if="${analytics.state.name() != 'DISABLED'}" method="post" th:action="@{/analytics/sync}">
+            <input type="hidden" name="days" th:value="${analytics.period.days}">
+            <button class="secondary" type="submit">Обновить очередь →</button>
+        </form>
+    </div>
+    <div class="delivery-status">
+        <span th:text="|В очереди: ${analytics.queue.pendingOrders} заказов|"></span>
+        <span th:if="${analytics.queue.lastDelivery != null}"
+              th:text="|Последняя доставка: ${@display.time(analytics.queue.lastDelivery)}|"></span>
+        <span th:unless="${analytics.queue.lastDelivery != null}">Доставленных заказов пока нет</span>
+    </div>
+
+    <th:block th:if="${analytics.available()}">
+        <section class="metrics-grid" aria-label="Показатели магазина">
+            <article class="metric-card"><p>Заказы</p><strong th:text="${analytics.summary.orders}" data-metric="orders"></strong><span>оформлено за период</span></article>
+            <article class="metric-card"><p>Сумма заказов</p><strong th:text="${@display.money(analytics.summary.orderValue)}" data-metric="order-value"></strong><span>без реальных платежей</span></article>
+            <article class="metric-card"><p>Предметы</p><strong th:text="${analytics.summary.units}" data-metric="units"></strong><span>в сохранённых заказах</span></article>
+            <article class="metric-card"><p>Средний заказ</p><strong th:text="${@display.money(analytics.summary.averageOrder())}"></strong><span>сумма / число заказов</span></article>
+        </section>
+        <section class="surface analytics-surface">
+            <div class="section-heading"><h2>Стоимость заказов по дням</h2><p>UTC · дни без заказов показаны нулём</p></div>
+            <div class="analytics-chart" th:style="|--days:${analytics.period.days}|" aria-label="Дневная стоимость заказов">
+                <div class="chart-column" th:each="point : ${analytics.daily}" tabindex="0" role="img"
+                     th:attr="aria-label=|${point.date}. Заказов: ${point.orders}. Сумма в рублях: ${point.orderValue}.|">
+                    <span class="chart-tooltip"><b th:text="${point.date}"></b><span th:text="${@display.money(point.orderValue)}"></span><small th:text="|Заказов: ${point.orders} · Предметов: ${point.units}|"></small></span>
+                    <div class="chart-track"><div class="chart-bar" th:classappend="${point.orderValue > 0} ? 'has-value'" th:style="|--height:${point.percent}%|"></div></div>
+                    <span class="chart-day" th:text="${point.date.dayOfMonth}" aria-hidden="true"></span>
+                </div>
+            </div>
+            <details class="chart-table"><summary>Посмотреть точные значения</summary><div class="table-scroll"><table><thead><tr><th scope="col">День, UTC</th><th scope="col">Заказы</th><th scope="col">Предметы</th><th scope="col">Сумма заказов</th></tr></thead><tbody><tr th:each="point : ${analytics.daily}"><th scope="row" th:text="${point.date}"></th><td th:text="${point.orders}"></td><td th:text="${point.units}"></td><td th:text="${@display.money(point.orderValue)}"></td></tr></tbody></table></div></details>
+        </section>
+        <section class="surface analytics-surface">
+            <div class="section-heading"><h2>Что выбирают чаще</h2><p>Топ по количеству предметов</p></div>
+            <ol class="product-ranking" th:if="${!analytics.products.isEmpty()}">
+                <li th:each="product : ${analytics.products}"><div><strong th:text="${product.title}"></strong><span class="muted" th:text="${product.sku}"></span></div><div><strong th:text="|${product.units} шт.|"></strong><span class="muted" th:text="${@display.money(product.orderValue)}"></span></div></li>
+            </ol>
+            <p class="muted" th:if="${analytics.products.isEmpty()}">Когда появятся заказы, здесь будут выбранные товары.</p>
+        </section>
+    </th:block>
+    <section class="empty-state" th:unless="${analytics.available()}" role="status">
+        <p class="eyebrow">ЗАКАЗЫ СОХРАНЯЮТСЯ</p>
+        <h2 th:text="${analytics.state.name() == 'DISABLED'} ? 'Аналитика не подключена' : 'Аналитика временно недоступна'"></h2>
+        <p>Покупки продолжают сохраняться в магазине. Отложенные показатели появятся после подключения аналитики.</p>
+        <a class="primary button-link" th:href="@{/items}">В коллекцию →</a>
+    </section>
+</main>
+<footer th:replace="~{fragments :: footer}"></footer>
+</body>
+</html>

@@ -11,8 +11,9 @@
 <a class="brand" th:href="@{/items}"><span class="brand-symbol" aria-hidden="true">м</span><span>мастерская<span class="brand-note">вещи для рабочего стола</span></span></a>
 <nav aria-label="Основная навигация">
 <a th:href="@{/items}" th:classappend="${active == 'items'} ? 'active'" th:attr="aria-current=${active == 'items' ? 'page' : null}">Витрина</a>
-<a th:href="@{/orders}" th:classappend="${active == 'orders'} ? 'active'">Заказы</a>
-<a class="cart-link" th:href="@{/cart/items}" th:classappend="${active == 'cart'} ? 'active'">Корзина <span class="nav-count" th:text="${cart == null ? 0 : cart.itemCount()}">0</span></a>
+<a th:href="@{/orders}" th:classappend="${active == 'orders'} ? 'active'" th:attr="aria-current=${active == 'orders' ? 'page' : null}">Заказы</a>
+<a th:href="@{/analytics}" th:classappend="${active == 'analytics'} ? 'active'" th:attr="aria-current=${active == 'analytics' ? 'page' : null}">Аналитика</a>
+<a class="cart-link" th:href="@{/cart/items}" th:classappend="${active == 'cart'} ? 'active'" th:attr="aria-current=${active == 'cart' ? 'page' : null}">Корзина <span class="nav-count" th:text="${cart == null ? 0 : cart.itemCount()}">0</span></a>
 <button class="theme-button" type="button" id="theme-switch" aria-label="Тёмная тема" aria-pressed="false">◐</button>
 </nav>
 </header>

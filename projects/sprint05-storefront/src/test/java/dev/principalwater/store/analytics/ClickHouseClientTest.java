@@ -33,6 +33,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClickHouseClientTest {
     private static final UUID SOURCE = UUID.fromString("11111111-1111-1111-1111-111111111111");
+    private static final LocalDate START = LocalDate.parse("2026-10-06");
+    private static final LocalDate END = LocalDate.parse("2026-10-12");
     private static final String TOTAL = """
             {"bucket":3,"day":"1970-01-01","sku":"","title":"","orders":"1","units":"2","order_value":"15800"}
             """;
@@ -82,7 +84,7 @@ class ClickHouseClientTest {
         };
         try (var client = client()) {
             client.insert(List.of(fact()));
-            var rows = client.dashboard(SOURCE, LocalDate.parse("2026-10-06"));
+            var rows = client.dashboard(SOURCE, START, END);
             assertEquals(1, writes.get());
             assertEquals(AnalyticsBucket.TOTAL, rows.getFirst().bucket());
             assertEquals(15800, rows.getFirst().orderValue());
@@ -100,7 +102,7 @@ class ClickHouseClientTest {
     void malformedOrPartialHttp200CannotBecomeValidMetrics(String body) {
         handler = exchange -> respond(exchange, 200, body);
         try (var client = client()) {
-            var error = assertThrows(StoreException.class, () -> client.dashboard(SOURCE, LocalDate.parse("2026-10-06")));
+            var error = assertThrows(StoreException.class, () -> client.dashboard(SOURCE, START, END));
             assertEquals(StoreError.ANALYTICS_UNAVAILABLE, error.getError());
             assertNotNull(error.getCause());
         }
@@ -145,7 +147,7 @@ class ClickHouseClientTest {
             }
         };
         try (var client = client()) {
-            var error = assertThrows(StoreException.class, () -> client.dashboard(SOURCE, LocalDate.parse("2026-10-06")));
+            var error = assertThrows(StoreException.class, () -> client.dashboard(SOURCE, START, END));
             assertEquals(StoreError.ANALYTICS_UNAVAILABLE, error.getError());
         }
     }
@@ -165,7 +167,7 @@ class ClickHouseClientTest {
         };
         try (var client = client()) {
             assertTimeout(Duration.ofSeconds(11), () -> assertThrows(StoreException.class,
-                    () -> client.dashboard(SOURCE, LocalDate.parse("2026-10-06"))));
+                    () -> client.dashboard(SOURCE, START, END)));
         } finally {
             finish.countDown();
         }
@@ -177,7 +179,7 @@ class ClickHouseClientTest {
         try (var client = client()) {
             Thread.currentThread().interrupt();
             try {
-                assertThrows(StoreException.class, () -> client.dashboard(SOURCE, LocalDate.parse("2026-10-06")));
+                assertThrows(StoreException.class, () -> client.dashboard(SOURCE, START, END));
                 assertTrue(Thread.currentThread().isInterrupted());
             } finally {
                 Thread.interrupted();

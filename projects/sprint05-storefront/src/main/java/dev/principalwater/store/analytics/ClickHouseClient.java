@@ -80,8 +80,9 @@ public class ClickHouseClient implements AutoCloseable {
         }
     }
 
-    public List<AnalyticsRow> dashboard(UUID sourceId, LocalDate start) {
+    public List<AnalyticsRow> dashboard(UUID sourceId, LocalDate start, LocalDate end) {
         URI uri = endpoint().queryParam("param_source", sourceId).queryParam("param_start", start)
+                .queryParam("param_end", end).queryParam("param_limit", AnalyticsPeriod.MAXIMUM_DAYS)
                 .queryParam("wait_end_of_query", 1).build().toUri();
         byte[] response = execute(uri, dashboardQuery, "storefront_reader", properties.getReaderPassword());
         try (MappingIterator<AnalyticsRow> rows = aggregateReader.readValues(response)) {

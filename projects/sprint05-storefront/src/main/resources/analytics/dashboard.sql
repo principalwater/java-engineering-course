@@ -8,8 +8,8 @@ SELECT
     sum(quantity) AS units,
     sum(amount) AS order_value
 FROM storefront.order_lines FINAL
-PREWHERE source_id = {source:UUID} AND order_day >= {start:Date}
+PREWHERE source_id = {source:UUID} AND order_day >= {start:Date} AND order_day <= {end:Date}
 GROUP BY GROUPING SETS ((), (order_day), (sku))
 ORDER BY bucket, units DESC, order_value DESC, sku
-LIMIT 30 BY bucket
+LIMIT {limit:UInt8} BY bucket
 FORMAT JSONEachRow

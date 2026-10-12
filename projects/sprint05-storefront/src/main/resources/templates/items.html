@@ -14,7 +14,7 @@
 <div class="section-heading"><h2>Коллекция мастерской</h2><p th:text="|Найдено товаров: ${totalItems}|">Найдено товаров</p></div>
 <section class="product-grid" aria-label="Товары" th:if="${!items.isEmpty()}">
 <article class="product-card" th:each="item : ${items}" th:attr="data-product-id=${item.id},data-price=${item.price}">
-<a class="product-link" th:href="@{/items/{id}(id=${item.id})}"><div class="product-art"><img th:src="@{${item.imgPath}}" th:alt="${item.title}" width="320" height="240" loading="lazy"></div><h3 th:text="${item.title}"></h3></a>
+<a class="product-link" th:href="@{/items/{id}(id=${item.id})}"><div class="product-art"><img th:src="@{${item.imgPath}}" alt="" width="320" height="240" loading="lazy"></div><h3 th:text="${item.title}"></h3></a>
 <p class="product-description" th:text="${item.description}"></p><div class="product-price" th:text="${@display.money(item.price)}"></div>
 <div th:replace="~{fragments :: quantity(${item}, @{/items}, ${query})}"></div>
 </article></section>

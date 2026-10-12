@@ -19,12 +19,19 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
 
 import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 
 @SpringBootTest(properties = {
         "store.analytics.enabled=true",
@@ -34,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         "store.analytics.reader-password=${STORE_TEST_ANALYTICS_READER_PASSWORD}"
 })
 @ActiveProfiles("test")
+@AutoConfigureMockMvc
 class AnalyticsIntegrationTest {
     @Autowired private CatalogImportService importer;
     @Autowired private ProductRepository products;
@@ -44,6 +52,7 @@ class AnalyticsIntegrationTest {
     @Autowired private AnalyticsExporter exporter;
     @Autowired private ClickHouseClient clickhouse;
     @Autowired private ObjectMapper json;
+    @Autowired private MockMvc mvc;
 
     @Test
     void realCheckoutRetriesUnknownOutcomeAndRecoversAfterWarehouseOutage() throws Exception {
@@ -67,6 +76,10 @@ class AnalyticsIntegrationTest {
         assertEquals(1, queue.status().pendingOrders());
         assertEquals(1, exporter.flush());
         assertEquals(0, queue.status().pendingOrders());
+        mvc.perform(get("/analytics"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("data-metric=\"orders\">1")))
+                .andExpect(content().string(containsString("Клавиатура")));
 
         docker("stop");
         try {
@@ -77,6 +90,10 @@ class AnalyticsIntegrationTest {
             assertTrue(carts.view(secondCart).items().isEmpty());
             assertEquals(StoreError.ANALYTICS_UNAVAILABLE, assertThrows(StoreException.class, exporter::flush).getError());
             assertEquals(1, queue.status().pendingOrders());
+            mvc.perform(get("/analytics"))
+                    .andExpect(status().isOk())
+                    .andExpect(content().string(containsString("Аналитика временно недоступна")))
+                    .andExpect(content().string(not(containsString("data-metric=\"orders\""))));
         } finally {
             docker("start");
         }
@@ -89,10 +106,15 @@ class AnalyticsIntegrationTest {
         assertEquals(3, total.units());
         assertEquals(23700, total.orderValue());
         assertTrue(queue.status().lastDelivery() != null);
+        mvc.perform(get("/analytics").param("days", "30"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("--days:30")));
+        mvc.perform(get("/analytics").param("days", "365"))
+                .andExpect(status().isBadRequest());
     }
 
     private AnalyticsRow total() {
-        return clickhouse.dashboard(queue.sourceId(), LocalDate.now(ZoneOffset.UTC).minusDays(6)).stream()
+        return clickhouse.dashboard(queue.sourceId(), LocalDate.now(ZoneOffset.UTC).minusDays(6), LocalDate.now(ZoneOffset.UTC)).stream()
                 .filter(row -> row.bucket() == AnalyticsBucket.TOTAL).findFirst().orElseThrow();
     }
 

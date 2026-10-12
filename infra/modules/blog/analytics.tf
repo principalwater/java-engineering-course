@@ -61,6 +61,7 @@ resource "docker_container" "clickhouse" {
   entrypoint   = ["sh", "/setup/start-clickhouse.sh"]
   restart      = "unless-stopped"
   memory       = 768
+  memory_swap  = 768
   wait         = true
   wait_timeout = 120
   env = [

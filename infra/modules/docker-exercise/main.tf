@@ -59,13 +59,14 @@ resource "docker_image" "application" {
 }
 
 resource "docker_container" "application" {
-  name       = "${var.stack_name}-app"
-  image      = docker_image.application.image_id
-  user       = var.runtime_user
-  memory     = 512
-  restart    = "unless-stopped"
-  entrypoint = ["sh", "-ec", "export POSTGRES_PASSWORD=\"$(cat /run/secrets/db_password)\"; test -n \"$POSTGRES_PASSWORD\"; exec java -jar /app/app.jar"]
-  env        = ["DB_HOST=database", "POSTGRES_USER=study", "POSTGRES_DB=study"]
+  name        = "${var.stack_name}-app"
+  image       = docker_image.application.image_id
+  user        = var.runtime_user
+  memory      = 512
+  memory_swap = 512
+  restart     = "unless-stopped"
+  entrypoint  = ["sh", "-ec", "export POSTGRES_PASSWORD=\"$(cat /run/secrets/db_password)\"; test -n \"$POSTGRES_PASSWORD\"; exec java -jar /app/app.jar"]
+  env         = ["DB_HOST=database", "POSTGRES_USER=study", "POSTGRES_DB=study"]
   networks_advanced {
     name    = docker_network.application.name
     aliases = ["app"]

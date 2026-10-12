@@ -41,10 +41,12 @@ resource "docker_image" "backend" {
 }
 
 resource "docker_container" "backend" {
-  name         = "${var.stack_name}-backend"
-  image        = docker_image.backend.image_id
-  user         = var.spring_boot ? var.runtime_user : null
-  memory       = 512
+  name   = "${var.stack_name}-backend"
+  image  = docker_image.backend.image_id
+  user   = var.spring_boot ? var.runtime_user : null
+  memory = 512
+  # Match the RAM limit to disable container swap and avoid daemon-default drift.
+  memory_swap  = 512
   restart      = "unless-stopped"
   stop_timeout = 30
   wait         = true

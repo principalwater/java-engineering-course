@@ -26,6 +26,7 @@ resource "docker_container" "web" {
   name         = var.stack_name
   image        = docker_image.tomcat.image_id
   memory       = 512
+  memory_swap  = 512
   restart      = "unless-stopped"
   wait         = true
   wait_timeout = 120

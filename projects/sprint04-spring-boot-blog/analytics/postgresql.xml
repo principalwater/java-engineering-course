@@ -1,0 +1,13 @@
+<clickhouse>
+    <named_collections>
+        <blog_pg>
+            <!-- Альтернативный адрес тоже фиксируем: иначе он может переопределить host/port. -->
+            <addresses_expr overridable="false">db:5432</addresses_expr>
+            <host overridable="false">db</host>
+            <port overridable="false">5432</port>
+            <database from_env="PG_DATABASE" overridable="false"/>
+            <user overridable="false">blog_reader</user>
+            <password from_env="PG_READER_PASSWORD" overridable="false"/>
+        </blog_pg>
+    </named_collections>
+</clickhouse>

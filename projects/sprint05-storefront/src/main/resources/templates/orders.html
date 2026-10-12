@@ -1,0 +1,7 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org"><head th:replace="~{fragments :: head('Заказы')}"></head>
+<body><header th:replace="~{fragments :: header('orders')}"></header><main id="main">
+<div class="page-heading"><p class="eyebrow">ИСТОРИЯ ВЫБОРА</p><h1>Ваши заказы</h1><p class="lead">Все оформленные подборки, от новых к предыдущим.</p></div>
+<section class="orders-grid" th:if="${!orders.isEmpty()}"><article class="order-card" th:each="order : ${orders}" th:attr="data-order-id=${order.id}"><div class="order-heading"><a th:href="@{/orders/{id}(id=${order.id})}" th:text="|Заказ № ${order.id}|"></a><strong th:text="${@display.money(order.totalSum)}"></strong></div><time class="muted" th:datetime="${order.createdAt}" th:text="${@display.time(order.createdAt)}"></time><ul class="order-preview"><li th:each="item : ${order.items}"><span th:text="${item.title}"></span><span th:text="|${item.count} × ${@display.money(item.price)}|"></span></li></ul><a class="secondary button-link" th:href="@{/orders/{id}(id=${order.id})}">Открыть заказ →</a></article></section>
+<section class="empty-state" th:if="${orders.isEmpty()}"><p class="eyebrow">ВСЁ ВПЕРЕДИ</p><h2>Здесь появятся ваши заказы</h2><p>Добавьте предметы в корзину и оформите первую подборку.</p><a class="primary button-link" th:href="@{/items}">В коллекцию →</a></section>
+</main><footer th:replace="~{fragments :: footer}"></footer></body></html>

@@ -1,0 +1,42 @@
+package dev.principalwater.store.model;
+
+import java.util.ArrayList;
+import java.util.UUID;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+class StoreModelTest {
+    @Test
+    void moneyTotalsStayLongWhenAnAllowedCartExceedsIntegerRange() {
+        var items = new ArrayList<ItemView>();
+        for (int id = 1; id <= 50; id++) {
+            items.add(new ItemView(id, "item-" + id, "Item", "Description", "/images/cup.svg", 1_000_000, 99));
+        }
+        var cart = new CartView(items);
+        assertEquals(4_950_000_000L, cart.total());
+        assertEquals(4950, cart.itemCount());
+    }
+
+    @Test
+    void rejectedIncrementKeepsTheExistingQuantity() {
+        var product = new Product(new ProductInput("keyboard", "Keyboard", "Description", ImageAsset.KEYBOARD, 2500L));
+        var line = new CartLine(new ShoppingCart(UUID.randomUUID()), product);
+        for (int attempt = 1; attempt < 99; attempt++) {
+            line.increment();
+        }
+        var error = assertThrows(StoreException.class, line::increment);
+        assertEquals(StoreError.QUANTITY_LIMIT, error.getError());
+        assertEquals(99, line.getQuantity());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 3, 101})
+    void rejectsPageSizesOutsideThePublishedChoices(int size) {
+        var error = assertThrows(StoreException.class, () -> new CatalogQuery("", SortMode.NO, 1, size));
+        assertEquals(StoreError.INVALID_PAGING, error.getError());
+    }
+}

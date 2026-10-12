@@ -1,0 +1,41 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-catalog
+      author: principalwater
+      changes:
+        - sqlFile:
+            path: 001-catalog.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: 002-cart
+      author: principalwater
+      changes:
+        - sqlFile:
+            path: 002-cart.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: 003-orders
+      author: principalwater
+      changes:
+        - sqlFile:
+            path: 003-orders.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: 004-analytics-delivery
+      author: principalwater
+      changes:
+        - sqlFile:
+            path: 004-analytics-delivery.sql
+            relativeToChangelogFile: true
+  - changeSet:
+      id: 005-h2-source
+      author: principalwater
+      dbms: h2
+      changes:
+        - sql: INSERT INTO store_identity(id, source_id) VALUES (1, RANDOM_UUID())
+  - changeSet:
+      id: 005-postgresql-source
+      author: principalwater
+      dbms: postgresql
+      changes:
+        - sql: INSERT INTO store_identity(id, source_id) VALUES (1, gen_random_uuid())

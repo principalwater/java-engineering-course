@@ -4,7 +4,7 @@
 
 [Русский](#java-engineering-course) · [English](#homework-projects-for-the-java-engineering-course)
 
-**[Проекты](projects/) · [Упражнения в IDE](exercises/) · [Развёртывание OpenTofu](infra/) · [Сборка и тесты](#-запуск-тестирование-и-сдача)**
+**[Проекты](projects/) · [Упражнения в IDE](exercises/) · [Деплой OpenTofu](infra/) · [Сборка и тесты](#-запуск-тестирование-и-сдача)**
 
 Проектные и домашние работы по курсу [Java Middle](https://practicum.yandex.ru/middle-java/) Яндекс Практикума.
 
@@ -77,7 +77,7 @@ CI обнаруживает проекты и выполняет их реаль
 
 [Русский](#java-engineering-course) · [English](#homework-projects-for-the-java-engineering-course)
 
-**[Projects](projects/) · [IDE exercises](exercises/) · [OpenTofu deployments](infra/) · [Build and tests](#-running-testing-and-submission)**
+**[Projects](projects/) · [IDE exercises](exercises/) · [Deploy with OpenTofu](infra/) · [Build and tests](#-running-testing-and-submission)**
 
 Sprint projects and homework applications for the [Middle Java Developer course](https://practicum.yandex.ru/middle-java/) at Yandex Practicum.
 

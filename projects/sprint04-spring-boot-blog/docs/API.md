@@ -1,6 +1,6 @@
 # REST-контракт · Спринт 04
 
-Compose: `http://localhost:18084`; через Nginx: `http://localhost:8084`. Успешные операции возвращают `200 OK`.
+Compose: `http://localhost:18084`; через Nginx: `http://localhost:8084`. Создание поста возвращает `201 Created`, остальные успешные операции - `200 OK`.
 
 | Метод | Путь | Запрос / ответ |
 | --- | --- | --- |
@@ -9,7 +9,7 @@ Compose: `http://localhost:18084`; через Nginx: `http://localhost:8084`. У
 | POST | `/api/posts` | `title`, `text`, `tags` → Созданный пост, счётчики 0 |
 | PUT | `/api/posts/{id}` | `id`, `title`, `text`, `tags` → Обновлённый пост |
 | DELETE | `/api/posts/{id}` | Удалить пост, теги, комментарии и изображение; пустое тело |
-| POST | `/api/posts/{id}/likes` | Атомарный +1 → Число в JSON |
+| POST | `/api/posts/{id}/likes` | Атомарный +1 → Значение счётчика именно этого UPDATE в JSON |
 | PUT | `/api/posts/{id}/image` | Поле multipart `image` → Пустое тело |
 | GET | `/api/posts/{id}/image` | Байты изображения и фактический MIME-тип |
 | GET | `/api/posts/{postId}/comments` | Массив комментариев |

@@ -9,6 +9,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.LongStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -80,30 +81,32 @@ class BlogDaoTest extends BlogIntegrationTest {
 
     @Test
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    void concurrentLikesNeverLoseAnIncrement() throws Exception {
+    void concurrentLikesReturnEachOperationsOwnCounter() throws Exception {
         // Строка должна быть закоммичена до старта потоков с независимыми соединениями.
         long id = insert("Concurrent likes", "Body");
         var start = new CountDownLatch(1);
         var executor = Executors.newFixedThreadPool(6);
         try {
-            var futures = new ArrayList<Future<Integer>>();
+            var futures = new ArrayList<Future<List<Long>>>();
             for (int worker = 0; worker < 6; worker++) {
                 futures.add(executor.submit(() -> {
                     if (!start.await(5, TimeUnit.SECONDS)) {
                         throw new IllegalStateException("Workers did not start");
                     }
-                    int updated = 0;
+                    var likes = new ArrayList<Long>();
                     for (int attempt = 0; attempt < 10; attempt++) {
-                        updated += dao.incrementLikes(id);
+                        likes.add(dao.incrementLikes(id).orElseThrow());
                     }
-                    return updated;
+                    return likes;
                 }));
             }
             start.countDown();
+            var likes = new ArrayList<Long>();
             for (var future : futures) {
-                assertEquals(10, future.get(15, TimeUnit.SECONDS));
+                likes.addAll(future.get(15, TimeUnit.SECONDS));
             }
-            assertEquals(60, dao.likes(id));
+            assertEquals(LongStream.rangeClosed(1, 60).boxed().toList(), likes.stream().sorted().toList());
+            assertEquals(60, dao.get(id).orElseThrow().likesCount());
         } finally {
             executor.shutdownNow();
             boolean terminated = executor.awaitTermination(5, TimeUnit.SECONDS);

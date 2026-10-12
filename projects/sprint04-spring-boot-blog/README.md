@@ -26,7 +26,7 @@
 
 Изменения по файлам: [build.gradle](build.gradle) заменяет `pom.xml`, [BlogApplication](src/main/java/dev/principalwater/blog/BlogApplication.java) — `web.xml`. [WebConfig](src/main/java/dev/principalwater/blog/config/WebConfig.java) и [CorsProperties](src/main/java/dev/principalwater/blog/config/CorsProperties.java) дополняют MVC Boot; [PostgresqlConfig](src/main/java/dev/principalwater/blog/config/PostgresqlConfig.java) и [application properties](src/main/resources/application.properties) заменяют ручную JDBC-конфигурацию. [Профиль PostgreSQL](src/main/resources/application-postgresql.properties) подключает config tree. [BlogIntegrationTest](src/test/java/dev/principalwater/blog/BlogIntegrationTest.java) задаёт общий тестовый контекст; [EmbeddedServerTest](src/test/java/dev/principalwater/blog/controller/EmbeddedServerTest.java) проверяет настоящий servlet-контейнер. [Dockerfile](Dockerfile) упаковывает JAR в образ JRE, [адаптер фронтенда](frontend/prepare.py) сохраняет клиент и исправляет обнаруженные ошибки. Модель, SQL и бизнес-операции перенесены из спринта 3.
 
-Системные ошибки унифицированы на английском: [ApiErrorHandler](src/main/java/dev/principalwater/blog/controller/ApiErrorHandler.java), [RequestError](src/main/java/dev/principalwater/blog/service/RequestError.java) и [BlogEntity](src/main/java/dev/principalwater/blog/model/BlogEntity.java). HTTP-статусы и JSON-поле `error` сохранены; комментарии в коде и интерфейс остаются русскими.
+Системные ошибки унифицированы на английском: [ApiErrorHandler](src/main/java/dev/principalwater/blog/controller/ApiErrorHandler.java), [RequestError](src/main/java/dev/principalwater/blog/service/RequestError.java) и [BlogEntity](src/main/java/dev/principalwater/blog/model/BlogEntity.java). Статусы ошибок и JSON-поле `error` сохранены; комментарии в коде и интерфейс остаются русскими.
 
 **Используемые технологии:** Java 21 · Spring Boot 3.5.16 · Spring Framework 6.2.19 · Spring Data JDBC 3.5.13 · Gradle 8.14.3 · JUnit Jupiter 5.12.2 · PostgreSQL 17 · встроенный Tomcat 10.1.
 
@@ -147,6 +147,8 @@ Readiness включает состояние Boot и проверку БД. Liv
 > **Примечание о multipart:** реальный Tomcat сбрасывал соединение при файле чуть больше 5 МиБ: стандартный `maxSwallowSize` — 2 МиБ. Значение связано с ограниченным `max-request-size=6MB`; сервер дочитывает отклонённую загрузку и возвращает JSON 413. Дочитывание не сделано бесконечным; существенно большие прямые запросы могут завершаться сбросом. Это проверено отдельным HTTP-тестом, поскольку MockMvc не проходит servlet-парсер загрузок.
 
 REST-пути и JSON сохранены. Чтение поста остаётся GET: POST в исходном документе противоречил готовому клиенту и семантике HTTP. POST на адрес чтения возвращает 405.
+
+Создание поста возвращает `201 Created`. Лайк получает обновлённый счётчик через JDBC `GeneratedKeyHolder` без второго SELECT: [pgjdbc добавляет RETURNING](https://github.com/pgjdbc/pgjdbc/blob/REL42.7.11/pgjdbc/src/main/java/org/postgresql/core/Parser.java), H2 поддерживает возврат указанной колонки из UPDATE. Это сохраняет один DAO для обеих БД; параллельные запросы проверяют уникальность возвращённых значений и итоговый счётчик.
 
 ### Этап 5: Spring Boot Test и кеширование контекстов
 

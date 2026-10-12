@@ -10,7 +10,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.core.io.ByteArrayResource;
-import org.springframework.http.*;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.util.LinkedMultiValueMap;
 
@@ -28,7 +32,7 @@ class EmbeddedServerTest {
     void tomcatRejectsOversizedMultipartWithoutReplacingThePost() {
         var created = http.postForEntity("/api/posts",
                 Map.of("title", "Upload limit", "text", "Original body", "tags", List.of()), Post.class);
-        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(created.getStatusCode().is2xxSuccessful()).isTrue();
         long id = created.getBody().id();
         try {
             var file = new ByteArrayResource(new byte[MAX_IMAGE_BYTES + 1]) {

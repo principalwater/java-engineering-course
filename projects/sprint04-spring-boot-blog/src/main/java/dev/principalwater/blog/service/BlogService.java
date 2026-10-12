@@ -1,7 +1,14 @@
 package dev.principalwater.blog.service;
 
 import dev.principalwater.blog.dao.BlogDao;
-import dev.principalwater.blog.model.*;
+import dev.principalwater.blog.model.BlogEntity;
+import dev.principalwater.blog.model.Comment;
+import dev.principalwater.blog.model.CommentRequest;
+import dev.principalwater.blog.model.Post;
+import dev.principalwater.blog.model.PostPage;
+import dev.principalwater.blog.model.PostRequest;
+import dev.principalwater.blog.model.SearchFilter;
+import dev.principalwater.blog.model.StoredImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.LinkedHashSet;
@@ -14,7 +21,14 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import static dev.principalwater.blog.model.BlogLimits.*;
+import static dev.principalwater.blog.model.BlogLimits.MAX_IMAGE_BYTES;
+import static dev.principalwater.blog.model.BlogLimits.MAX_IMAGE_PIXELS;
+import static dev.principalwater.blog.model.BlogLimits.MAX_PAGE_SIZE;
+import static dev.principalwater.blog.model.BlogLimits.MAX_SEARCH_LENGTH;
+import static dev.principalwater.blog.model.BlogLimits.MAX_TAG_COUNT;
+import static dev.principalwater.blog.model.BlogLimits.MAX_TAG_LENGTH;
+import static dev.principalwater.blog.model.BlogLimits.MAX_TEXT_LENGTH;
+import static dev.principalwater.blog.model.BlogLimits.MAX_TITLE_LENGTH;
 
 @Service
 @Transactional(readOnly = true)
@@ -70,8 +84,7 @@ public class BlogService {
     @Transactional
     public long like(long id) {
         requirePositive(id);
-        requireUpdated(dao.incrementLikes(id), BlogEntity.POST);
-        return dao.likes(id);
+        return dao.incrementLikes(id).orElseThrow(() -> ApiException.notFound(BlogEntity.POST));
     }
 
     public StoredImage image(long id) {

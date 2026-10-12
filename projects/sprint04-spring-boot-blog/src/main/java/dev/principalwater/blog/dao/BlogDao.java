@@ -1,9 +1,17 @@
 package dev.principalwater.blog.dao;
 
-import dev.principalwater.blog.model.*;
+import dev.principalwater.blog.model.Comment;
+import dev.principalwater.blog.model.Post;
+import dev.principalwater.blog.model.PostRequest;
+import dev.principalwater.blog.model.SearchFilter;
+import dev.principalwater.blog.model.StoredImage;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -63,14 +71,12 @@ public class BlogDao {
         return jdbc.update("DELETE FROM posts WHERE id = :id", Map.of("id", id));
     }
 
-    public int incrementLikes(long id) {
-        return jdbc.update("UPDATE posts SET likes_count = likes_count + 1 WHERE id = :id",
-                Map.of("id", id));
-    }
-
-    public long likes(long id) {
-        return jdbc.queryForObject("SELECT likes_count FROM posts WHERE id = :id",
-                Map.of("id", id), Long.class);
+    public Optional<Long> incrementLikes(long id) {
+        // JDBC возвращает запрошенную колонку из самого UPDATE, без отдельного SELECT.
+        var counter = new GeneratedKeyHolder();
+        int updated = jdbc.update("UPDATE posts SET likes_count = likes_count + 1 WHERE id = :id",
+                new MapSqlParameterSource("id", id), counter, new String[]{"likes_count"});
+        return updated == 0 ? Optional.empty() : Optional.of(counter.getKey().longValue());
     }
 
     public Optional<StoredImage> image(long id) {

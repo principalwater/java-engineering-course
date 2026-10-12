@@ -16,8 +16,16 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.http.MediaType.IMAGE_PNG;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class PostControllerTest extends BlogIntegrationTest {
     @Autowired
@@ -32,7 +40,7 @@ class PostControllerTest extends BlogIntegrationTest {
         var created = mvc.perform(post("/api/posts").contentType(APPLICATION_JSON)
                         .content(json.writeValueAsBytes(Map.of("title", "HTTP contract", "text", fullText,
                                 "tags", List.of("http")))))
-                .andExpect(status().isOk()).andExpect(content().contentTypeCompatibleWith(APPLICATION_JSON))
+                .andExpect(status().isCreated()).andExpect(content().contentTypeCompatibleWith(APPLICATION_JSON))
                 .andExpect(jsonPath("$.id").isNumber()).andExpect(jsonPath("$.likesCount").value(0))
                 .andExpect(jsonPath("$.commentsCount").value(0)).andReturn();
         long id = json.readTree(created.getResponse().getContentAsByteArray()).get("id").longValue();
@@ -57,6 +65,7 @@ class PostControllerTest extends BlogIntegrationTest {
                 .andExpect(jsonPath("$.tags", hasSize(0)));
         mvc.perform(delete("/api/posts/{id}", id)).andExpect(status().isOk());
         mvc.perform(get("/api/posts/{id}", id)).andExpect(status().isNotFound());
+        mvc.perform(post("/api/posts/{id}/likes", id)).andExpect(status().isNotFound());
     }
 
     @Test

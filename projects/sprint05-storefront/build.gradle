@@ -47,3 +47,20 @@ tasks.named('bootJar') {
 tasks.named('test') {
     useJUnitPlatform()
 }
+
+tasks.register('postgresTest', Test) {
+    description = 'Verify JPA and transactional contracts against isolated PostgreSQL'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform()
+    include '**/StoreRepositoryTest.class', '**/StoreServiceTest.class'
+    // Отдельный диалект проверяет реальные блокировки и ограничения, без повторения MVC/unit-сценариев.
+    outputs.upToDateWhen { false }
+    doFirst {
+        if (!System.getenv('STORE_TEST_DB_URL')?.startsWith('jdbc:postgresql:')
+                || !System.getenv('STORE_TEST_DB_PASSWORD')) {
+            throw new GradleException('postgresTest requires an isolated PostgreSQL URL and password')
+        }
+    }
+}

@@ -14,4 +14,9 @@ public record ProductInput(
         @NotBlank @Size(max = StoreLimits.DESCRIPTION_LENGTH) String description,
         @NotNull ImageAsset image,
         @NotNull @Min(1) @Max(StoreLimits.MAX_PRICE_RUBLES) Long price) {
+    public ProductInput {
+        sku = sku == null ? null : sku.strip();
+        title = title == null ? null : title.strip();
+        description = description == null ? null : description.strip();
+    }
 }

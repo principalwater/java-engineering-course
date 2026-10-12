@@ -38,7 +38,8 @@
         <section class="surface analytics-surface">
             <div class="section-heading"><h2>Стоимость заказов по дням</h2><p>UTC · дни без заказов показаны нулём</p></div>
             <div class="analytics-chart" th:style="|--days:${analytics.period.days}|" aria-label="Дневная стоимость заказов">
-                <div class="chart-column" th:each="point : ${analytics.daily}" tabindex="0" role="img"
+                <div class="chart-column" th:each="point, position : ${analytics.daily}" tabindex="0" role="img"
+                     th:style="|--point-index:${position.index}|"
                      th:attr="aria-label=|${point.date}. Заказов: ${point.orders}. Сумма в рублях: ${point.orderValue}.|">
                     <span class="chart-tooltip"><b th:text="${point.date}"></b><span th:text="${@display.money(point.orderValue)}"></span><small th:text="|Заказов: ${point.orders} · Предметов: ${point.units}|"></small></span>
                     <div class="chart-track"><div class="chart-bar" th:classappend="${point.orderValue > 0} ? 'has-value'" th:style="|--height:${point.percent}%|"></div></div>
@@ -50,7 +51,12 @@
         <section class="surface analytics-surface">
             <div class="section-heading"><h2>Что выбирают чаще</h2><p>Топ по количеству предметов</p></div>
             <ol class="product-ranking" th:if="${!analytics.products.isEmpty()}">
-                <li th:each="product : ${analytics.products}"><div><strong th:text="${product.title}"></strong><span class="muted" th:text="${product.sku}"></span></div><div><strong th:text="|${product.units} шт.|"></strong><span class="muted" th:text="${@display.money(product.orderValue)}"></span></div></li>
+                <li th:each="product : ${analytics.products}">
+                    <div class="ranking-row">
+                        <div><strong th:text="${product.title}"></strong><span class="muted" th:text="${product.sku}"></span></div>
+                        <div><strong th:text="|${product.units} шт.|"></strong><span class="muted" th:text="${@display.money(product.orderValue)}"></span></div>
+                    </div>
+                </li>
             </ol>
             <p class="muted" th:if="${analytics.products.isEmpty()}">Когда появятся заказы, здесь будут выбранные товары.</p>
         </section>

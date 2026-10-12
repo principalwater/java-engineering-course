@@ -16,3 +16,13 @@
     try { localStorage.setItem("store-theme", root.dataset.theme); } catch {}
   });
 })();
+document.querySelectorAll('.chart-column').forEach(column => {
+  column.addEventListener('focus', () => column.classList.remove('tooltip-dismissed'));
+  column.addEventListener('mouseenter', () => column.classList.remove('tooltip-dismissed'));
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') {
+    // Подсказка скрывается без потери фокуса и позиции в клавиатурной навигации.
+    document.querySelector('.chart-column:focus, .chart-column:hover')?.classList.add('tooltip-dismissed');
+  }
+});

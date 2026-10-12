@@ -15,7 +15,7 @@ function scenario() {
   const run = {id: 99, head_sha: 'head', event: 'pull_request', pull_requests: [{number: 7}],
     status: 'completed', conclusion: 'success'};
   const pushRun = {...run, id: 100, event: 'push', head_branch: pull.head.ref, pull_requests: []};
-  const jobs = ['projects', 'exercises', 'sprint03', 'sprint04'].map((name, index) => ({
+  const jobs = ['projects', 'exercises', 'sprint03', 'sprint04', 'infrastructure'].map((name, index) => ({
     name, status: 'completed', conclusion: 'success', check_run_url: 'https://api.github.com/check-runs/' + index,
   }));
   const checks = jobs.map(job => ({...job, app: {id: 15368}}));
@@ -86,7 +86,8 @@ test('approval accepts only a verified head and preserves merge history', async 
     ['pending push CI', fixture => {fixture.pushRun.status = 'in_progress';}, /latest push CI/],
     ['stale push CI', fixture => {fixture.pushRun.head_sha = 'previous';}, /latest push CI/],
     ['push CI from another branch', fixture => {fixture.pushRun.head_branch = 'other';}, /latest push CI/],
-    ['missing Boot job', fixture => {fixture.jobs.pop(); fixture.checks.pop();}, /Required check sprint04/],
+    ['missing Boot job', fixture => {fixture.jobs.splice(3, 1);}, /Required check sprint04/],
+    ['missing infrastructure job', fixture => {fixture.jobs.pop(); fixture.checks.pop();}, /Required check infrastructure/],
     ['failed job', fixture => {fixture.jobs[1].conclusion = 'failure';}, /Required check/],
     ['existing module skipped', fixture => {
       fixture.jobs[2].conclusion = 'skipped'; fixture.checks[2].conclusion = 'skipped';

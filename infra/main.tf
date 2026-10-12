@@ -52,3 +52,17 @@ module "mvc_exercise" {
   stack_name        = local.stack_name
   http_port         = 28081
 }
+
+module "sprint05" {
+  source   = "./modules/storefront"
+  for_each = contains(["sprint05-postgresql", "sprint05-h2"], var.deployment) ? toset([var.deployment]) : toset([])
+
+  project_directory = "${local.repository}/projects/sprint05-storefront"
+  stack_name        = local.stack_name
+  profile           = each.key == "sprint05-h2" ? "h2" : "postgresql"
+  http_port         = each.key == "sprint05-h2" ? 28086 : 28085
+  analytics_port    = each.key == "sprint05-h2" ? 28126 : 28125
+  analytics_enabled = var.analytics_enabled
+  secrets_directory = var.secrets_directory
+  runtime_user      = var.runtime_user
+}

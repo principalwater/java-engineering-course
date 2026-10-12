@@ -2,8 +2,8 @@ variable "deployment" {
   description = "One independently managed local stack."
   type        = string
   validation {
-    condition     = contains(["sprint03", "sprint04", "docker-exercise", "mvc-exercise"], var.deployment)
-    error_message = "Select sprint03, sprint04, docker-exercise or mvc-exercise."
+    condition     = contains(["sprint03", "sprint04", "sprint05-postgresql", "sprint05-h2", "docker-exercise", "mvc-exercise"], var.deployment)
+    error_message = "Select an implemented project or exercise deployment."
   }
 }
 
@@ -31,7 +31,7 @@ variable "runtime_user" {
 }
 
 variable "analytics_enabled" {
-  description = "Enable the existing read-only ClickHouse integration for blog projects."
+  description = "Enable the selected project's optional ClickHouse integration."
   type        = bool
   default     = false
 }

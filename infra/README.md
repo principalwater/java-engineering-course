@@ -1,46 +1,46 @@
-# Modular Java deployments
+# Модульный деплой Java-приложений
 
-[Course repository](../README.md) · [Modules](#modules-and-endpoints) · [Deploy](#plan-and-deploy) · [Verify](#verification) · [Recovery](#data-and-recovery)
+[Репозиторий курса](../README.md) · [Модули](#модули-и-точки-входа) · [Деплой](#план-и-деплой) · [Проверка](#проверка) · [Восстановление](#данные-и-восстановление)
 
-One root configuration deploys the existing Java applications as separate Docker resources. Each selected stack owns its network, containers and persistent volumes. The accepted project directories, build wrappers, Dockerfiles and Compose commands remain available.
+Общий корневой модуль разворачивает Java-приложения отдельными Docker-ресурсами. У каждого стенда свои сеть, контейнеры и постоянные тома. Каталоги принятых проектов, сборочные wrappers, Dockerfile и команды Compose сохраняются.
 
-## Runtime and scope
+## Версии и область применения
 
-Tested with **OpenTofu 1.11.6**, **Docker provider 4.6.0**, Java 21 and OrbStack on macOS. CI uses the same OpenTofu version on Linux. HCL requires the 1.11 release line; Terraform CLI compatibility is not separately tested. The provider source is explicitly `registry.terraform.io/kreuzwerker/docker`, with checksums for macOS ARM64 and Linux AMD64/ARM64 in the committed lock file.
+Проверено с **OpenTofu 1.11.6**, **Docker provider 4.6.0**, Java 21 и OrbStack на macOS. В CI используется та же версия OpenTofu на Linux. HCL рассчитан на ветку 1.11; совместимость с Terraform CLI отдельно не проверялась. Источник провайдера указан явно: `registry.terraform.io/kreuzwerker/docker`. Контрольные суммы для macOS ARM64 и Linux AMD64/ARM64 зафиксированы в lock-файле.
 
-This is local coursework infrastructure. A local backend locks each stack's state; it is not a shared production backend. For team deployment, select an encrypted remote backend with locking and access control before sharing state.
+Это локальная учебная инфраструктура. Local backend блокирует state каждого стенда; для совместного рабочего окружения нужен отдельный зашифрованный remote backend с блокировками и контролем доступа. Выберите его до совместного использования state.
 
-## Modules and endpoints
+## Модули и точки входа
 
-| Selector | Root module | Existing application | Frontend | Backend | Optional ClickHouse |
+| Селектор | Корневой модуль | Приложение | Фронтенд | Бэкенд | Опциональный ClickHouse |
 | --- | --- | --- | --- | --- | --- |
 | `sprint03` | `module.sprint03[0]` | [Spring Framework WAR](../projects/sprint03-spring-blog/) | `28083` | `29083` | `28123` |
 | `sprint04` | `module.sprint04[0]` | [Spring Boot JAR](../projects/sprint04-spring-boot-blog/) | `28084` | `29084` | `28124` |
-| `docker-exercise` | `module.docker_exercise[0]` | [Docker routing/JDBC](../exercises/supplements/docker/) | `28380` | Internal | - |
-| `mvc-exercise` | `module.mvc_exercise[0]` | [MVC/JDBC WAR with H2](../exercises/sprint03/spring-mvc-jdbc/) | `28081/spring-web-demo` | Same endpoint | - |
+| `docker-exercise` | `module.docker_exercise[0]` | [Docker: маршрутизация и JDBC](../exercises/supplements/docker/) | `28380` | Внутри сети | - |
+| `mvc-exercise` | `module.mvc_exercise[0]` | [MVC/JDBC WAR с H2](../exercises/sprint03/spring-mvc-jdbc/) | `28081/spring-web-demo` | Та же точка входа | - |
 
-All published ports bind to `127.0.0.1`. Database ports remain inside each stack's network. Names start with `java-tofu-<selector>` and do not adopt existing Compose resources or reuse their database volumes.
+Все опубликованные порты привязаны к `127.0.0.1`; порты БД доступны внутри сети своего стенда. Имена начинаются с `java-tofu-<selector>`. Существующие ресурсы Compose и их тома БД не подключаются к управлению OpenTofu.
 
-The two blog module instances share [blog](modules/blog/) because their database, frontend and analytics wiring are the same. The `spring_boot` input retains the real difference: WAR/Tomcat versus executable JAR, password-file contract, CORS property and readiness endpoint. [postgres](modules/postgres/) is reused by the blogs and [Docker exercise](modules/docker-exercise/); the [MVC exercise](modules/mvc-exercise/) keeps its embedded H2. Blog storage has its own lifecycle: disabling analytics removes its containers while retaining its protected volume, including an empty volume when analytics has never been enabled.
+Два экземпляра модуля [blog](modules/blog/) переиспользуют одинаковую конфигурацию БД, фронтенда и аналитики. Параметр `spring_boot` сохраняет различия проектов: WAR/Tomcat или Executable JAR, имя файла пароля, настройку CORS и endpoint готовности. Модуль [postgres](modules/postgres/) используется блогами и [Docker-упражнением](modules/docker-exercise/); [MVC-упражнение](modules/mvc-exercise/) сохраняет встроенную H2. У хранилища блога отдельный жизненный цикл: отключение аналитики удаляет её контейнеры, но оставляет защищённый том. Пустой том создаётся и в случае, когда аналитика ещё не включалась.
 
 ```mermaid
 flowchart LR
-    root[main.tf] --> s3[Spring Framework blog]
-    root --> s4[Spring Boot blog]
-    root --> docker[Docker exercise]
-    root --> mvc[MVC exercise]
-    s3 --> pg[PostgreSQL module]
+    root[main.tf] --> s3[Блог на Spring Framework]
+    root --> s4[Блог на Spring Boot]
+    root --> docker[Docker-упражнение]
+    root --> mvc[MVC-упражнение]
+    s3 --> pg[Модуль PostgreSQL]
     s4 --> pg
     docker --> pg
-    s3 -. optional .-> ch[Existing read-only ClickHouse integration]
-    s4 -. optional .-> ch
+    s3 -. опционально .-> ch[Существующая интеграция ClickHouse для чтения]
+    s4 -. опционально .-> ch
 ```
 
-Other exercises keep their documented native JAR/Maven/Gradle workflows. A new deployable project adds a module call, a selector and verification for its actual services; it does not require moving source code or adding empty modules for future sprints.
+Остальные упражнения сохраняют описанный в их README запуск через JAR/Maven/Gradle. Для нового проекта с Docker-сервисами добавляются вызов модуля, селектор и проверка настоящего окружения. Переносить исходники или создавать пустые модули под будущие спринты не требуется.
 
-## Plan and deploy
+## План и деплой
 
-Install OpenTofu and a running local Docker Engine; Java 21 is needed to package the two exercises. Blog images build with their existing wrappers inside Docker. On macOS with Homebrew Java:
+Нужны OpenTofu и работающий локальный Docker Engine. Для упаковки двух упражнений требуется Java 21; образы блогов собираются их wrappers внутри Docker. На macOS с Java из Homebrew:
 
 ```sh
 export JAVA_HOME="$(brew --prefix openjdk@21)/libexec/openjdk.jdk/Contents/Home"
@@ -53,29 +53,29 @@ python3 infra/deploy.py sprint04 apply --analytics
 python3 infra/deploy.py sprint04 status
 ```
 
-Open [the Boot blog](http://127.0.0.1:28084). Use another selector for a different stack; omit `--analytics` for the base blog. Keep the same analytics option for plan and apply.
+Откройте [блог на Spring Boot](http://127.0.0.1:28084). Для другого стенда выберите его селектор; для базового блога уберите `--analytics`. Значение этой опции должно совпадать при подготовке плана и его применении.
 
-The driver detects the local Docker socket from the active context, initializes the selected backend, runs `validate`, saves a plan and checks its safety. `apply` consumes that saved plan. It rejects changed source/configuration, a different checkout or changed deployment inputs; prepare a new plan after any such change. A successful apply consumes the plan so it cannot be replayed accidentally.
+Скрипт определяет локальный Docker socket из активного контекста, инициализирует выбранный backend, выполняет `validate`, сохраняет план и проверяет его безопасность. `apply` применяет именно сохранённый план. Изменение исходников, конфигурации, checkout или параметров деплоя требует нового плана. После успешного применения файл плана удаляется, чтобы исключить случайный повтор.
 
-State and plans default to `~/.local/state/java-engineering-course/<selector>/`; secrets use `~/.config/java-engineering-course/tofu/<selector>/`. `COURSE_DEPLOY_STATE` and `COURSE_DEPLOY_SECRETS` can select other external roots. Directories use mode `0700`; password and plan files use `0600`. Existing passwords are preserved. Never share these paths between different Docker Engines or manage one stack concurrently from different worktrees.
+State и планы по умолчанию находятся в `~/.local/state/java-engineering-course/<selector>/`, секреты - в `~/.config/java-engineering-course/tofu/<selector>/`. Другие внешние каталоги задаются через `COURSE_DEPLOY_STATE` и `COURSE_DEPLOY_SECRETS`. Права каталогов - `0700`, файлов паролей и планов - `0600`. Существующие пароли сохраняются. Не используйте один каталог state для разных Docker Engines и не управляйте одним стендом одновременно из разных worktrees.
 
-Select the CLI path with `TF_CLI`; the tested runtime is `tofu`. For native commands against an initialized stack:
+Путь к CLI задаётся через `TF_CLI`; проверенный runtime - `tofu`. Для штатных команд в уже инициализированном стенде:
 
 ```sh
 export TF_DATA_DIR="$HOME/.local/state/java-engineering-course/sprint04/providers"
 tofu -chdir=infra output -json deployment
 ```
 
-## Java packaging and readiness
+## Упаковка Java и готовность сервисов
 
-- `docker_image` builds the existing Dockerfiles through Buildx. Source hashes rebuild the affected image; Maven/Gradle build caches and layered Boot JARs remain useful. A Dockerfile change does not introduce another Java packaging format.
-- Exercise WAR/JAR artifacts are packaged with the existing Maven wrapper before planning. Archive timestamps are fixed for reproducibility; unchanged source does not redeploy just because packaging ran again.
-- PostgreSQL has a real `pg_isready` healthcheck. Blog startup waits for the healthy database; Boot readiness includes its database. The Docker exercise checks `/movies` through Nginx and Java. Container creation alone is not readiness.
-- Java containers have a 512 MiB RAM limit with swap disabled; ClickHouse uses 768 MiB. These are local laboratory limits, not production sizing. A healthcheck does not restart an unhealthy process automatically.
-- Non-root Boot/Java processes use the host's numeric UID:GID to read mounted `0600` secrets on Linux. Passwords are mounted read-only; Java/entrypoint code reads them at runtime. Secret contents are absent from Terraform variables, image build arguments, container configuration and state.
-- The blogs reuse their read-only PostgreSQL/ClickHouse setup and least-privilege reader. Analytics remains optional. Runtime secret files are local delivery, not encryption or a Vault replacement; production needs an external secret manager and deliberate TLS/authentication configuration.
+- `docker_image` собирает существующие Dockerfile через Buildx. Хеши исходников вызывают пересборку затронутого образа; сохраняются преимущества кешей Maven/Gradle и послойного Boot JAR. Изменение Dockerfile не вводит другой формат упаковки Java-приложения.
+- WAR/JAR упражнений собираются существующим Maven wrapper перед подготовкой плана. Временные метки архивов фиксированы для воспроизводимости: повторная упаковка неизменённых исходников не вызывает новый деплой.
+- Готовность PostgreSQL проверяет `pg_isready`. Блог запускается после готовности БД; Boot readiness учитывает доступность БД. Docker-упражнение проверяет `/movies` через Nginx и Java. Создание контейнера само по себе не подтверждает готовность приложения.
+- Java-контейнеры ограничены 512 МиБ RAM, swap отключён; ClickHouse получает 768 МиБ. Это ограничения локального стенда, а не расчёт ресурсов рабочего окружения. Healthcheck сам по себе не перезапускает нездоровый процесс.
+- Boot/Java-процессы без root используют числовые UID:GID владельца на хосте, чтобы читать смонтированные секреты с правами `0600` на Linux. Пароли монтируются только для чтения; Java/entrypoint получают их при запуске. Содержимое секретов не попадает в переменные Terraform, аргументы сборки образа, конфигурацию контейнера и state.
+- Блоги переиспользуют существующую интеграцию PostgreSQL/ClickHouse с ролью чтения и ограниченными привилегиями. Аналитика опциональна. File secrets - локальный способ передачи пароля, а не шифрование или замена Vault; рабочему окружению нужны внешний secret manager и отдельные настройки TLS/аутентификации.
 
-## Verification
+## Проверка
 
 ```sh
 tofu fmt -check -recursive infra
@@ -84,15 +84,15 @@ TF_DATA_DIR="$HOME/.local/state/java-engineering-course/sprint04/providers" tofu
 python3 infra/verify.py sprint04 --analytics
 ```
 
-The live verifier checks HTTP/JDBC, creates its own persistence marker, plans replacement of only the database container, applies that saved plan and reads the same marker afterward. It removes its own record and requires the final plan to be empty. The MVC variant checks its real servlet/H2 endpoint and repeated plan; H2 data has no persistent-volume guarantee.
+Проверка настоящего окружения проходит путь HTTP/JDBC, создаёт собственную контрольную запись, готовит замену только контейнера БД, применяет сохранённый план и повторно читает эту запись. Затем удаляет свою запись и требует пустого итогового плана. Вариант MVC проверяет настоящий servlet/H2 endpoint и повторный план; сохранность данных H2 после пересоздания процесса не гарантируется.
 
-Local checks cover all four selectors. The Boot path also reuses its existing full REST smoke scenario. CI runs formatting, native configuration tests, deployment-policy tests and a real Docker-exercise deployment with database recreation. The `infrastructure` check is part of `/approve` validation.
+Локально проверены все четыре селектора. Вариант Boot также переиспользует полный REST smoke-сценарий проекта. CI проверяет форматирование, штатные тесты конфигурации, правила безопасности плана и настоящий деплой Docker-упражнения с пересозданием БД. Проверка `infrastructure` входит в условия `/approve`.
 
-## Data and recovery
+## Данные и восстановление
 
-Persistent database/analytics volumes use `prevent_destroy`. A full destroy or changing a selector inside the same state is rejected rather than deleting data. The saved-plan policy also rejects volume deletion, unowned names, privileged containers, public port bindings, inline passwords and writable/tracked secret mounts.
+Постоянные тома БД и аналитики защищены через `prevent_destroy`. Полный destroy или смена селектора внутри того же state завершаются отказом вместо удаления данных. Проверка сохранённого плана также отклоняет удаление томов, чужие имена ресурсов, привилегированные контейнеры, публичные привязки портов, пароли в параметрах и writable/отслеживаемые Git mounts секретов.
 
-For a deliberate service redeploy, use its exact address and inspect the plan:
+Для намеренного редеплоя сервиса укажите его точный адрес и проверьте план:
 
 ```sh
 python3 infra/deploy.py sprint04 plan --analytics \
@@ -100,16 +100,16 @@ python3 infra/deploy.py sprint04 plan --analytics \
 python3 infra/deploy.py sprint04 apply --analytics
 ```
 
-To stop a local stack, stop only its explicitly named running containers; the stopped state is visible in the next plan. Reapplying a reviewed plan starts them again. PostgreSQL and ClickHouse data remain in their named volumes. Do not use broad prune commands.
+Для остановки локального стенда остановите только его явно перечисленные работающие контейнеры. Следующий план покажет остановленное состояние; применение проверенного плана запускает их снова. Данные PostgreSQL и ClickHouse сохраняются в именованных томах. Не используйте общие команды prune.
 
-Before changing database image versions, export the database and retain the state backup. Application rollback uses the previous source revision plus a newly reviewed plan; it does not roll back stored data. Changing an initialization password file does not rotate a password already stored in PostgreSQL.
+Перед изменением версии образа БД выгрузите данные и сохраните резервную копию state. Откат приложения выполняется через предыдущую версию исходников и новый проверенный план; сохранённые данные при этом не откатываются. Изменение файла начального пароля не меняет пароль уже созданной роли PostgreSQL.
 
-Permanent removal is a separate operation: back up the data, inspect `tofu state list`, detach only the exact protected volume addresses with `tofu state rm`, then review a native `tofu plan -destroy` using the same backend and deployment variables. The detached Docker volumes remain until explicitly removed. Do not detach volumes during ordinary redeployment.
+Окончательное удаление - отдельная операция: сделайте резервную копию данных, проверьте `tofu state list`, отсоедините только точные адреса защищённых томов через `tofu state rm`, затем проверьте штатный `tofu plan -destroy` с тем же backend и параметрами деплоя. Отсоединённые Docker-тома остаются до их явного удаления. Не отсоединяйте тома при обычном редеплое.
 
-## Sources
+## Источники
 
-- [OpenTofu local backend](https://opentofu.org/docs/language/settings/backends/local/)
-- [Docker provider image/Buildx contract](https://github.com/kreuzwerker/terraform-provider-docker/blob/v4.6.0/docs/resources/image.md)
-- [Docker provider container health/wait contract](https://github.com/kreuzwerker/terraform-provider-docker/blob/v4.6.0/docs/resources/container.md)
-- [Spring Boot container images](https://docs.spring.io/spring-boot/3.5/reference/packaging/container-images/index.html)
-- [PostgreSQL Official Image initialization](https://github.com/docker-library/docs/blob/master/postgres/README.md)
+- [Local backend OpenTofu](https://opentofu.org/docs/language/settings/backends/local/)
+- [Сборка образов и Buildx в Docker provider](https://github.com/kreuzwerker/terraform-provider-docker/blob/v4.6.0/docs/resources/image.md)
+- [Готовность контейнеров и ожидание healthcheck](https://github.com/kreuzwerker/terraform-provider-docker/blob/v4.6.0/docs/resources/container.md)
+- [Контейнерные образы Spring Boot](https://docs.spring.io/spring-boot/3.5/reference/packaging/container-images/index.html)
+- [Инициализация PostgreSQL Official Image](https://github.com/docker-library/docs/blob/master/postgres/README.md)

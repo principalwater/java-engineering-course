@@ -12,7 +12,7 @@ locals {
     toset(["Dockerfile", ".dockerignore", "gradlew", "build.gradle", "settings.gradle"]),
   )
   secret_mounts = merge(
-    local.persistent ? { "spring.datasource.password" = "db_password" } : {},
+    local.persistent ? { (var.database_password_property) = "db_password" } : {},
     var.analytics_enabled ? {
       "store.analytics.writer-password" = "analytics_writer_password"
       "store.analytics.reader-password" = "analytics_reader_password"
@@ -52,7 +52,7 @@ resource "docker_container" "application" {
   # Cookies are not port-scoped; parallel Compose and OpenTofu stores need distinct identities.
   command = [
     "--store.cart.cookie-name=${var.stack_name}-cart",
-    "--server.servlet.session.cookie.name=${var.stack_name}-session",
+    "--${var.session_cookie_property}=${var.stack_name}-session",
   ]
   user         = var.runtime_user
   memory       = 512
@@ -64,7 +64,7 @@ resource "docker_container" "application" {
   env = concat([
     "SERVER_PORT=8080", "SPRING_PROFILES_ACTIVE=${var.profile}",
     ], local.persistent ? [
-    "DB_URL=jdbc:postgresql://db:5432/storefront", "DB_USER=storefront",
+    "DB_URL=${var.database_protocol}:postgresql://db:5432/storefront", "DB_USER=storefront",
     ] : [], var.analytics_enabled ? [
     "STORE_ANALYTICS_ENABLED=true", "STORE_ANALYTICS_URL=http://clickhouse:8123",
     "SPRING_CONFIG_IMPORT=configtree:/run/secrets/",

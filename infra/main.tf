@@ -66,3 +66,20 @@ module "sprint05" {
   secrets_directory = var.secrets_directory
   runtime_user      = var.runtime_user
 }
+
+module "sprint06" {
+  source   = "./modules/storefront"
+  for_each = contains(["sprint06-postgresql", "sprint06-h2"], var.deployment) ? toset([var.deployment]) : toset([])
+
+  project_directory          = "${local.repository}/projects/sprint06-reactive-storefront"
+  stack_name                 = local.stack_name
+  profile                    = each.key == "sprint06-h2" ? "h2" : "postgresql"
+  database_protocol          = "r2dbc"
+  database_password_property = "spring.r2dbc.password"
+  session_cookie_property    = "server.reactive.session.cookie.name"
+  http_port                  = each.key == "sprint06-h2" ? 28088 : 28087
+  analytics_port             = each.key == "sprint06-h2" ? 28128 : 28127
+  analytics_enabled          = var.analytics_enabled
+  secrets_directory          = var.secrets_directory
+  runtime_user               = var.runtime_user
+}

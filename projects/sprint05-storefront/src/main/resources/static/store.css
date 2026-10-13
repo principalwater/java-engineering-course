@@ -160,7 +160,7 @@ pre { overflow: auto; padding: 24px; border-radius: 16px; background: var(--bg);
 .product-ranking li { padding: 18px 0 18px 12px; border-bottom: 1px solid var(--line); }
 .product-ranking li::marker { color: var(--muted); font-size: 12px; }
 .ranking-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 16px; }
-.ranking-row > div { display: flex; flex-direction: column; }
+.ranking-row > div { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
 .ranking-row > div:last-child { text-align: right; }
 .product-ranking .muted { font-size: 12px; margin-top: 5px; }
 @media (max-width: 1100px) {
@@ -199,6 +199,10 @@ pre { overflow: auto; padding: 24px; border-radius: 16px; background: var(--bg);
   .catalog-filters label:not(.search-field) { flex: 1; min-width: 0; }
   select { width: 100%; }
   .section-heading { align-items: start; flex-direction: column; gap: 6px; }
+  /* Все 30 подписей не помещаются; полные даты остаются в подсказках и таблице. */
+  .analytics-chart[data-days="30"] .chart-day { visibility: hidden; }
+  .analytics-chart[data-days="30"] .chart-column:nth-child(5n + 1) .chart-day,
+  .analytics-chart[data-days="30"] .chart-column:last-child .chart-day { visibility: visible; }
   .cart-line { padding: 18px; gap: 14px; }
   .purchased-line { grid-template-columns: 80px minmax(0,1fr); padding: 18px; gap: 16px; }
   .purchased-line > strong { grid-column: 2; }

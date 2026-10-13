@@ -30,11 +30,18 @@
   const STATUS_VISIBLE_MS = 3500;
   const numbers = new Intl.NumberFormat("ru-RU");
   const money = value => `${numbers.format(value)} ₽`;
-  const big = value => { try { return BigInt(value); } catch { return 0n; } };
+  const big = value => {
+    if ((typeof value === "number" && !Number.isSafeInteger(value)) || !/^\d+$/.test(String(value))) {
+      throw new Error("Invalid cart amount");
+    }
+    return BigInt(value);
+  };
 
   const queue = [];
   const states = new WeakMap();
   let draining = false;
+  let queueResult = Promise.resolve(true);
+  let purchasing = false;
 
   class RequestError extends Error {
     constructor(status) {
@@ -46,7 +53,7 @@
   const stateOf = form => {
     let state = states.get(form);
     if (!state) {
-      state = { pending: 0, intended: undefined, timer: 0 };
+        state = { pending: 0, intended: undefined, timer: 0, invalid: false };
       states.set(form, state);
     }
     return state;
@@ -184,7 +191,7 @@
       const link = document.createElement("a");
       link.href = form.dataset.endpoint;
       link.textContent = "Открыть корзину";
-      say(form, ["Добавлено в корзину. ", link]);
+      say(form, ["Добавлено в корзину. ", link], { sticky: true });
     } else {
       say(form, `В корзине: ${after}`);
     }
@@ -227,14 +234,16 @@
       if (response.redirected || !(response.headers.get("content-type") ?? "").includes("json")) {
         // Сервер применил изменение, но ответил страницей: актуальное состояние покажет перезагрузка.
         location.reload();
-        return;
+        return false;
       }
       const result = await response.json();
       if (!result?.cart || !Array.isArray(result.cart.items)) throw new Error("Unexpected cart response shape");
       applyCart(result.cart);
       reportSaved(form, before, Number(result.count));
+      return true;
     } catch (error) {
       reportFailed(form, error);
+      return false;
     } finally {
       clearTimeout(timer);
     }
@@ -243,9 +252,10 @@
   const drain = async () => {
     if (draining) return;
     draining = true;
+    let success = true;
     while (queue.length > 0) {
       const task = queue.shift();
-      await perform(task);
+      success = await perform(task) && success;
       const state = stateOf(task.form);
       state.pending -= 1;
       if (state.pending === 0) {
@@ -254,18 +264,21 @@
       }
     }
     draining = false;
+    return success;
   };
 
   const enqueue = task => {
     if (queue.length >= MAX_QUEUED) {
       say(task.form, "Слишком много изменений подряд. Подождите секунду и повторите.", { error: true });
-      return;
+      stateOf(task.form).invalid = true;
+      return false;
     }
     stateOf(task.form).pending += 1;
     task.form.setAttribute("aria-busy", "true");
     say(task.form, "Сохраняем…", { sticky: true });
     queue.push(task);
-    drain();
+    if (!draining) queueResult = drain();
+    return true;
   };
 
   // Введённое число проверяется до отправки: в запрос попадает только целое от 0 до максимума.
@@ -273,21 +286,24 @@
     const input = form.querySelector(".quantity-input");
     const max = Number(form.dataset.max);
     const raw = input.value.trim();
+    const state = stateOf(form);
     delete input.dataset.dirty;
     if (!/^\d{1,4}$/.test(raw) || Number(raw) > max) {
       syncInput(form);
       say(form, `Введите число от 0 до ${max}.`, { error: true });
-      return;
+      state.invalid = true;
+      return false;
     }
     const quantity = Number(raw);
-    const state = stateOf(form);
+    state.invalid = false;
     // Enter даёт change, затем submit: второй вызов с тем же значением ничего не отправляет.
     if (quantity === state.intended || (quantity === Number(form.dataset.count) && state.pending === 0)) return;
     state.intended = quantity;
-    enqueue({ form, action: "SET", quantity });
+    return enqueue({ form, action: "SET", quantity });
   };
 
   const request = (form, action) => {
+    stateOf(form).invalid = false;
     stateOf(form).intended = undefined;
     if (action === "MINUS" && Number(form.dataset.count) === 0) return;
     enqueue({ form, action });
@@ -320,11 +336,42 @@
       else request(form, action);
     });
     if (!input) return;
-    input.addEventListener("input", () => { input.dataset.dirty = "true"; });
+    input.addEventListener("input", () => { input.dataset.dirty = "true"; stateOf(form).invalid = false; });
     input.addEventListener("change", () => commit(form));
     input.addEventListener("keydown", event => { if (event.key === "Escape") syncInput(form); });
     // Колесо над активным полем не должно менять количество.
     input.addEventListener("wheel", () => { if (document.activeElement === input) input.blur(); }, { passive: true });
+  };
+
+  const enhanceCheckout = form => {
+    const button = form.querySelector('button[type="submit"]');
+    const status = form.querySelector("[data-checkout-status]");
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      if (purchasing) return;
+      const quantities = [...document.querySelectorAll(".quantity-form")];
+      quantities.forEach(quantity => { if (quantity.querySelector("input[data-dirty]")) commit(quantity); });
+      if (quantities.some(quantity => stateOf(quantity).invalid)) {
+        status.textContent = "Проверьте количество перед оформлением заказа.";
+        return;
+      }
+      purchasing = true;
+      quantities.forEach(quantity => { quantity.inert = true; });
+      setDisabled(button, true);
+      status.textContent = "Сохраняем изменения корзины…";
+      // Покупка отправляется после всей очереди; один FOR UPDATE не сохраняет порядок HTTP-запросов.
+      const saved = await queueResult;
+      if (saved && !form.closest("[data-cart-layout]").hidden) {
+        status.textContent = "Оформляем заказ…";
+        form.submit();
+      } else {
+        status.textContent = saved ? "Корзина пуста." : "Покупка остановлена: изменение не подтверждено. Обновите страницу и проверьте корзину.";
+        purchasing = false;
+        quantities.forEach(quantity => { quantity.inert = false; });
+        setDisabled(button, false);
+        if (saved) document.querySelector("[data-cart-empty] h2")?.focus();
+      }
+    });
   };
 
   const start = () => {
@@ -336,6 +383,7 @@
     applyTheme();
     if ("fetch" in window && "AbortController" in window) {
       document.querySelectorAll(".quantity-form").forEach(enhance);
+      document.querySelectorAll("[data-checkout]").forEach(enhanceCheckout);
     }
     // Страница из кэша «назад/вперёд» хранит устаревшие количества.
     window.addEventListener("pageshow", event => { if (event.persisted) location.reload(); });

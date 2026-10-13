@@ -27,7 +27,7 @@
 <div><dt>Предметов</dt><dd data-cart-item-count th:text="${cart.itemCount}">0</dd></div>
 </dl>
 <p class="summary-total"><span>Итого</span><strong th:text="${@display.money(cart.total)}" th:attr="data-cart-total=${cart.total}"></strong></p>
-<form method="post" th:action="@{/buy}"><button class="button primary wide" type="submit">Оформить заказ</button></form>
+<form method="post" th:action="@{/buy}" data-checkout><button class="button primary wide" type="submit">Оформить заказ</button><p class="quiet-note" role="status" data-checkout-status></p></form>
 <p class="quiet-note">Оплата не проводится. Заказ сохранится в вашей истории.</p>
 </aside>
 </section>

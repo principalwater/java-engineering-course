@@ -138,6 +138,12 @@
         if (lineTotal) lineTotal.textContent = money(big(item.price) * big(item.count));
         return;
       }
+      // Промежуточный ноль не уничтожает форму, если для неё уже принято следующее изменение.
+      if (queue.some(task => task.form.dataset.itemId === row.dataset.productId)) {
+        row.dataset.count = "0";
+        row.querySelector("[data-line-total]").textContent = money(0n);
+        return;
+      }
       if (row.contains(document.activeElement)) {
         hadFocus = true;
         neighbour = row.nextElementSibling ?? row.previousElementSibling;
@@ -149,11 +155,12 @@
       node.dataset.cartTotal = String(total);
       node.textContent = money(total);
     });
-    if (lines.size === 0) {
-      layout.hidden = true;
-      const empty = document.querySelector("[data-cart-empty]");
+    const hasRows = layout.querySelector(".cart-line") !== null;
+    layout.hidden = !hasRows;
+    const empty = document.querySelector("[data-cart-empty]");
+    if (empty) empty.hidden = hasRows;
+    if (!hasRows) {
       if (empty) {
-        empty.hidden = false;
         if (hadFocus) empty.querySelector("h2")?.focus();
       }
     } else if (hadFocus) {
@@ -181,6 +188,10 @@
   };
 
   const reportSaved = (form, before, after) => {
+    if (stateOf(form).pending > 1) {
+      say(form, "Сохраняем…", { sticky: true });
+      return;
+    }
     if (!form.isConnected) {
       announce(`«${form.dataset.title}» удалено из корзины`);
       return;
@@ -240,7 +251,7 @@
       if (!result?.cart || !Array.isArray(result.cart.items)) throw new Error("Unexpected cart response shape");
       applyCart(result.cart);
       reportSaved(form, before, Number(result.count));
-      return true;
+      return result.cart;
     } catch (error) {
       reportFailed(form, error);
       return false;
@@ -253,9 +264,12 @@
     if (draining) return;
     draining = true;
     let success = true;
+    let lastCart = null;
     while (queue.length > 0) {
       const task = queue.shift();
-      success = await perform(task) && success;
+      const cart = await perform(task);
+      if (cart) lastCart = cart;
+      else success = false;
       const state = stateOf(task.form);
       state.pending -= 1;
       if (state.pending === 0) {
@@ -264,6 +278,7 @@
       }
     }
     draining = false;
+    if (lastCart) applyCart(lastCart);
     return success;
   };
 

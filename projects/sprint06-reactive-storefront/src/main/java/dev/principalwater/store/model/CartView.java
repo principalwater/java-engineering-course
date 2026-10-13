@@ -1,5 +1,6 @@
 package dev.principalwater.store.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -9,10 +10,12 @@ public record CartView(List<ItemView> items) {
         items = List.copyOf(items);
     }
 
+    @JsonProperty("total")
     public long total() {
         return items.stream().mapToLong(ItemView::total).reduce(0, Math::addExact);
     }
 
+    @JsonProperty("itemCount")
     public int itemCount() {
         return items.stream().mapToInt(ItemView::count).sum();
     }

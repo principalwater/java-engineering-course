@@ -18,17 +18,17 @@ repositories {
 
 dependencies {
     implementation platform(org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES)
-    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
     implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
-    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-data-r2dbc'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
-    implementation 'org.liquibase:liquibase-core'
-    runtimeOnly 'com.h2database:h2'
-    runtimeOnly 'org.postgresql:postgresql'
+    runtimeOnly 'io.r2dbc:r2dbc-h2'
+    runtimeOnly 'org.postgresql:r2dbc-postgresql'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'
+    testImplementation 'io.projectreactor:reactor-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
@@ -50,16 +50,16 @@ tasks.named('test') {
 }
 
 tasks.register('postgresTest', Test) {
-    description = 'Verify JPA and transactional contracts against isolated PostgreSQL'
+    description = 'Verify R2DBC and transactional contracts against isolated PostgreSQL'
     group = 'verification'
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
     useJUnitPlatform()
     include '**/StoreRepositoryTest.class', '**/StoreServiceTest.class'
-    // Отдельный диалект проверяет реальные блокировки и ограничения, без повторения MVC/unit-сценариев.
+    // Отдельный диалект проверяет реальные блокировки и ограничения, без повторения WebFlux/unit-сценариев.
     outputs.upToDateWhen { false }
     doFirst {
-        if (!System.getenv('STORE_TEST_DB_URL')?.startsWith('jdbc:postgresql:')
+        if (!System.getenv('STORE_TEST_DB_URL')?.startsWith('r2dbc:postgresql:')
                 || !System.getenv('STORE_TEST_DB_PASSWORD')) {
             throw new GradleException('postgresTest requires an isolated PostgreSQL URL and password')
         }

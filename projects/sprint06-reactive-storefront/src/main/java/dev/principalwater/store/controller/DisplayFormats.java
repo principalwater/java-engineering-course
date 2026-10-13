@@ -32,4 +32,8 @@ public class DisplayFormats {
     public String time(Instant value) {
         return time.format(value);
     }
+
+    public String zone() {
+        return time.getZone().getId();
+    }
 }

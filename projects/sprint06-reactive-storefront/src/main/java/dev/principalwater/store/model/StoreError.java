@@ -11,6 +11,7 @@ public enum StoreError {
     PRODUCT_NOT_FOUND(HttpStatus.NOT_FOUND, "Product not found"),
     ORDER_NOT_FOUND(HttpStatus.NOT_FOUND, "Order not found"),
     CART_NOT_FOUND(HttpStatus.NOT_FOUND, "Cart not found"),
+    INVALID_QUANTITY(HttpStatus.BAD_REQUEST, "Product quantity must be an integer between 0 and " + StoreLimits.MAX_ITEM_QUANTITY),
     QUANTITY_LIMIT(HttpStatus.CONFLICT, "Product quantity exceeds the cart limit"),
     CART_LIMIT(HttpStatus.CONFLICT, "Cart contains too many different products"),
     EMPTY_CART(HttpStatus.CONFLICT, "Cannot purchase an empty cart"),

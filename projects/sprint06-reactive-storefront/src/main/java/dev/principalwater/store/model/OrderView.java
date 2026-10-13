@@ -8,8 +8,8 @@ public record OrderView(long id, Instant createdAt, List<OrderLineView> items, l
         items = List.copyOf(items);
     }
 
-    public static OrderView from(PurchaseOrder order) {
-        List<OrderLineView> items = order.getLines().stream().map(OrderLineView::from).toList();
-        return new OrderView(order.getId(), order.getCreatedAt(), items, order.getTotalSum());
+    public static OrderView from(PurchaseOrder order, List<OrderLine> lines) {
+        return new OrderView(order.id(), order.createdAt(), lines.stream().map(OrderLineView::from).toList(),
+                order.totalSum());
     }
 }

@@ -1,17 +1,13 @@
 package dev.principalwater.store.dao;
 
 import dev.principalwater.store.model.ShoppingCart;
-import jakarta.persistence.LockModeType;
-import java.util.Optional;
 import java.util.UUID;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Lock;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
+import org.springframework.data.r2dbc.repository.Query;
+import org.springframework.data.repository.reactive.ReactiveCrudRepository;
+import reactor.core.publisher.Mono;
 
-public interface CartRepository extends JpaRepository<ShoppingCart, UUID> {
-    // Блокируется только корень корзины: FOR UPDATE с внешним JOIN непереносим между H2 и PostgreSQL.
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select cart from ShoppingCart cart where cart.id = :id")
-    Optional<ShoppingCart> lockById(@Param("id") UUID id);
+public interface CartRepository extends ReactiveCrudRepository<ShoppingCart, UUID> {
+    // Корень корзины блокируется без JOIN; тот же SQL поддерживают H2 и PostgreSQL.
+    @Query("SELECT id, version FROM shopping_carts WHERE id = :id FOR UPDATE")
+    Mono<ShoppingCart> lockById(UUID id);
 }

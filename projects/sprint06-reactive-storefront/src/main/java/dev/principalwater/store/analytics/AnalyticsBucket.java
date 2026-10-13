@@ -3,7 +3,7 @@ package dev.principalwater.store.analytics;
 import com.fasterxml.jackson.annotation.JsonCreator;
 
 public enum AnalyticsBucket {
-    DAILY(1), PRODUCT(2), TOTAL(3);
+    DAILY(1), PRODUCT(2), TOTAL(3), PREVIOUS(4);
 
     private final int code;
 

@@ -1,5 +1,5 @@
 package dev.principalwater.store.model;
 
 public enum CartAction {
-    PLUS, MINUS, DELETE
+    PLUS, MINUS, DELETE, SET
 }

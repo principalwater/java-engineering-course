@@ -9,11 +9,11 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Comparator;
 import java.util.List;
-import java.util.OptionalInt;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Mono;
 
 @Service
 public class AnalyticsDashboardService {
@@ -32,43 +32,40 @@ public class AnalyticsDashboardService {
         this.clock = clock;
     }
 
-    public AnalyticsDashboard load(AnalyticsPeriod period) {
-        var status = queue.status();
-        var client = clickhouse.getIfAvailable();
-        if (client == null) {
-            return AnalyticsDashboard.inactive(AnalyticsDashboard.State.DISABLED, period, status);
-        }
-        try {
-            return available(period, status, client);
-        } catch (StoreException exception) {
-            if (exception.getError() != StoreError.ANALYTICS_UNAVAILABLE) {
-                throw exception;
+    public Mono<AnalyticsDashboard> load(AnalyticsPeriod period) {
+        return Mono.defer(() -> queue.status().flatMap(status -> {
+            var client = clickhouse.getIfAvailable();
+            if (client == null) {
+                return Mono.just(AnalyticsDashboard.inactive(AnalyticsDashboard.State.DISABLED, period, status));
             }
-            return AnalyticsDashboard.inactive(AnalyticsDashboard.State.UNAVAILABLE, period, status);
-        }
+            var end = LocalDate.now(clock.withZone(ZoneOffset.UTC));
+            var start = end.minusDays(period.getDays() - 1L);
+            return queue.sourceId().flatMap(source -> client.dashboard(source, start, end))
+                    .map(rows -> available(period, status, start, end, rows))
+                    .onErrorResume(this::isUnavailable, error -> Mono.just(AnalyticsDashboard.inactive(
+                            AnalyticsDashboard.State.UNAVAILABLE, period, status)));
+        }));
     }
 
-    public OptionalInt sync() {
-        var coordinator = delivery.getIfAvailable();
-        if (coordinator == null) {
-            throw new StoreException(StoreError.ANALYTICS_UNAVAILABLE);
-        }
-        try {
-            return OptionalInt.of(coordinator.flush());
-        } catch (StoreException exception) {
-            if (exception.getError() != StoreError.ANALYTICS_UNAVAILABLE) {
-                throw exception;
+    public Mono<DeliveryResult> sync() {
+        return Mono.defer(() -> {
+            var coordinator = delivery.getIfAvailable();
+            if (coordinator == null) {
+                return Mono.error(new StoreException(StoreError.ANALYTICS_UNAVAILABLE));
             }
-            return OptionalInt.empty();
-        }
+            return coordinator.flush().onErrorResume(this::isUnavailable,
+                    error -> Mono.just(DeliveryResult.unavailable()));
+        });
     }
 
-    private AnalyticsDashboard available(AnalyticsPeriod period, QueueStatus status, ClickHouseClient client) {
-        var end = LocalDate.now(clock.withZone(ZoneOffset.UTC));
-        var start = end.minusDays(period.getDays() - 1L);
-        var rows = client.dashboard(queue.sourceId(), start, end);
-        var total = rows.stream().filter(row -> row.bucket() == AnalyticsBucket.TOTAL).findFirst()
-                .orElseThrow(() -> new StoreException(StoreError.ANALYTICS_UNAVAILABLE));
+    private boolean isUnavailable(Throwable error) {
+        return error instanceof StoreException failure && failure.getError() == StoreError.ANALYTICS_UNAVAILABLE;
+    }
+
+    private AnalyticsDashboard available(AnalyticsPeriod period, QueueStatus status, LocalDate start,
+                                         LocalDate end, List<AnalyticsRow> rows) {
+        var total = summary(rows, AnalyticsBucket.TOTAL);
+        var previous = summary(rows, AnalyticsBucket.PREVIOUS);
         var byDate = rows.stream().filter(row -> row.bucket() == AnalyticsBucket.DAILY)
                 .collect(Collectors.toMap(row -> LocalDate.parse(row.day()), Function.identity()));
         long maximum = byDate.values().stream().mapToLong(AnalyticsRow::orderValue).max().orElse(0);
@@ -87,6 +84,12 @@ public class AnalyticsDashboardService {
                         .thenComparing(AnalyticsRow::sku))
                 .limit(TOP_PRODUCTS).toList();
         return new AnalyticsDashboard(AnalyticsDashboard.State.AVAILABLE, period, status,
-                new AnalyticsSummary(total.orders(), total.units(), total.orderValue()), daily, products);
+                total, previous, daily, products);
+    }
+
+    private AnalyticsSummary summary(List<AnalyticsRow> rows, AnalyticsBucket bucket) {
+        var total = rows.stream().filter(row -> row.bucket() == bucket).findFirst()
+                .orElseThrow(() -> new StoreException(StoreError.ANALYTICS_UNAVAILABLE));
+        return new AnalyticsSummary(total.orders(), total.units(), total.orderValue());
     }
 }

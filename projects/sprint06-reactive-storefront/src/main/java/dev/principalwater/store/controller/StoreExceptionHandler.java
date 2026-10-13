@@ -4,53 +4,61 @@ import dev.principalwater.store.model.StoreError;
 import dev.principalwater.store.model.StoreException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.io.buffer.DataBufferLimitException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
-import org.springframework.orm.ObjectOptimisticLockingFailureException;
-import org.springframework.web.bind.ServletRequestBindingException;
+import org.springframework.http.MediaType;
+import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
-import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
-import org.springframework.web.multipart.MaxUploadSizeExceededException;
-import org.springframework.web.servlet.ModelAndView;
+import org.springframework.web.reactive.result.view.Rendering;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.server.ServerWebExchange;
+import org.springframework.web.server.ServerWebInputException;
 
 @ControllerAdvice(basePackages = "dev.principalwater.store.controller")
 public class StoreExceptionHandler {
     private static final Logger LOG = LoggerFactory.getLogger(StoreExceptionHandler.class);
 
     @ExceptionHandler(StoreException.class)
-    public ModelAndView domain(StoreException exception) {
-        return error(exception.getError().getStatus(), exception.getMessage());
+    public Object domain(StoreException exception, ServerWebExchange exchange) {
+        return error(exception.getError().getStatus(), exception.getMessage(), exchange);
     }
 
-    @ExceptionHandler({MethodArgumentTypeMismatchException.class, ServletRequestBindingException.class,
-            HandlerMethodValidationException.class})
-    public ModelAndView invalid(Exception exception) {
-        return error(HttpStatus.BAD_REQUEST, StoreError.INVALID_REQUEST.getMessage());
+    @ExceptionHandler({ServerWebInputException.class, HandlerMethodValidationException.class})
+    public Object invalid(Exception exception, ServerWebExchange exchange) {
+        return error(HttpStatus.BAD_REQUEST, StoreError.INVALID_REQUEST.getMessage(), exchange);
     }
 
-    @ExceptionHandler(MaxUploadSizeExceededException.class)
-    public ModelAndView upload(MaxUploadSizeExceededException exception) {
-        return error(HttpStatus.PAYLOAD_TOO_LARGE, StoreError.CATALOG_TOO_LARGE.getMessage());
+    @ExceptionHandler(DataBufferLimitException.class)
+    public Object upload(DataBufferLimitException exception, ServerWebExchange exchange) {
+        return error(HttpStatus.PAYLOAD_TOO_LARGE, StoreError.CATALOG_TOO_LARGE.getMessage(), exchange);
     }
 
-    @ExceptionHandler({ObjectOptimisticLockingFailureException.class, DataIntegrityViolationException.class})
-    public ModelAndView conflict(Exception exception) {
-        return error(HttpStatus.CONFLICT, "The catalog changed concurrently; reload and try again");
+    @ExceptionHandler({OptimisticLockingFailureException.class, DataIntegrityViolationException.class})
+    public Object conflict(Exception exception, ServerWebExchange exchange) {
+        return error(HttpStatus.CONFLICT, "The catalog changed concurrently; reload and try again", exchange);
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public Object status(ResponseStatusException exception, ServerWebExchange exchange) {
+        return error(HttpStatus.valueOf(exception.getStatusCode().value()), "Request could not be completed", exchange);
     }
 
     @ExceptionHandler(Exception.class)
-    public ModelAndView unexpected(Exception exception) {
+    public Object unexpected(Exception exception, ServerWebExchange exchange) {
         LOG.error("Store request failed", exception);
-        return error(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
+        return error(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error", exchange);
     }
 
-    private ModelAndView error(HttpStatus status, String message) {
-        var result = new ModelAndView("error");
-        result.setStatus(status);
-        result.addObject("status", status.value());
-        result.addObject("message", message);
-        return result;
+    private Object error(HttpStatus status, String message, ServerWebExchange exchange) {
+        if (exchange.getRequest().getHeaders().getAccept().stream().anyMatch(MediaType.APPLICATION_JSON::equalsTypeAndSubtype)) {
+            return ResponseEntity.status(status).body(ProblemDetail.forStatusAndDetail(status, message));
+        }
+        return Rendering.view("error").status(status).modelAttribute("status", status.value())
+                .modelAttribute("message", message).build();
     }
 }

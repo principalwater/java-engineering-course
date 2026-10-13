@@ -1,7 +1,6 @@
 package dev.principalwater.store.model;
 
 import java.util.ArrayList;
-import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -19,18 +18,6 @@ class StoreModelTest {
         var cart = new CartView(items);
         assertEquals(4_950_000_000L, cart.total());
         assertEquals(4950, cart.itemCount());
-    }
-
-    @Test
-    void rejectedIncrementKeepsTheExistingQuantity() {
-        var product = new Product(new ProductInput("keyboard", "Keyboard", "Description", ImageAsset.KEYBOARD, 2500L));
-        var line = new CartLine(new ShoppingCart(UUID.randomUUID()), product);
-        for (int attempt = 1; attempt < 99; attempt++) {
-            line.increment();
-        }
-        var error = assertThrows(StoreException.class, line::increment);
-        assertEquals(StoreError.QUANTITY_LIMIT, error.getError());
-        assertEquals(99, line.getQuantity());
     }
 
     @ParameterizedTest

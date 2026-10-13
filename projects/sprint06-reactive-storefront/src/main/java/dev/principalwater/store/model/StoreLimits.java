@@ -13,7 +13,6 @@ public final class StoreLimits {
     public static final int MAX_CART_ITEMS = 50;
     public static final int MAX_IMPORT_ITEMS = 1000;
     public static final int MAX_IMPORT_BYTES = 1024 * 1024;
-    public static final int JPA_BATCH_SIZE = 50;
     public static final List<Integer> PAGE_SIZES = List.of(2, 5, 10, 20, 50, 100);
 
     private StoreLimits() {

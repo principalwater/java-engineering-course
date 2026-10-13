@@ -1,70 +1,94 @@
 package dev.principalwater.store.service;
 
 import dev.principalwater.store.dao.CartLineRepository;
+import dev.principalwater.store.dao.CartQueries;
 import dev.principalwater.store.dao.CartRepository;
 import dev.principalwater.store.dao.ProductRepository;
 import dev.principalwater.store.model.CartAction;
 import dev.principalwater.store.model.CartLine;
 import dev.principalwater.store.model.CartView;
-import dev.principalwater.store.model.ItemView;
 import dev.principalwater.store.model.ShoppingCart;
 import dev.principalwater.store.model.StoreError;
 import dev.principalwater.store.model.StoreException;
 import dev.principalwater.store.model.StoreLimits;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.reactive.TransactionalOperator;
+import reactor.core.publisher.Mono;
 
 @Service
-@Transactional(readOnly = true)
 public class CartService {
     private final CartRepository carts;
     private final CartLineRepository lines;
+    private final CartQueries queries;
     private final ProductRepository products;
+    private final TransactionalOperator transactions;
 
-    public CartService(CartRepository carts, CartLineRepository lines, ProductRepository products) {
+    public CartService(CartRepository carts, CartLineRepository lines, CartQueries queries,
+                       ProductRepository products, TransactionalOperator transactions) {
         this.carts = carts;
         this.lines = lines;
+        this.queries = queries;
         this.products = products;
+        this.transactions = transactions;
     }
 
-    @Transactional
-    public UUID identify(UUID cookieId) {
-        if (cookieId != null && carts.existsById(cookieId)) {
-            return cookieId;
-        }
-        return carts.save(new ShoppingCart(UUID.randomUUID())).getId();
+    public Mono<UUID> identify(UUID cookieId) {
+        return Mono.defer(() -> cookieId == null ? create() : carts.existsById(cookieId)
+                .flatMap(exists -> exists ? Mono.just(cookieId) : create()));
     }
 
-    public CartView view(UUID cartId) {
-        return new CartView(lines.findByCartIdOrderById(cartId).stream()
-                .map(line -> ItemView.from(line.getProduct(), line.getQuantity())).toList());
+    private Mono<UUID> create() {
+        return carts.save(new ShoppingCart(UUID.randomUUID())).map(ShoppingCart::id);
     }
 
-    @Transactional
-    public void change(UUID cartId, long productId, CartAction action) {
-        var cart = carts.lockById(cartId).orElseThrow(() -> new StoreException(StoreError.CART_NOT_FOUND));
-        var product = products.findById(productId).orElseThrow(() -> new StoreException(StoreError.PRODUCT_NOT_FOUND));
-        var existing = lines.findByCartIdAndProductId(cartId, productId);
-        switch (action) {
-            case PLUS -> {
-                if (existing.isPresent()) {
-                    existing.get().increment();
-                } else {
-                    if (lines.countByCartId(cartId) >= StoreLimits.MAX_CART_ITEMS) {
-                        throw new StoreException(StoreError.CART_LIMIT);
-                    }
-                    lines.save(new CartLine(cart, product));
-                }
+    public Mono<CartView> view(UUID cartId) {
+        return queries.items(cartId).map(item -> item.view()).collectList().map(CartView::new);
+    }
+
+    public Mono<CartView> change(UUID cartId, long productId, CartAction action) {
+        return change(cartId, productId, action, null);
+    }
+
+    public Mono<CartView> change(UUID cartId, long productId, CartAction action, Integer quantity) {
+        return Mono.defer(() -> {
+            if (productId <= 0 || action == null) {
+                return Mono.error(new StoreException(StoreError.INVALID_REQUEST));
             }
-            case MINUS -> existing.ifPresent(line -> {
-                if (line.getQuantity() == 1) {
-                    lines.delete(line);
-                } else {
-                    line.decrement();
-                }
-            });
-            case DELETE -> existing.ifPresent(lines::delete);
+            if (action == CartAction.SET && (quantity == null || quantity < 0 || quantity > StoreLimits.MAX_ITEM_QUANTITY)) {
+                return Mono.error(new StoreException(StoreError.INVALID_QUANTITY));
+            }
+            // Блокировка живёт до terminal/cancel всей операции, включая чтение возвращаемой корзины.
+            return carts.lockById(cartId).switchIfEmpty(Mono.error(new StoreException(StoreError.CART_NOT_FOUND)))
+                    .then(products.findById(productId)
+                            .switchIfEmpty(Mono.error(new StoreException(StoreError.PRODUCT_NOT_FOUND))))
+                    .then(lines.findByCartIdAndProductId(cartId, productId).map(Optional::of)
+                            .defaultIfEmpty(Optional.empty()))
+                    .flatMap(existing -> update(cartId, productId, existing.orElse(null), action, quantity))
+                    .then(view(cartId)).as(transactions::transactional);
+        });
+    }
+
+    private Mono<Void> update(UUID cartId, long productId, CartLine line, CartAction action, Integer quantity) {
+        int count = line == null ? 0 : line.quantity();
+        int target = switch (action) {
+            case PLUS -> count + 1;
+            case MINUS -> Math.max(0, count - 1);
+            case DELETE -> 0;
+            case SET -> quantity;
+        };
+        if (target > StoreLimits.MAX_ITEM_QUANTITY) {
+            return Mono.error(new StoreException(StoreError.QUANTITY_LIMIT));
         }
+        if (target == 0) {
+            return line == null ? Mono.empty() : lines.delete(line);
+        }
+        if (line != null) {
+            return lines.save(line.withQuantity(target)).then();
+        }
+        return lines.countByCartId(cartId).flatMap(total -> total >= StoreLimits.MAX_CART_ITEMS
+                ? Mono.error(new StoreException(StoreError.CART_LIMIT))
+                : lines.save(new CartLine(cartId, productId, target)).then());
     }
 }

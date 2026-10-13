@@ -6,6 +6,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.web.reactive.function.client.WebClient;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(name = "store.analytics.enabled", havingValue = "true")
@@ -13,7 +14,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 public class AnalyticsConfig {
     @Bean(destroyMethod = "close")
-    public ClickHouseClient clickHouseClient(AnalyticsProperties properties, ObjectMapper json) {
-        return new ClickHouseClient(properties, json);
+    public ClickHouseClient clickHouseClient(AnalyticsProperties properties, ObjectMapper json, WebClient.Builder builder) {
+        return new ClickHouseClient(properties, json, builder);
     }
 }

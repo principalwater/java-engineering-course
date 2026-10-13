@@ -2,10 +2,9 @@ package dev.principalwater.store.dao;
 
 import dev.principalwater.store.model.Product;
 import java.util.Collection;
-import java.util.List;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.repository.reactive.ReactiveCrudRepository;
+import reactor.core.publisher.Flux;
 
-public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpecificationExecutor<Product> {
-    List<Product> findAllBySkuIn(Collection<String> skus);
+public interface ProductRepository extends ReactiveCrudRepository<Product, Long> {
+    Flux<Product> findAllBySkuIn(Collection<String> skus);
 }

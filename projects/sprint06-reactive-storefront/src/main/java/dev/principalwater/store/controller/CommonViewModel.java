@@ -5,9 +5,13 @@ import dev.principalwater.store.model.StoreLimits;
 import dev.principalwater.store.service.CartService;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.http.HttpMethod;
+import org.springframework.security.web.server.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.RequestAttribute;
+import org.springframework.web.server.ServerWebExchange;
+import reactor.core.publisher.Mono;
 
 @ControllerAdvice(basePackages = "dev.principalwater.store.controller")
 public class CommonViewModel {
@@ -18,8 +22,14 @@ public class CommonViewModel {
     }
 
     @ModelAttribute("cart")
-    public CartView cart(@RequestAttribute(CartIdentityInterceptor.ATTRIBUTE_NAME) UUID cartId) {
+    public Mono<CartView> cart(@RequestAttribute(CartIdentityFilter.ATTRIBUTE_NAME) UUID cartId) {
         return carts.view(cartId);
+    }
+
+    @ModelAttribute("_csrf")
+    public Mono<CsrfToken> csrf(ServerWebExchange exchange) {
+        Mono<CsrfToken> token = exchange.getAttribute(CsrfToken.class.getName());
+        return token == null ? Mono.empty() : token;
     }
 
     @ModelAttribute("pageSizes")
@@ -30,5 +40,14 @@ public class CommonViewModel {
     @ModelAttribute("maxQuantity")
     public int maxQuantity() {
         return StoreLimits.MAX_ITEM_QUANTITY;
+    }
+
+    @ModelAttribute("notice")
+    public Mono<String> notice(ServerWebExchange exchange) {
+        // Redirect тоже разрешает реактивную модель: POST не должен забрать уведомление до следующего GET.
+        if (exchange.getRequest().getMethod() != HttpMethod.GET) {
+            return Mono.empty();
+        }
+        return exchange.getSession().flatMap(session -> Mono.justOrEmpty((String) session.getAttributes().remove("notice")));
     }
 }

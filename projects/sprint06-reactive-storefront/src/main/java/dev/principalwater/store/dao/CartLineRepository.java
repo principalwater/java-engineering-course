@@ -1,17 +1,14 @@
 package dev.principalwater.store.dao;
 
 import dev.principalwater.store.model.CartLine;
-import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
-import org.springframework.data.jpa.repository.EntityGraph;
-import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.repository.reactive.ReactiveCrudRepository;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
-public interface CartLineRepository extends JpaRepository<CartLine, Long> {
-    @EntityGraph(attributePaths = "product")
-    List<CartLine> findByCartIdOrderById(UUID cartId);
-
-    Optional<CartLine> findByCartIdAndProductId(UUID cartId, long productId);
-
-    long countByCartId(UUID cartId);
+public interface CartLineRepository extends ReactiveCrudRepository<CartLine, Long> {
+    Flux<CartLine> findByCartIdOrderById(UUID cartId);
+    Mono<CartLine> findByCartIdAndProductId(UUID cartId, long productId);
+    Mono<Long> countByCartId(UUID cartId);
+    Mono<Void> deleteByCartId(UUID cartId);
 }

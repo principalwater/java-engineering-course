@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.reactive.result.view.Rendering;
+import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 @Controller
@@ -35,7 +36,10 @@ public class AccountController {
     }
 
     @GetMapping("/account/login")
-    public String login() {
+    public String login(ServerWebExchange exchange, Model model) {
+        // Thymeleaf param — lazy wrapper; наличие флага читаем из настоящей карты параметров WebFlux.
+        model.addAttribute("loginError", exchange.getRequest().getQueryParams().containsKey("error"));
+        model.addAttribute("registered", exchange.getRequest().getQueryParams().containsKey("registered"));
         return "account/login";
     }
 

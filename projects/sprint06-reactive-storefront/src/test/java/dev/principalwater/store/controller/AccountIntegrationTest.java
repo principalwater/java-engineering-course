@@ -133,7 +133,9 @@ class AccountIntegrationTest extends DatabaseTestBase {
         assertEquals(1L, await(users.count()));
         assertEquals(cartCount, await(carts.count()));
 
-        browser.get("/account/login", HttpStatus.OK);
+        String loginPage = browser.get("/account/login", HttpStatus.OK);
+        assertFalse(loginPage.contains("Не удалось войти."));
+        assertFalse(loginPage.contains("Аккаунт создан."));
         browser.post("/account/login", Map.of("username", "alice.shop", "password", PASSWORD),
                 false, HttpStatus.FORBIDDEN);
         assertTrue(browser.get("/profile", HttpStatus.OK).contains("Сейчас вы гость"));
@@ -141,6 +143,10 @@ class AccountIntegrationTest extends DatabaseTestBase {
         var failure = browser.post("/account/login", Map.of("username", "alice.shop", "password", "a wrong password"),
                 true, HttpStatus.FOUND);
         assertEquals("/account/login?error", failure.getResponseHeaders().getFirst(HttpHeaders.LOCATION));
+        assertTrue(browser.get("/account/login?error", HttpStatus.OK).contains("Не удалось войти."));
+        assertFalse(browser.get("/account/login?error", HttpStatus.OK).contains("Аккаунт создан."));
+        assertTrue(browser.get("/account/login?registered", HttpStatus.OK).contains("Аккаунт создан."));
+        assertFalse(browser.get("/account/login?registered", HttpStatus.OK).contains("Не удалось войти."));
         assertTrue(browser.get("/profile", HttpStatus.OK).contains("Сейчас вы гость"));
         browser.get("/account/login", HttpStatus.OK);
         login(browser, "ALICE.SHOP", PASSWORD);

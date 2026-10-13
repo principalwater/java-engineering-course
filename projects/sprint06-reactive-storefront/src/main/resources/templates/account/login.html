@@ -5,8 +5,8 @@
 <header th:replace="~{fragments :: header('profile')}"></header>
 <main id="main" class="account-page">
 <div class="page-heading"><h1>Войти в мастерскую</h1><p class="lead">Корзина и заказы вашего аккаунта доступны в любом браузере.</p></div>
-<div class="notice" role="status" th:if="${param.registered != null}">Аккаунт создан. Войдите с вашим логином и паролем.</div>
-<p class="account-error" role="alert" th:if="${param.error != null}">Не удалось войти. Проверьте логин и пароль.</p>
+<div class="notice" role="status" th:if="${registered}">Аккаунт создан. Войдите с вашим логином и паролем.</div>
+<p class="account-error" role="alert" th:if="${loginError}">Не удалось войти. Проверьте логин и пароль.</p>
 <form class="account-form" method="post" th:action="@{/account/login}">
 <div class="account-field"><label for="username">Логин</label><input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required th:pattern="${usernamePattern}" th:maxlength="${usernameMaxLength}" aria-describedby="login-hint"><p id="login-hint">Логин не зависит от регистра букв.</p></div>
 <div class="account-field"><label for="password">Пароль</label><input id="password" name="password" type="password" autocomplete="current-password" required th:minlength="${passwordMinLength}" th:maxlength="${passwordMaxLength}"></div>

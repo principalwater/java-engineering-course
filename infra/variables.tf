@@ -2,7 +2,7 @@ variable "deployment" {
   description = "One independently managed local stack."
   type        = string
   validation {
-    condition     = contains(["sprint03", "sprint04", "sprint05-postgresql", "sprint05-h2", "docker-exercise", "mvc-exercise"], var.deployment)
+    condition     = contains(["sprint03", "sprint04", "sprint05-postgresql", "sprint05-h2", "sprint06-postgresql", "sprint06-h2", "docker-exercise", "mvc-exercise"], var.deployment)
     error_message = "Select an implemented project or exercise deployment."
   }
 }

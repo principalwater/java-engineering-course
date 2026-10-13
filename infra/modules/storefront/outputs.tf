@@ -1,5 +1,5 @@
 output "deployment" {
-  description = "Embedded Tomcat endpoints and independently managed service names."
+  description = "Embedded server endpoints and independently managed service names."
   value = {
     name          = var.stack_name
     frontend_url  = "http://127.0.0.1:${var.http_port}"

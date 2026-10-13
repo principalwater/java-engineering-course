@@ -18,12 +18,14 @@
 | `sprint04` | `module.sprint04[0]` | [Spring Boot JAR](../projects/sprint04-spring-boot-blog/) | `28084` | `29084` | `28124` |
 | `sprint05-postgresql` | `module.sprint05["sprint05-postgresql"]` | [Витрина с PostgreSQL](../projects/sprint05-storefront/) | `28085` | Та же точка входа | `28125` |
 | `sprint05-h2` | `module.sprint05["sprint05-h2"]` | [Витрина с H2](../projects/sprint05-storefront/) | `28086` | Та же точка входа | `28126` |
+| `sprint06-postgresql` | `module.sprint06["sprint06-postgresql"]` | [Реактивная витрина с PostgreSQL](../projects/sprint06-reactive-storefront/) | `28087` | Та же точка входа | `28127` |
+| `sprint06-h2` | `module.sprint06["sprint06-h2"]` | [Реактивная витрина с H2](../projects/sprint06-reactive-storefront/) | `28088` | Та же точка входа | `28128` |
 | `docker-exercise` | `module.docker_exercise[0]` | [Docker: маршрутизация и JDBC](../exercises/supplements/docker/) | `28380` | Внутри сети | - |
 | `mvc-exercise` | `module.mvc_exercise[0]` | [MVC/JDBC WAR с H2](../exercises/sprint03/spring-mvc-jdbc/) | `28081/spring-web-demo` | Та же точка входа | - |
 
 Все опубликованные порты привязаны к `127.0.0.1`; порты БД доступны внутри сети своего стенда. Имена начинаются с `java-tofu-<selector>`. Существующие ресурсы Compose и их тома БД не подключаются к управлению OpenTofu.
 
-Два экземпляра модуля [blog](modules/blog/) переиспользуют одинаковую конфигурацию БД, фронтенда и аналитики. Параметр `spring_boot` сохраняет различия проектов: WAR/Tomcat или Executable JAR, имя файла пароля, настройку CORS и endpoint готовности. Модуль [postgres](modules/postgres/) используется блогами, витриной с PostgreSQL и [Docker-упражнением](modules/docker-exercise/); [MVC-упражнение](modules/mvc-exercise/) сохраняет встроенную H2. У хранилища блога отдельный жизненный цикл: отключение аналитики удаляет её контейнеры, но оставляет защищённый том. Пустой том создаётся и в случае, когда аналитика ещё не включалась. [Витрина](modules/storefront/) выбирает профиль PostgreSQL/H2 и обслуживает HTML встроенным Tomcat; её ClickHouse получает факты через outbox. При H2 отдельный контейнер БД не создаётся, новый процесс получает новый UUID набора данных.
+Два экземпляра модуля [blog](modules/blog/) переиспользуют одинаковую конфигурацию БД, фронтенда и аналитики. Параметр `spring_boot` сохраняет различия проектов: WAR/Tomcat или Executable JAR, имя файла пароля, настройку CORS и endpoint готовности. Модуль [postgres](modules/postgres/) используется блогами, витриной с PostgreSQL и [Docker-упражнением](modules/docker-exercise/); [MVC-упражнение](modules/mvc-exercise/) сохраняет встроенную H2. У хранилища блога отдельный жизненный цикл: отключение аналитики удаляет её контейнеры, но оставляет защищённый том. Пустой том создаётся и в случае, когда аналитика ещё не включалась. [Витрина](modules/storefront/) выбирает профиль PostgreSQL/H2; её ClickHouse получает факты через outbox. Спринт 5 использует JDBC и Tomcat, спринт 6 — native R2DBC и Netty. Параметры `database_protocol`, `database_password_property` и `session_cookie_property` сохраняют различия URL, configtree и сессионных cookies. Defaults совместимы со спринтом 5; оба спринта и каждый вариант БД имеют отдельные namespaces cookies. При H2 отдельный контейнер БД не создаётся, новый процесс получает новый UUID набора данных.
 
 ```mermaid
 flowchart LR
@@ -58,7 +60,7 @@ python3 infra/deploy.py sprint04 apply --analytics
 python3 infra/deploy.py sprint04 status
 ```
 
-Откройте [блог на Spring Boot](http://127.0.0.1:28084). Для другого стенда выберите его селектор; для базового блога уберите `--analytics`. Значение этой опции должно совпадать при подготовке плана и его применении.
+Откройте [блог на Spring Boot](http://127.0.0.1:28084). Для другого стенда выберите его селектор; для базового блога уберите `--analytics`. Реактивная витрина запускается селекторами `sprint06-postgresql` и `sprint06-h2`, когда её исходники доступны в checkout. В PostgreSQL-варианте используется `r2dbc:postgresql://db:5432/storefront` и файл `/run/secrets/spring.r2dbc.password`; H2 создаётся в самом приложении. Значение этой опции должно совпадать при подготовке плана и его применении.
 
 Скрипт определяет локальный Docker socket из активного контекста, инициализирует выбранный backend, выполняет `validate`, сохраняет план и проверяет его безопасность. `apply` применяет именно сохранённый план. Изменение исходников, конфигурации, checkout или параметров деплоя требует нового плана. После успешного применения файл плана удаляется, чтобы исключить случайный повтор.
 
@@ -87,11 +89,15 @@ tofu fmt -check -recursive infra
 python3 -m unittest discover -s infra/tests -v
 TF_DATA_DIR="$HOME/.local/state/java-engineering-course/sprint04/providers" tofu -chdir=infra test
 python3 infra/verify.py sprint04 --analytics
+
+python3 infra/deploy.py sprint06-postgresql plan --analytics
+python3 infra/deploy.py sprint06-postgresql apply --analytics
+python3 infra/verify.py sprint06-postgresql --analytics
 ```
 
-Проверка настоящего окружения проходит путь HTTP/JDBC, создаёт собственную контрольную запись, готовит замену только контейнера БД, применяет сохранённый план и повторно читает эту запись. Затем удаляет свою запись и требует пустого итогового плана. Вариант MVC проверяет настоящий servlet/H2 endpoint и повторный план; сохранность данных H2 после пересоздания процесса не гарантируется.
+Проверка настоящего окружения проходит путь HTTP и native JDBC/R2DBC, создаёт собственную контрольную запись, готовит замену только контейнера БД, применяет сохранённый план и повторно читает эту запись. Затем удаляет свою запись и требует пустого итогового плана. Вариант MVC проверяет настоящий servlet/H2 endpoint и повторный план; сохранность данных H2 после пересоздания процесса не гарантируется.
 
-Локально проверены все шесть селекторов. Вариант Boot также переиспользует полный REST smoke-сценарий проекта. CI проверяет форматирование, штатные тесты конфигурации, правила безопасности плана и настоящий деплой Docker-упражнения с пересозданием БД. Проверка `infrastructure` входит в условия `/approve`.
+Локально проверены шесть селекторов спринтов 3–5 и двух упражнений. Для спринта 6 выполнены mock-проверки native R2DBC/H2, password mount и изоляции cookies; они не подтверждают реальную связность Netty/PostgreSQL/ClickHouse. Вариант Boot также переиспользует полный REST smoke-сценарий проекта. CI проверяет форматирование, штатные тесты конфигурации, правила безопасности плана и настоящий деплой Docker-упражнения с пересозданием БД. Проверка `infrastructure` входит в условия `/approve`. У проекта спринта 6 отдельная проверка `sprint06`: Gradle tests/bootJar, готовый JAR с H2, PostgreSQL, доставка и восстановление ClickHouse, затем HTTP-формы в Compose. При отсутствии исходников job пропускается; согласование проверяет marker на точном head PR.
 
 ## Данные и восстановление
 

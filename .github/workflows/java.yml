@@ -12,6 +12,7 @@ jobs:
       sprint03: ${{ steps.detect.outputs.sprint03 }}
       sprint04: ${{ steps.detect.outputs.sprint04 }}
       sprint05: ${{ steps.detect.outputs.sprint05 }}
+      sprint06: ${{ steps.detect.outputs.sprint06 }}
       exercises: ${{ steps.detect.outputs.exercises }}
       infrastructure: ${{ steps.detect.outputs.infrastructure }}
     steps:
@@ -42,6 +43,11 @@ jobs:
             echo "sprint05=true" >> "$GITHUB_OUTPUT"
           else
             echo "sprint05=false" >> "$GITHUB_OUTPUT"
+          fi
+          if test -f projects/sprint06-reactive-storefront/build.gradle; then
+            echo "sprint06=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sprint06=false" >> "$GITHUB_OUTPUT"
           fi
           if test -f exercises/sprint01/junit5/pom.xml; then
             echo "exercises=true" >> "$GITHUB_OUTPUT"
@@ -476,3 +482,69 @@ jobs:
       - name: Stop owned storefront containers
         if: always() && steps.containers.outcome != 'skipped'
         run: docker compose -p ci-sprint05 -f compose.yaml -f compose.analytics.yaml down
+  sprint06:
+    needs: projects
+    if: needs.projects.outputs.sprint06 == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: projects/sprint06-reactive-storefront
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Java 21 and Gradle cache
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: |
+            projects/sprint06-reactive-storefront/build.gradle
+            projects/sprint06-reactive-storefront/gradle/wrapper/gradle-wrapper.properties
+      - name: Run cached Boot contexts and package the executable JAR
+        run: ./gradlew --no-daemon --console=plain clean check bootJar
+      - name: Validate JavaScript and file-secret initialization
+        run: |
+          for script in src/main/resources/static/*.js; do node --check "$script"; done
+          python3 -m unittest discover -s src/test/python -v
+      - name: Verify the executable JAR with native H2
+        run: python3 scripts/verify-jar.py
+      - name: Verify native R2DBC and transactions with isolated PostgreSQL
+        run: python3 scripts/verify-postgresql.py
+      - name: Verify real ClickHouse delivery and outage recovery
+        run: python3 scripts/verify-analytics.py
+      - name: Initialize external runtime secrets
+        env:
+          STORE_SECRETS_DIR: ${{ runner.temp }}/sprint06-secrets
+        run: |
+          python3 scripts/init-secrets.py
+          {
+            echo "STORE_SECRETS_DIR=$STORE_SECRETS_DIR"
+            echo "STORE_UID=$(id -u)"
+            echo "STORE_GID=$(id -g)"
+          } >> "$GITHUB_ENV"
+      - name: Start the PostgreSQL storefront and optional analytics
+        id: containers
+        run: docker compose -p ci-sprint06 -f compose.yaml -f compose.analytics.yaml up -d --build --wait
+      - name: Verify real cookies, CSRF and purchase forms
+        run: python3 scripts/smoke.py --base-url http://localhost:8086
+      - name: Collect storefront diagnostics on failure
+        if: failure() && steps.containers.outcome != 'skipped'
+        run: |
+          docker compose -p ci-sprint06 -f compose.yaml -f compose.analytics.yaml ps -a
+          docker compose -p ci-sprint06 -f compose.yaml -f compose.analytics.yaml logs --no-color --tail 150
+      - name: Upload JAR and database test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sprint06-java21
+          path: |
+            projects/sprint06-reactive-storefront/build/libs/storefront.jar
+            projects/sprint06-reactive-storefront/build/test-results/
+            projects/sprint06-reactive-storefront/build/reports/tests/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Stop owned storefront containers
+        if: always() && steps.containers.outcome != 'skipped'
+        run: docker compose -p ci-sprint06 -f compose.yaml -f compose.analytics.yaml down

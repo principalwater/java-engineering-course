@@ -1,0 +1,3 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org"><head th:replace="~{fragments :: head('Не удалось выполнить запрос')}"></head>
+<body><header th:replace="~{fragments :: header('')}"></header><main id="main"><section class="empty-state error-state"><p class="eyebrow" th:text="|ОШИБКА ${status}|"></p><h1>Не удалось выполнить запрос</h1><p th:text="${message ?: error}"></p><p class="quiet-note">Вернитесь к каталогу и проверьте введённые данные.</p><a class="primary button-link" th:href="@{/items}">В коллекцию →</a><a class="secondary button-link" th:href="@{/cart/items}">Открыть корзину</a></section></main><footer th:replace="~{fragments :: footer}"></footer></body></html>

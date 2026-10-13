@@ -1,0 +1,82 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.5.16'
+}
+
+group = 'dev.principalwater'
+version = '1.0.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation platform(org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES)
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.liquibase:liquibase-core'
+    runtimeOnly 'com.h2database:h2'
+    runtimeOnly 'org.postgresql:postgresql'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+springBoot {
+    buildInfo()
+}
+
+tasks.named('jar') {
+    enabled = false
+}
+
+tasks.named('bootJar') {
+    archiveFileName = 'storefront.jar'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    exclude '**/AnalyticsIntegrationTest.class'
+}
+
+tasks.register('postgresTest', Test) {
+    description = 'Verify JPA and transactional contracts against isolated PostgreSQL'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform()
+    include '**/StoreRepositoryTest.class', '**/StoreServiceTest.class'
+    // Отдельный диалект проверяет реальные блокировки и ограничения, без повторения MVC/unit-сценариев.
+    outputs.upToDateWhen { false }
+    doFirst {
+        if (!System.getenv('STORE_TEST_DB_URL')?.startsWith('jdbc:postgresql:')
+                || !System.getenv('STORE_TEST_DB_PASSWORD')) {
+            throw new GradleException('postgresTest requires an isolated PostgreSQL URL and password')
+        }
+    }
+}
+
+tasks.register('analyticsTest', Test) {
+    description = 'Verify durable delivery and idempotent ClickHouse aggregates'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform()
+    include '**/AnalyticsIntegrationTest.class'
+    outputs.upToDateWhen { false }
+    doFirst {
+        if (!System.getenv('STORE_TEST_ANALYTICS_URL') || !System.getenv('STORE_TEST_CLICKHOUSE_CONTAINER')) {
+            throw new GradleException('analyticsTest requires an isolated ClickHouse deployment')
+        }
+    }
+}

@@ -6,7 +6,7 @@ import secrets
 import stat
 
 
-SECRET_NAMES = ("db_password", "analytics_admin_password", "analytics_writer_password", "analytics_reader_password")
+SECRET_NAMES = ("db_password", "analytics_admin_password", "analytics_writer_password", "analytics_reader_password", "analytics_cluster_secret")
 
 
 def initialize(directory, repository):

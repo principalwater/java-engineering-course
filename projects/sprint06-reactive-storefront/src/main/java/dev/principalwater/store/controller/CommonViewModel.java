@@ -2,6 +2,7 @@ package dev.principalwater.store.controller;
 
 import dev.principalwater.store.model.CartView;
 import dev.principalwater.store.model.StoreLimits;
+import dev.principalwater.store.model.StoreUserDetails;
 import dev.principalwater.store.service.CartService;
 import java.util.List;
 import java.util.UUID;
@@ -24,6 +25,13 @@ public class CommonViewModel {
     @ModelAttribute("cart")
     public Mono<CartView> cart(@RequestAttribute(CartIdentityFilter.ATTRIBUTE_NAME) UUID cartId) {
         return carts.view(cartId);
+    }
+
+    @ModelAttribute("account")
+    public Mono<StoreUserDetails> account(ServerWebExchange exchange) {
+        // Null с ServerWebExchange завершает invocation без HandlerResult и отменяет zip остальных атрибутов.
+        StoreUserDetails account = exchange.getAttribute(CartIdentityFilter.ACCOUNT_ATTRIBUTE_NAME);
+        return Mono.justOrEmpty(account);
     }
 
     @ModelAttribute("_csrf")

@@ -1,9 +1,10 @@
 CREATE DATABASE IF NOT EXISTS storefront;
 
 -- Повторная доставка заменяет тот же неизменяемый снимок; FINAL убирает повторы до фонового merge.
-CREATE TABLE IF NOT EXISTS storefront.order_lines
+CREATE TABLE IF NOT EXISTS storefront.purchase_facts
 (
     source_id UUID,
+    user_id UUID,
     order_uuid UUID,
     order_id UInt64,
     created_at DateTime64(3, 'UTC'),
@@ -19,4 +20,4 @@ CREATE TABLE IF NOT EXISTS storefront.order_lines
     CONSTRAINT positive_quantity CHECK quantity > 0
 )
 ENGINE = ReplacingMergeTree
-ORDER BY (source_id, order_day, order_uuid, line_number);
+ORDER BY (source_id, user_id, order_day, order_uuid, line_number);

@@ -4,13 +4,11 @@ import dev.principalwater.store.analytics.AnalyticsDashboard;
 import dev.principalwater.store.analytics.AnalyticsDashboardService;
 import dev.principalwater.store.analytics.AnalyticsPeriod;
 import org.springframework.http.MediaType;
+import java.util.UUID;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.ModelAttribute;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.ResponseBody;
+
 import org.springframework.web.server.WebSession;
 import reactor.core.publisher.Mono;
 
@@ -23,8 +21,10 @@ public class AnalyticsController {
     }
 
     @GetMapping({"/analytics", "/profile/analytics"})
-    public Mono<String> get(@RequestParam(required = false) Integer days, Model model) {
-        return dashboard.load(period(days)).map(view -> {
+    public Mono<String> get(@RequestParam(required = false) Integer days,
+                            @RequestAttribute(CartIdentityFilter.USER_ATTRIBUTE_NAME) UUID userId,
+                            @RequestAttribute(CartIdentityFilter.ATTRIBUTE_NAME) UUID cartId, Model model) {
+        return dashboard.load(period(days), userId, cartId).map(view -> {
             model.addAttribute("analytics", view);
             model.addAttribute("periods", AnalyticsPeriod.values());
             return "analytics";
@@ -33,8 +33,10 @@ public class AnalyticsController {
 
     @GetMapping(value = "/profile/analytics/data", produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
-    public Mono<AnalyticsDashboard> data(@RequestParam(required = false) Integer days) {
-        return dashboard.load(period(days));
+    public Mono<AnalyticsDashboard> data(@RequestParam(required = false) Integer days,
+                                         @RequestAttribute(CartIdentityFilter.USER_ATTRIBUTE_NAME) UUID userId,
+                                         @RequestAttribute(CartIdentityFilter.ATTRIBUTE_NAME) UUID cartId) {
+        return dashboard.load(period(days), userId, cartId);
     }
 
     @PostMapping({"/analytics/sync", "/profile/analytics/sync"})
@@ -42,7 +44,7 @@ public class AnalyticsController {
         var selected = period(input.days());
         return dashboard.sync().map(result -> {
             String notice = switch (result.status()) {
-                case DELIVERED -> "Доставлено заказов: " + result.deliveredOrders();
+                case DELIVERED -> "Доставка завершена. Показатели ваших покупок обновлены.";
                 case IN_PROGRESS -> "Очередь уже обновляется. Показатели появятся после завершения доставки.";
                 case UNAVAILABLE -> "Аналитика пока недоступна. Заказы остаются в очереди.";
             };

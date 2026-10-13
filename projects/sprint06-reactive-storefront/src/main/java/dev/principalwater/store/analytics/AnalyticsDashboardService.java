@@ -9,6 +9,7 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Comparator;
 import java.util.List;
+import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.ObjectProvider;
@@ -32,15 +33,15 @@ public class AnalyticsDashboardService {
         this.clock = clock;
     }
 
-    public Mono<AnalyticsDashboard> load(AnalyticsPeriod period) {
-        return Mono.defer(() -> queue.status().flatMap(status -> {
+    public Mono<AnalyticsDashboard> load(AnalyticsPeriod period, UUID userId, UUID cartId) {
+        return Mono.defer(() -> queue.status(cartId).flatMap(status -> {
             var client = clickhouse.getIfAvailable();
             if (client == null) {
                 return Mono.just(AnalyticsDashboard.inactive(AnalyticsDashboard.State.DISABLED, period, status));
             }
             var end = LocalDate.now(clock.withZone(ZoneOffset.UTC));
             var start = end.minusDays(period.getDays() - 1L);
-            return queue.sourceId().flatMap(source -> client.dashboard(source, start, end))
+            return queue.sourceId().flatMap(source -> client.dashboard(source, userId, start, end))
                     .map(rows -> available(period, status, start, end, rows))
                     .onErrorResume(this::isUnavailable, error -> Mono.just(AnalyticsDashboard.inactive(
                             AnalyticsDashboard.State.UNAVAILABLE, period, status)));

@@ -7,6 +7,8 @@ public enum StoreError {
     CATALOG_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "Catalog exceeds the import limit"),
     INVALID_PAGING(HttpStatus.BAD_REQUEST, "Invalid pagination parameters"),
     SEARCH_TOO_LONG(HttpStatus.BAD_REQUEST, "Search query exceeds the length limit"),
+    INVALID_ACCOUNT(HttpStatus.BAD_REQUEST, "Invalid account details"),
+    ACCOUNT_EXISTS(HttpStatus.CONFLICT, "Username is already registered"),
     INVALID_REQUEST(HttpStatus.BAD_REQUEST, "Invalid request parameters"),
     PRODUCT_NOT_FOUND(HttpStatus.NOT_FOUND, "Product not found"),
     ORDER_NOT_FOUND(HttpStatus.NOT_FOUND, "Order not found"),

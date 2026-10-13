@@ -1,12 +1,12 @@
 package dev.principalwater.store.analytics;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.principalwater.store.util.VisitorIdentity;
+import dev.principalwater.store.DatabaseTestBase;
+import dev.principalwater.store.config.CartProperties;
 import dev.principalwater.store.dao.ProductRepository;
 import dev.principalwater.store.model.CartAction;
-import dev.principalwater.store.model.ImageAsset;
-import dev.principalwater.store.model.ProductInput;
 import dev.principalwater.store.model.StoreError;
-import dev.principalwater.store.model.StoreException;
 import dev.principalwater.store.service.CartService;
 import dev.principalwater.store.service.CatalogImportService;
 import dev.principalwater.store.service.CheckoutService;
@@ -16,33 +16,24 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.awaitility.Awaitility;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.core.env.Environment;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.r2dbc.core.DatabaseClient;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.web.reactive.function.BodyInserters;
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
-import static org.awaitility.Awaitility.await;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static dev.principalwater.store.ProductFixtures.productInput;
+import static org.junit.jupiter.api.Assertions.*;
+
 import static org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.csrf;
 
 @SpringBootTest(properties = {
@@ -52,10 +43,9 @@ import static org.springframework.security.test.web.reactive.server.SecurityMock
         "store.analytics.writer-password=${STORE_TEST_ANALYTICS_WRITER_PASSWORD}",
         "store.analytics.reader-password=${STORE_TEST_ANALYTICS_READER_PASSWORD}"
 })
-@ActiveProfiles("test")
 @AutoConfigureWebTestClient
-class AnalyticsIntegrationTest {
-    private static final Duration TIMEOUT = Duration.ofSeconds(15);
+@Timeout(value = 2, unit = TimeUnit.MINUTES)
+class AnalyticsIntegrationTest extends DatabaseTestBase {
     @Autowired private CatalogImportService importer;
     @Autowired private ProductRepository products;
     @Autowired private CartService carts;
@@ -66,23 +56,18 @@ class AnalyticsIntegrationTest {
     @Autowired private ClickHouseClient clickhouse;
     @Autowired private ObjectMapper json;
     @Autowired private Clock clock;
-    @Autowired private DatabaseClient database;
-    @Autowired private Environment environment;
     @Autowired private WebTestClient web;
+    @Autowired private CartProperties cartProperties;
 
     @BeforeEach
-    @AfterEach
-    void cleanIsolatedDatabase() {
-        String url = environment.getRequiredProperty("spring.r2dbc.url");
-        assertTrue(url.contains("/store-tests6") || url.endsWith("/store_tests"),
-                "Analytics integration cleanup requires its isolated test database");
-        Flux.just("analytics_outbox", "order_items", "purchase_orders", "cart_items", "shopping_carts", "products")
-                .concatMap(table -> database.sql("DELETE FROM " + table).fetch().rowsUpdated()).then().block(TIMEOUT);
+    void boundWebRequests() {
         web = web.mutate().responseTimeout(TIMEOUT).build();
     }
 
     @Test
     void realCheckoutRetriesUnknownOutcomeAndRecoversAfterWarehouseOutage() throws Exception {
+        UUID firstCart = await(carts.identify(null));
+        web = web.mutate().defaultCookie(cartProperties.cookieName(), firstCart.toString()).build();
         // Пустое окно доступно, но среднего без заказов нет: wire-контракт сохраняет явный null.
         web.get().uri("/profile/analytics/data").accept(MediaType.APPLICATION_JSON)
                 .exchange().expectStatus().isOk().expectBody()
@@ -91,31 +76,34 @@ class AnalyticsIntegrationTest {
                 .jsonPath("$.summary.averageOrder").value(value -> assertNull(value));
         web.get().uri("/profile/analytics").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
                 .expectBody(String.class).value(html -> assertTrue(html.contains("data-metric=\"average-order\">—")));
-        value(importer.importJson(json.writeValueAsBytes(List.of(new ProductInput(
-                "analytics-keyboard", "Клавиатура", "Снимок заказа", ImageAsset.KEYBOARD, 7900L)))));
-        long productId = value(products.findAllBySkuIn(List.of("analytics-keyboard")).single()).id();
-        var firstCart = value(carts.identify(null));
-        value(carts.change(firstCart, productId, CartAction.SET, 2));
-        long firstOrder = value(checkout.buy(firstCart));
-        var batch = value(queue.capture());
+        await(importer.importJson(json.writeValueAsBytes(List.of(productInput(
+                "analytics-keyboard", "Клавиатура", "Снимок заказа", 7900)))));
+        long productId = await(products.findAllBySkuIn(List.of("analytics-keyboard")).single()).id();
+        await(carts.change(firstCart, productId, CartAction.SET, 2));
+        long firstOrder = await(checkout.buy(firstCart));
+        var batch = await(queue.capture());
         assertEquals(List.of(firstOrder), batch.orderIds());
-        assertNotNull(value(queue.status()).oldestPending());
+        assertNotNull(await(queue.status(firstCart)).oldestPending());
 
         // На отдельном сервере merge остановлен: без FINAL повторные строки увеличат сумму.
         StepVerifier.create(clickhouse.insert(batch.facts())).expectComplete().verify(TIMEOUT);
         StepVerifier.create(clickhouse.insert(batch.facts())).expectComplete().verify(TIMEOUT);
         var fact = batch.facts().getFirst();
-        var foreign = new AnalyticsFact(UUID.randomUUID(), fact.orderUuid(), fact.orderId(), fact.createdAt(),
-                fact.lineNumber(), fact.productId(), fact.sku(), fact.title(), 1_000_000, 99);
-        StepVerifier.create(clickhouse.insert(List.of(foreign))).expectComplete().verify(TIMEOUT);
-        var total = total();
+        assertEquals(VisitorIdentity.analyticsId(firstCart), fact.userId());
+        var foreign = new AnalyticsFact(UUID.randomUUID(), UUID.randomUUID(), fact.orderUuid(), fact.orderId(),
+                fact.createdAt(), fact.lineNumber(), fact.productId(), fact.sku(), fact.title(), 1_000_000, 99);
+        var otherUser = new AnalyticsFact(fact.sourceId(), UUID.randomUUID(), UUID.randomUUID(), fact.orderId(),
+                fact.createdAt(), fact.lineNumber(), fact.productId(), fact.sku(), fact.title(), 1_000_000, 99);
+        StepVerifier.create(clickhouse.insert(List.of(foreign, otherUser))).expectComplete().verify(TIMEOUT);
+        assertEquals(0, total(UUID.randomUUID()).orders());
+        var total = total(firstCart);
         assertEquals(1, total.orders());
         assertEquals(2, total.units());
         assertEquals(15800, total.orderValue());
-        assertEquals(1, value(queue.status()).pendingOrders());
+        assertEquals(1, await(queue.status(firstCart)).pendingOrders());
         StepVerifier.create(delivery.flush()).expectNext(DeliveryResult.delivered(1))
                 .expectComplete().verify(TIMEOUT);
-        assertEquals(0, value(queue.status()).pendingOrders());
+        assertEquals(0, await(queue.status(firstCart)).pendingOrders());
         web.get().uri("/profile/analytics").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
                 .expectBody(String.class).value(html -> {
                     assertTrue(html.contains("data-metric=\"orders\">1"));
@@ -125,15 +113,12 @@ class AnalyticsIntegrationTest {
 
         docker("stop");
         try {
-            var secondCart = value(carts.identify(null));
-            value(carts.change(secondCart, productId, CartAction.PLUS));
-            long secondOrder = value(checkout.buy(secondCart));
-            assertEquals(7900, value(orders.get(secondOrder, secondCart)).totalSum());
-            assertTrue(value(carts.view(secondCart)).items().isEmpty());
-            StepVerifier.create(delivery.flush()).expectErrorSatisfies(failure ->
-                    assertEquals(StoreError.ANALYTICS_UNAVAILABLE,
-                            assertInstanceOf(StoreException.class, failure).getError())).verify(TIMEOUT);
-            assertEquals(1, value(queue.status()).pendingOrders());
+            await(carts.change(firstCart, productId, CartAction.PLUS));
+            long secondOrder = await(checkout.buy(firstCart));
+            assertEquals(7900, await(orders.get(secondOrder, firstCart)).totalSum());
+            assertTrue(await(carts.view(firstCart)).items().isEmpty());
+            expectError(delivery.flush(), StoreError.ANALYTICS_UNAVAILABLE);
+            assertEquals(1, await(queue.status(firstCart)).pendingOrders());
             web.get().uri("/profile/analytics").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
                     .expectBody(String.class).value(html -> {
                         assertTrue(html.contains("data-state=\"UNAVAILABLE\""));
@@ -152,15 +137,15 @@ class AnalyticsIntegrationTest {
         } finally {
             docker("start");
         }
-        await().atMost(Duration.ofSeconds(45)).pollInterval(Duration.ofMillis(500)).ignoreExceptions()
-                .untilAsserted(() -> assertEquals(1, total().orders()));
+        Awaitility.await().atMost(Duration.ofSeconds(45)).pollInterval(Duration.ofMillis(500)).ignoreExceptions()
+                .untilAsserted(() -> assertEquals(1, total(firstCart).orders()));
         StepVerifier.create(delivery.flush()).expectNext(DeliveryResult.delivered(1))
                 .expectComplete().verify(TIMEOUT);
-        var status = value(queue.status());
+        var status = await(queue.status(firstCart));
         assertEquals(0, status.pendingOrders());
         assertNotNull(status.lastDelivery());
         assertNull(status.oldestPending());
-        total = total();
+        total = total(firstCart);
         assertEquals(2, total.orders());
         assertEquals(3, total.units());
         assertEquals(23700, total.orderValue());
@@ -179,14 +164,10 @@ class AnalyticsIntegrationTest {
                 .exchange().expectStatus().isBadRequest();
     }
 
-    private AnalyticsRow total() {
+    private AnalyticsRow total(UUID userId) {
         var end = LocalDate.now(clock.withZone(ZoneOffset.UTC));
-        return value(queue.sourceId().flatMap(source -> clickhouse.dashboard(source, end.minusDays(6), end)))
+        return await(queue.sourceId().flatMap(source -> clickhouse.dashboard(source, VisitorIdentity.analyticsId(userId), end.minusDays(6), end)))
                 .stream().filter(row -> row.bucket() == AnalyticsBucket.TOTAL).findFirst().orElseThrow();
-    }
-
-    private <T> T value(Mono<T> operation) {
-        return Objects.requireNonNull(operation.block(TIMEOUT), "Expected a reactive result");
     }
 
     private void docker(String action) throws Exception {

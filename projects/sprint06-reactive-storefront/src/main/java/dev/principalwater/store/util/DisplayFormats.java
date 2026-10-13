@@ -1,4 +1,4 @@
-package dev.principalwater.store.controller;
+package dev.principalwater.store.util;
 
 import dev.principalwater.store.config.DisplayProperties;
 import java.math.BigDecimal;

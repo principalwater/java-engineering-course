@@ -1,25 +1,12 @@
 package dev.principalwater.store.controller;
 
+import dev.principalwater.store.TestBase;
 import dev.principalwater.store.config.SecurityConfig;
+import dev.principalwater.store.util.DisplayFormats;
+import dev.principalwater.store.service.*;
 import dev.principalwater.store.config.WebConfig;
-import dev.principalwater.store.model.CartAction;
-import dev.principalwater.store.model.CartView;
-import dev.principalwater.store.model.CatalogPage;
-import dev.principalwater.store.model.CatalogQuery;
-import dev.principalwater.store.model.ImportResult;
-import dev.principalwater.store.model.ItemView;
-import dev.principalwater.store.model.OrderLineView;
-import dev.principalwater.store.model.OrderView;
-import dev.principalwater.store.model.Paging;
-import dev.principalwater.store.model.ProfileView;
-import dev.principalwater.store.model.SortMode;
-import dev.principalwater.store.model.StoreError;
-import dev.principalwater.store.model.StoreException;
-import dev.principalwater.store.service.CartService;
-import dev.principalwater.store.service.CatalogImportService;
-import dev.principalwater.store.service.CatalogService;
-import dev.principalwater.store.service.CheckoutService;
-import dev.principalwater.store.service.OrderService;
+import dev.principalwater.store.model.*;
+
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
@@ -45,9 +32,8 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.web.reactive.function.BodyInserters;
 import reactor.core.publisher.Mono;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
+
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.verify;
@@ -58,7 +44,8 @@ import static org.springframework.security.test.web.reactive.server.SecurityMock
         CatalogImportController.class, ProfileController.class})
 @ActiveProfiles("test")
 @Import({SecurityConfig.class, WebConfig.class, DisplayFormats.class})
-class StoreWebTest {
+class StoreWebTest extends TestBase {
+    @MockitoBean private AccountService accounts;
     private static final UUID CART_ID = UUID.fromString("652b77b8-9b3f-498c-9b99-321bd2fd3949");
     private static final CartView EMPTY_CART = new CartView(List.of());
     @Autowired private WebTestClient web;

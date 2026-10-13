@@ -1,16 +1,9 @@
 package dev.principalwater.store.service;
 
-import dev.principalwater.store.dao.CartLineRepository;
-import dev.principalwater.store.dao.CartQueries;
-import dev.principalwater.store.dao.CartRepository;
-import dev.principalwater.store.dao.ProductRepository;
-import dev.principalwater.store.model.CartAction;
-import dev.principalwater.store.model.CartLine;
-import dev.principalwater.store.model.CartView;
-import dev.principalwater.store.model.ShoppingCart;
-import dev.principalwater.store.model.StoreError;
-import dev.principalwater.store.model.StoreException;
-import dev.principalwater.store.model.StoreLimits;
+import dev.principalwater.store.dao.*;
+
+import dev.principalwater.store.model.*;
+
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -23,20 +16,24 @@ public class CartService {
     private final CartLineRepository lines;
     private final CartQueries queries;
     private final ProductRepository products;
+    private final StoreUserRepository users;
     private final TransactionalOperator transactions;
 
     public CartService(CartRepository carts, CartLineRepository lines, CartQueries queries,
-                       ProductRepository products, TransactionalOperator transactions) {
+                       ProductRepository products, StoreUserRepository users, TransactionalOperator transactions) {
         this.carts = carts;
         this.lines = lines;
         this.queries = queries;
         this.products = products;
+        this.users = users;
         this.transactions = transactions;
     }
 
     public Mono<UUID> identify(UUID cookieId) {
-        return Mono.defer(() -> cookieId == null ? create() : carts.existsById(cookieId)
-                .flatMap(exists -> exists ? Mono.just(cookieId) : create()));
+        return Mono.defer(() -> cookieId == null ? create() : users.existsByCartId(cookieId)
+                // Cookie даёт доступ только к гостевой корзине; корзина аккаунта требует authentication.
+                .flatMap(accountCart -> accountCart ? create() : carts.existsById(cookieId)
+                        .flatMap(exists -> exists ? Mono.just(cookieId) : create())));
     }
 
     private Mono<UUID> create() {

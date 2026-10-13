@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="ru" xmlns:th="http://www.thymeleaf.org">
-<head th:replace="~{fragments :: head('Аналитика магазина')}"></head>
+<head th:replace="~{fragments :: head('Аналитика покупок')}"></head>
 <body>
 <header th:replace="~{fragments :: header('analytics')}"></header>
 <main id="main" data-analytics
@@ -8,9 +8,9 @@
       th:attr="data-state=${analytics.state.name()},data-days=${analytics.period.days},data-source=@{/profile/analytics/data},data-page=@{/profile/analytics}">
 <a class="back-link" th:href="@{/profile}">В кабинет</a>
 <div class="page-heading">
-<p class="scope-tag">По магазину</p>
-<h1>Заказы магазина</h1>
-<p class="lead">Общие показатели по всем заказам магазина за выбранный период. Это не ваша история и не данные покупателей: здесь только суммы и количества.</p>
+<p class="scope-tag">Ваши покупки</p>
+<h1>Ваши покупки</h1>
+<p class="lead">Показатели ваших заказов за выбранный период. В аккаунте они доступны из любого браузера; гостевые покупки остаются отдельно.</p>
 </div>
 <div th:replace="~{fragments :: notice}"></div>
 
@@ -129,7 +129,7 @@
 </section>
 
 <section class="surface" aria-labelledby="products-title" data-products>
-<div class="section-heading"><div><h2 id="products-title">Что выбирают чаще</h2><p class="muted">Лидеры по числу предметов в заказах магазина</p></div></div>
+<div class="section-heading"><div><h2 id="products-title">Что выбирают чаще</h2><p class="muted">Лидеры по числу предметов в ваших заказах</p></div></div>
 <ol class="ranking" data-ranking th:attr="hidden=${analytics.products.isEmpty() ? 'hidden' : null}">
 <li th:each="product : ${analytics.products}" th:attr="data-orders=${product.orders},data-units=${product.units},data-value=${product.orderValue}">
 <div class="ranking-head"><span class="ranking-title" th:text="${product.title}"></span><span class="ranking-sku muted" th:text="${product.sku}"></span></div>
@@ -137,7 +137,7 @@
 <p class="ranking-values"><strong th:text="|${product.units} шт.|"></strong> <span class="muted" th:text="${@display.money(product.orderValue)}"></span></p>
 </li>
 </ol>
-<p class="muted" data-ranking-empty th:attr="hidden=${analytics.products.isEmpty() ? null : 'hidden'}">Когда в магазине появятся заказы, здесь будут самые частые товары.</p>
+<p class="muted" data-ranking-empty th:attr="hidden=${analytics.products.isEmpty() ? null : 'hidden'}">После ваших покупок здесь появятся самые частые товары.</p>
 </section>
 </th:block>
 

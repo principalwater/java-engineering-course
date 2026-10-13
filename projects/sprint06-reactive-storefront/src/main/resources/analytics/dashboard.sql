@@ -1,3 +1,4 @@
+-- Профиль storefront_reader фиксирует final=1, включая локальные таблицы Distributed-шардов.
 -- Один HTTP-запрос: текущие дни/товары и итог предыдущего равного окна, оба диапазона ограничены ключом.
 SELECT * FROM
 (
@@ -9,8 +10,8 @@ SELECT * FROM
         uniqExact(order_uuid) AS orders,
         sum(quantity) AS units,
         sum(amount) AS order_value
-    FROM storefront.order_lines FINAL
-    PREWHERE source_id = {source:UUID} AND order_day >= {start:Date} AND order_day <= {end:Date}
+    FROM storefront.purchase_facts
+    PREWHERE source_id = {source:UUID} AND user_id = {user:UUID} AND order_day >= {start:Date} AND order_day <= {end:Date}
     GROUP BY GROUPING SETS ((), (order_day), (sku))
 
     UNION ALL
@@ -23,8 +24,8 @@ SELECT * FROM
         uniqExact(order_uuid) AS orders,
         sum(quantity) AS units,
         sum(amount) AS order_value
-    FROM storefront.order_lines FINAL
-    PREWHERE source_id = {source:UUID}
+    FROM storefront.purchase_facts
+    PREWHERE source_id = {source:UUID} AND user_id = {user:UUID}
         AND order_day >= {start:Date} - toIntervalDay(dateDiff('day', {start:Date}, {end:Date}) + 1)
         AND order_day < {start:Date}
 )

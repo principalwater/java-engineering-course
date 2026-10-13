@@ -1,57 +1,34 @@
 package dev.principalwater.store.dao;
 
-import dev.principalwater.store.model.AnalyticsOutbox;
-import dev.principalwater.store.model.CartItem;
-import dev.principalwater.store.model.ImageAsset;
-import dev.principalwater.store.model.OrderLine;
-import dev.principalwater.store.model.OrderView;
-import dev.principalwater.store.model.Product;
-import dev.principalwater.store.model.ProductInput;
-import dev.principalwater.store.model.PurchaseOrder;
-import dev.principalwater.store.model.ShoppingCart;
-import java.time.Duration;
+import dev.principalwater.store.DatabaseTestBase;
+import dev.principalwater.store.model.*;
+
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Objects;
 import java.util.UUID;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.data.r2dbc.DataR2dbcTest;
-import org.springframework.r2dbc.core.DatabaseClient;
-import org.springframework.test.context.ActiveProfiles;
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
+import static dev.principalwater.store.ProductFixtures.productInput;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DataR2dbcTest
-@ActiveProfiles("test")
-class StoreRepositoryTest {
-    private static final Duration TIMEOUT = Duration.ofSeconds(15);
+class StoreRepositoryTest extends DatabaseTestBase {
     private static final Instant PURCHASE_TIME = Instant.parse("2026-10-12T10:00:00.123Z");
     @Autowired private ProductRepository products;
     @Autowired private CartRepository carts;
     @Autowired private OrderRepository orders;
     @Autowired private OrderLineRepository lines;
     @Autowired private OutboxRepository outbox;
-    @Autowired private DatabaseClient database;
-
-    @BeforeEach
-    @AfterEach
-    void cleanDatabase() {
-        // ReactiveCrudRepository не участвует в test-managed JDBC rollback: очищаем только отдельную тестовую БД.
-        Flux.just("analytics_outbox", "order_items", "purchase_orders", "cart_items", "shopping_carts", "products")
-                .concatMap(table -> database.sql("DELETE FROM " + table).fetch().rowsUpdated()).then().block(TIMEOUT);
-    }
 
     @Test
     void persistedOrderRetainsItsPriceAndTitleAfterACatalogUpdate() {
-        var product = await(products.save(input("Original keyboard", 2500)));
+        var product = await(products.save(new Product(productInput(
+                "keyboard", "Original keyboard", "Description", 2500))));
         var cart = await(carts.save(new ShoppingCart(UUID.randomUUID())));
         var item = new CartItem(product, 2);
         var order = await(orders.save(new PurchaseOrder(cart.id(), List.of(item), PURCHASE_TIME)));
@@ -79,7 +56,8 @@ class StoreRepositoryTest {
 
     @Test
     void pendingDeliverySurvivesReloadAndIsRemovedOnlyByAcknowledgement() {
-        var product = await(products.save(input("Delivery keyboard", 2500)));
+        var product = await(products.save(new Product(productInput(
+                "keyboard", "Delivery keyboard", "Description", 2500))));
         var cart = await(carts.save(new ShoppingCart(UUID.randomUUID())));
         var order = await(orders.save(new PurchaseOrder(cart.id(), List.of(new CartItem(product, 1)), PURCHASE_TIME)));
         await(outbox.save(new AnalyticsOutbox(order.id())));
@@ -92,13 +70,5 @@ class StoreRepositoryTest {
         StepVerifier.create(outbox.pendingOrderIds(100)).expectComplete().verify(TIMEOUT);
         StepVerifier.create(outbox.countByDeliveredAtIsNull()).expectNext(0L).expectComplete().verify(TIMEOUT);
         StepVerifier.create(outbox.latestDelivery().map(OffsetDateTime::toInstant)).expectNext(delivered).expectComplete().verify(TIMEOUT);
-    }
-
-    private <T> T await(Mono<T> publisher) {
-        return Objects.requireNonNull(publisher.block(TIMEOUT), "Expected a persisted row");
-    }
-
-    private Product input(String title, long price) {
-        return new Product(new ProductInput("keyboard", title, "Description", ImageAsset.KEYBOARD, price));
     }
 }

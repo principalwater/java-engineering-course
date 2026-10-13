@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'pmd'
     id 'org.springframework.boot' version '3.5.16'
 }
 
@@ -36,6 +37,17 @@ springBoot {
     buildInfo()
 }
 
+pmd {
+    toolVersion = '7.13.0'
+    ruleSets = []
+    ruleSetFiles = files('config/pmd/common.xml')
+    consoleOutput = true
+}
+
+tasks.named('pmdMain') {
+    ruleSetFiles = files('config/pmd/common.xml', 'config/pmd/main.xml')
+}
+
 tasks.named('jar') {
     enabled = false
 }
@@ -46,7 +58,7 @@ tasks.named('bootJar') {
 
 tasks.named('test') {
     useJUnitPlatform()
-    exclude '**/AnalyticsIntegrationTest.class'
+    exclude '**/AnalyticsIntegrationTest.class', '**/ClickHouseClusterTest.class'
 }
 
 tasks.register('postgresTest', Test) {
@@ -55,7 +67,7 @@ tasks.register('postgresTest', Test) {
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
     useJUnitPlatform()
-    include '**/StoreRepositoryTest.class', '**/StoreServiceTest.class'
+    include '**/StoreRepositoryTest.class', '**/StoreServiceTest.class', '**/AccountIntegrationTest.class'
     // Отдельный диалект проверяет реальные блокировки и ограничения, без повторения WebFlux/unit-сценариев.
     outputs.upToDateWhen { false }
     doFirst {
@@ -77,6 +89,21 @@ tasks.register('analyticsTest', Test) {
     doFirst {
         if (!System.getenv('STORE_TEST_ANALYTICS_URL') || !System.getenv('STORE_TEST_CLICKHOUSE_CONTAINER')) {
             throw new GradleException('analyticsTest requires an isolated ClickHouse deployment')
+        }
+    }
+}
+
+tasks.register('clusterTest', Test) {
+    description = 'Verify replicated shards and coordinator failover against isolated ClickHouse'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform()
+    include '**/ClickHouseClusterTest.class'
+    outputs.upToDateWhen { false }
+    doFirst {
+        if (!System.getenv('STORE_TEST_CLUSTER_URLS') || !System.getenv('STORE_TEST_CLUSTER_CONTAINERS')) {
+            throw new GradleException('clusterTest requires an isolated two-shard deployment')
         }
     }
 }

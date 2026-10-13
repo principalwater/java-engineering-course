@@ -1,10 +1,8 @@
 package dev.principalwater.store.controller;
 
-import dev.principalwater.store.model.CartMutationInput;
-import dev.principalwater.store.model.CartView;
-import dev.principalwater.store.model.CatalogNavigation;
-import dev.principalwater.store.model.CatalogQuery;
-import dev.principalwater.store.model.SortMode;
+import dev.principalwater.store.util.StoreRedirects;
+import dev.principalwater.store.model.*;
+
 import dev.principalwater.store.service.CartService;
 import dev.principalwater.store.service.CatalogService;
 import jakarta.validation.Valid;
@@ -12,12 +10,8 @@ import jakarta.validation.constraints.Positive;
 import java.util.UUID;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.ModelAttribute;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestAttribute;
-import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.*;
+
 import org.springframework.web.reactive.result.view.RedirectView;
 import org.springframework.web.util.UriComponentsBuilder;
 import reactor.core.publisher.Mono;
@@ -32,11 +26,12 @@ public class CatalogController {
         this.carts = carts;
     }
 
+    // defaultValue аннотации требует compile-time String: enum/getter здесь не компилируется.
     @GetMapping({"/", "/items"})
-    public Mono<String> items(@RequestParam(defaultValue = "") String search,
-                              @RequestParam(defaultValue = "NO") SortMode sort,
-                              @RequestParam(defaultValue = "1") int pageNumber,
-                              @RequestParam(defaultValue = "5") int pageSize,
+    public Mono<String> items(@RequestParam(defaultValue = CatalogQuery.DEFAULT_SEARCH) String search,
+                              @RequestParam(defaultValue = CatalogQuery.DEFAULT_SORT) SortMode sort,
+                              @RequestParam(defaultValue = CatalogQuery.DEFAULT_PAGE_NUMBER) int pageNumber,
+                              @RequestParam(defaultValue = CatalogQuery.DEFAULT_PAGE_SIZE) int pageSize,
                               @ModelAttribute("cart") CartView cart, Model model) {
         var query = new CatalogQuery(search, sort, pageNumber, pageSize);
         return catalog.list(query, cart).map(page -> {

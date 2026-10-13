@@ -14,6 +14,8 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
 import java.util.concurrent.TimeoutException;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.buffer.DataBufferLimitException;
@@ -34,8 +36,10 @@ public class ClickHouseClient implements AutoCloseable {
     private static final int MAX_RESPONSE_BYTES = 256 * 1024;
     private static final int MAX_CONNECTIONS = 4;
     private static final int MAX_PENDING_REQUESTS = 16;
-    private static final String INSERT = "INSERT INTO storefront.order_lines FORMAT JSONEachRow";
+    private static final String INSERT = "INSERT INTO storefront.purchase_facts FORMAT JSONEachRow";
     private final AnalyticsProperties properties;
+    private final List<URI> endpoints;
+    private final AtomicInteger nextEndpoint = new AtomicInteger();
     private final ObjectMapper json;
     private final ObjectReader aggregateReader;
     private final ConnectionProvider connections;
@@ -43,10 +47,18 @@ public class ClickHouseClient implements AutoCloseable {
     private final String dashboardQuery;
 
     public ClickHouseClient(AnalyticsProperties properties, ObjectMapper json, WebClient.Builder builder) {
-        URI url = properties.getUrl();
-        if (url == null || !List.of("http", "https").contains(url.getScheme()) || url.getHost() == null
-                || url.getUserInfo() != null || url.getQuery() != null || url.getFragment() != null) {
-            throw new IllegalArgumentException("ClickHouse requires an HTTP(S) endpoint without credentials, query or fragment");
+        endpoints = properties.endpoints();
+        if (endpoints.isEmpty() || endpoints.size() > MAX_PENDING_REQUESTS) {
+            throw new IllegalArgumentException("ClickHouse requires 1..16 coordinator endpoints");
+        }
+        for (URI url : endpoints) {
+            if (url == null || !List.of("http", "https").contains(url.getScheme()) || url.getHost() == null
+                    || url.getUserInfo() != null || url.getQuery() != null || url.getFragment() != null) {
+                throw new IllegalArgumentException("ClickHouse requires HTTP(S) endpoints without credentials, query or fragment");
+            }
+        }
+        if (!properties.isDistributed() && endpoints.size() != 1) {
+            throw new IllegalArgumentException("Multiple coordinators require one shared Distributed dataset");
         }
         this.properties = properties;
         this.json = json;
@@ -76,9 +88,19 @@ public class ClickHouseClient implements AutoCloseable {
         }
         // Ограниченный пакет сериализуется вне потоков Netty и R2DBC; транспорт остаётся неблокирующим.
         return Mono.fromCallable(() -> encode(facts)).subscribeOn(Schedulers.parallel()).flatMap(payload -> {
-            URI uri = endpoint().queryParam("async_insert", 1).queryParam("wait_for_async_insert", 1)
-                    .queryParam("wait_end_of_query", 1).build().toUri();
-            return execute(uri, payload, "storefront_writer", properties.getWriterPassword());
+            return executeWithFailover(endpoint -> {
+                var uri = UriComponentsBuilder.fromUri(endpoint).queryParam("wait_end_of_query", 1);
+                if (properties.isDistributed()) {
+                    // ACK только после записи на шарды; реплики выбирает Distributed с internal_replication=true.
+                    uri.queryParam("distributed_foreground_insert", 1).queryParam("async_insert", 0);
+                    if (properties.getInsertQuorum() > 0) {
+                        uri.queryParam("insert_quorum", properties.getInsertQuorum());
+                    }
+                } else {
+                    uri.queryParam("async_insert", 1).queryParam("wait_for_async_insert", 1);
+                }
+                return uri.build().toUri();
+            }, payload, "storefront_writer", properties.getWriterPassword());
         }).flatMap(response -> {
             // Поздняя ошибка может сопровождать HTTP 200; успешный INSERT имеет пустое подтверждение.
             if (!new String(response, StandardCharsets.UTF_8).isBlank()) {
@@ -88,12 +110,13 @@ public class ClickHouseClient implements AutoCloseable {
         });
     }
 
-    public Mono<List<AnalyticsRow>> dashboard(UUID sourceId, LocalDate start, LocalDate end) {
+    public Mono<List<AnalyticsRow>> dashboard(UUID sourceId, UUID userId, LocalDate start, LocalDate end) {
         return Mono.defer(() -> {
-            URI uri = endpoint().queryParam("param_source", sourceId).queryParam("param_start", start)
+            return executeWithFailover(endpoint -> UriComponentsBuilder.fromUri(endpoint)
+                    .queryParam("param_source", sourceId).queryParam("param_user", userId).queryParam("param_start", start)
                     .queryParam("param_end", end).queryParam("param_limit", AnalyticsPeriod.MAXIMUM_DAYS)
-                    .queryParam("wait_end_of_query", 1).build().toUri();
-            return execute(uri, dashboardQuery, "storefront_reader", properties.getReaderPassword()).map(response -> {
+                    .queryParam("wait_end_of_query", 1).build().toUri(),
+                    dashboardQuery, "storefront_reader", properties.getReaderPassword()).map(response -> {
                 try (MappingIterator<AnalyticsRow> rows = aggregateReader.readValues(response)) {
                     return rows.readAll();
                 } catch (IOException | IllegalArgumentException exception) {
@@ -111,8 +134,25 @@ public class ClickHouseClient implements AutoCloseable {
         return payload.toString();
     }
 
-    private UriComponentsBuilder endpoint() {
-        return UriComponentsBuilder.fromUri(properties.getUrl());
+    private Mono<byte[]> executeWithFailover(java.util.function.Function<URI, URI> request,
+                                               String payload, String user, String password) {
+        return Mono.defer(() -> {
+            int first = Math.floorMod(nextEndpoint.getAndIncrement(), endpoints.size());
+            return executeAt(first, 0, request, payload, user, password);
+        }).timeout(OPERATION_TIMEOUT).onErrorMap(TimeoutException.class, this::unavailable);
+    }
+
+    private Mono<byte[]> executeAt(int first, int attempt, java.util.function.Function<URI, URI> request,
+                                  String payload, String user, String password) {
+        URI endpoint = endpoints.get((first + attempt) % endpoints.size());
+        return execute(request.apply(endpoint), payload, user, password).onErrorResume(error -> {
+            Throwable cause = error instanceof StoreException ? error.getCause() : error;
+            // Не повторяем SQL/HTTP-ошибки. Неясный сетевой исход допускает replay неизменяемого ключа, без раннего ACK.
+            boolean networkFailure = cause instanceof WebClientRequestException || cause instanceof TimeoutException
+                    || cause instanceof io.netty.handler.timeout.TimeoutException;
+            return networkFailure && attempt + 1 < endpoints.size()
+                    ? executeAt(first, attempt + 1, request, payload, user, password) : Mono.error(error);
+        });
     }
 
     private Mono<byte[]> execute(URI uri, String payload, String user, String password) {

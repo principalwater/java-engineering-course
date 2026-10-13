@@ -14,11 +14,8 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
+
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -29,13 +26,10 @@ import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTimeout;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
-class ClickHouseClientTest {
+class ClickHouseClientTest extends dev.principalwater.store.TestBase {
+    private static final UUID USER = UUID.fromString("33333333-3333-3333-3333-333333333333");
     private static final UUID SOURCE = UUID.fromString("11111111-1111-1111-1111-111111111111");
     private static final LocalDate START = LocalDate.parse("2026-10-06");
     private static final LocalDate END = LocalDate.parse("2026-10-12");
@@ -78,18 +72,20 @@ class ClickHouseClientTest {
                 var fact = json.readTree(body.substring(body.indexOf('\n') + 1));
                 assertEquals("Клавиатура", fact.get("title").asText());
                 assertEquals(SOURCE.toString(), fact.get("source_id").asText());
+                assertEquals(USER.toString(), fact.get("user_id").asText());
                 writes.incrementAndGet();
                 respond(exchange, 200, "");
             } else {
                 assertEquals("storefront_reader", exchange.getRequestHeaders().getFirst("X-ClickHouse-User"));
                 assertEquals("reader-test-secret", exchange.getRequestHeaders().getFirst("X-ClickHouse-Key"));
                 assertTrue(exchange.getRequestURI().getRawQuery().contains("param_source=" + SOURCE));
+                assertTrue(exchange.getRequestURI().getRawQuery().contains("param_user=" + USER));
                 respond(exchange, 200, TOTAL);
             }
         };
         try (var client = client()) {
             StepVerifier.create(client.insert(List.of(fact()))).expectComplete().verify(TIMEOUT);
-            StepVerifier.create(client.dashboard(SOURCE, START, END)).assertNext(rows -> {
+            StepVerifier.create(client.dashboard(SOURCE, USER, START, END)).assertNext(rows -> {
                 assertEquals(1, writes.get());
                 assertEquals(1, rows.size());
                 assertEquals(AnalyticsBucket.TOTAL, rows.getFirst().bucket());
@@ -112,7 +108,7 @@ class ClickHouseClientTest {
     void malformedOrPartialHttp200CannotBecomeValidMetrics(String body) {
         handler = exchange -> respond(exchange, 200, body);
         try (var client = client()) {
-            unavailable(client.dashboard(SOURCE, START, END));
+            unavailable(client.dashboard(SOURCE, USER, START, END));
         }
     }
 
@@ -154,7 +150,7 @@ class ClickHouseClientTest {
             }
         };
         try (var client = client()) {
-            unavailable(client.dashboard(SOURCE, START, END));
+            unavailable(client.dashboard(SOURCE, USER, START, END));
         }
     }
 
@@ -172,7 +168,7 @@ class ClickHouseClientTest {
             }
         };
         try (var client = client()) {
-            assertTimeout(TIMEOUT, () -> unavailable(client.dashboard(SOURCE, START, END)));
+            assertTimeout(TIMEOUT, () -> unavailable(client.dashboard(SOURCE, USER, START, END)));
         } finally {
             finish.countDown();
         }
@@ -196,7 +192,7 @@ class ClickHouseClientTest {
         try (var client = client()) {
             // Четыре отмены заполнят весь пул, если незавершённые response не освобождаются.
             for (int index = 0; index < 4; index++) {
-                StepVerifier.create(client.dashboard(SOURCE, START, END)).then(() -> {
+                StepVerifier.create(client.dashboard(SOURCE, USER, START, END)).then(() -> {
                     try {
                         assertTrue(headers.tryAcquire(3, TimeUnit.SECONDS));
                     } catch (InterruptedException exception) {
@@ -206,10 +202,31 @@ class ClickHouseClientTest {
                 }).thenCancel().verify(TIMEOUT);
             }
             handler = exchange -> respond(exchange, 200, TOTAL);
-            StepVerifier.create(client.dashboard(SOURCE, START, END)).assertNext(rows -> assertEquals(1, rows.size()))
+            StepVerifier.create(client.dashboard(SOURCE, USER, START, END)).assertNext(rows -> assertEquals(1, rows.size()))
                     .expectComplete().verify(TIMEOUT);
         } finally {
             finish.countDown();
+        }
+    }
+
+    @Test
+    void unavailableCoordinatorFallsBackWithoutDuplicatingReplicaWrites() {
+        var writes = new AtomicInteger();
+        handler = exchange -> {
+            String query = exchange.getRequestURI().getRawQuery();
+            assertTrue(query.contains("distributed_foreground_insert=1"));
+            assertTrue(query.contains("async_insert=0"));
+            assertTrue(query.contains("insert_quorum=2"));
+            writes.incrementAndGet();
+            respond(exchange, 200, "");
+        };
+        var properties = properties();
+        properties.setUrls(List.of(URI.create("http://127.0.0.1:1"), URI.create(endpoint())));
+        properties.setDistributed(true);
+        properties.setInsertQuorum(2);
+        try (var client = new ClickHouseClient(properties, json, WebClient.builder())) {
+            StepVerifier.create(client.insert(List.of(fact()))).expectComplete().verify(TIMEOUT);
+            assertEquals(1, writes.get());
         }
     }
 
@@ -221,18 +238,22 @@ class ClickHouseClientTest {
         }).verify(TIMEOUT);
     }
 
-    private ClickHouseClient client() {
+    private AnalyticsProperties properties() {
         var properties = new AnalyticsProperties();
         properties.setUrl(URI.create(endpoint()));
         properties.setReaderPassword("reader-test-secret");
         properties.setWriterPassword("writer-test-secret");
-        return new ClickHouseClient(properties, json, WebClient.builder());
+        return properties;
+    }
+
+    private ClickHouseClient client() {
+        return new ClickHouseClient(properties(), json, WebClient.builder());
     }
 
     private String endpoint() { return "http://127.0.0.1:" + server.getAddress().getPort(); }
 
     private AnalyticsFact fact() {
-        return new AnalyticsFact(SOURCE, UUID.fromString("22222222-2222-2222-2222-222222222222"),
+        return new AnalyticsFact(SOURCE, USER, UUID.fromString("22222222-2222-2222-2222-222222222222"),
                 1, "2026-10-12 10:00:00.000", 0, 1, "keyboard", "Клавиатура", 7900, 2);
     }
 

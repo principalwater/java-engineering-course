@@ -1,20 +1,15 @@
 package dev.principalwater.store.analytics;
 
+import dev.principalwater.store.ReactiveTestBase;
 import dev.principalwater.store.model.StoreError;
 import dev.principalwater.store.model.StoreException;
-import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
-class AnalyticsDeliveryCoordinatorTest {
-    private static final Duration TIMEOUT = Duration.ofSeconds(3);
+class AnalyticsDeliveryCoordinatorTest extends ReactiveTestBase {
 
     @Test
     void admissionIsLazyReportsBusyUntilCancellationAndReleasesTheDeliverySlot() {

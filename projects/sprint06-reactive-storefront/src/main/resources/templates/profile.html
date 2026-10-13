@@ -6,12 +6,15 @@
 <main id="main">
 <div class="page-heading">
 <h1>Ваш кабинет</h1>
-<p class="lead">Регистрации здесь нет: магазин узнаёт этот браузер по cookie и показывает его заказы. Cookie действует 30 дней с первого визита. После истечения срока, очистки cookie или в другом браузере история начнётся заново.</p>
+<p class="lead" th:if="${account != null}" th:text="|${account.displayName}, здесь ваша корзина и заказы. Войдите в этот аккаунт в другом браузере, чтобы продолжить покупки.|"></p>
+<p class="lead" th:if="${account == null}">Сейчас вы гость: корзина и заказы привязаны к cookie этого браузера на 30 дней с первого визита. Войдите в аккаунт, чтобы пользоваться одной корзиной и историей в разных браузерах.</p>
+<div class="account-actions" th:if="${account == null}"><a class="button primary" th:href="@{/account/login}">Войти</a><a class="button secondary" th:href="@{/account/register}">Создать аккаунт</a></div>
+<form class="account-actions" th:if="${account != null}" method="post" th:action="@{/account/logout}"><span th:text="|Логин: ${account.username}|"></span><button class="button secondary" type="submit">Выйти</button></form>
 </div>
 <div th:replace="~{fragments :: notice}"></div>
-<!--/* Все числа ниже — только заказы текущего браузера. Показатели всего магазина живут на /profile/analytics. */-->
+<!--/* Владельца сводки и аналитики определяет серверная сессия; для гостя — отдельная cookie корзины. */-->
 <section class="profile-section" aria-labelledby="history-title">
-<div class="section-heading"><h2 id="history-title">Ваши заказы</h2><p>Только из этого браузера</p></div>
+<div class="section-heading"><h2 id="history-title">Ваши заказы</h2><p th:text="${account != null ? 'Во всех ваших браузерах' : 'Только из этого браузера'}"></p></div>
 <dl class="stat-grid">
 <div class="stat-card"><dt>Заказов</dt><dd><strong data-metric="orders" th:text="${profile.totalOrders}">0</strong></dd></div>
 <div class="stat-card"><dt>Предметов</dt><dd><strong data-metric="units" th:text="${profile.units}">0</strong></dd></div>
@@ -24,7 +27,7 @@
 </section>
 <section class="empty-state" th:if="${profile.totalOrders == 0}">
 <h2>Первый заказ появится здесь</h2>
-<p>Добавьте предметы в корзину и оформите заказ — он сохранится в истории этого браузера.</p>
+<p th:text="${account != null ? 'Добавьте предметы в корзину и оформите заказ — он сохранится в вашем аккаунте.' : 'Добавьте предметы в корзину и оформите заказ — он сохранится в истории этого браузера.'}"></p>
 <a class="button primary" th:href="@{/items}">В коллекцию</a>
 </section>
 <section class="profile-links" aria-label="Разделы кабинета">
@@ -33,9 +36,9 @@
 <p>Состав и цены каждого заказа, от новых к старым.</p>
 </a>
 <a class="link-card" th:href="@{/profile/analytics}">
-<span class="scope-tag">По магазину</span>
+<span class="scope-tag">Ваши покупки</span>
 <h2>Аналитика заказов</h2>
-<p>Общие показатели по всем заказам магазина за выбранный период, а не только по вашим. Данных покупателей здесь нет.</p>
+<p>Показатели ваших заказов за выбранный период: покупки, предметы и суммы.</p>
 </a>
 </section>
 </main>

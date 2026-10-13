@@ -51,7 +51,7 @@ def main():
             deadline = time.monotonic() + 60
             while True:
                 try:
-                    query = Request(endpoint, data=b"SYSTEM STOP MERGES storefront.order_lines",
+                    query = Request(endpoint, data=b"SYSTEM STOP MERGES storefront.purchase_facts",
                                     headers={"X-ClickHouse-User": "storefront_admin", "X-ClickHouse-Key": passwords["admin"]})
                     with urlopen(query, timeout=5) as response:
                         assert response.status == 200

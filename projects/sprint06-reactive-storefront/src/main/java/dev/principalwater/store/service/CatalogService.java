@@ -2,13 +2,8 @@ package dev.principalwater.store.service;
 
 import dev.principalwater.store.dao.CatalogQueries;
 import dev.principalwater.store.dao.ProductRepository;
-import dev.principalwater.store.model.CartView;
-import dev.principalwater.store.model.CatalogPage;
-import dev.principalwater.store.model.CatalogQuery;
-import dev.principalwater.store.model.ItemView;
-import dev.principalwater.store.model.Paging;
-import dev.principalwater.store.model.StoreError;
-import dev.principalwater.store.model.StoreException;
+import dev.principalwater.store.model.*;
+
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 

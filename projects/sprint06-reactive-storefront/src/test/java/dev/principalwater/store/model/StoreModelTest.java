@@ -1,5 +1,6 @@
 package dev.principalwater.store.model;
 
+import dev.principalwater.store.TestBase;
 import java.util.ArrayList;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -8,7 +9,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-class StoreModelTest {
+class StoreModelTest extends TestBase {
     @Test
     void moneyTotalsStayLongWhenAnAllowedCartExceedsIntegerRange() {
         var items = new ArrayList<ItemView>();
@@ -24,6 +25,6 @@ class StoreModelTest {
     @ValueSource(ints = {0, 1, 3, 101})
     void rejectsPageSizesOutsideThePublishedChoices(int size) {
         var error = assertThrows(StoreException.class, () -> new CatalogQuery("", SortMode.NO, 1, size));
-        assertEquals(StoreError.INVALID_PAGING, error.getError());
+        assertStoreError(StoreError.INVALID_PAGING, error);
     }
 }

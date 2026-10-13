@@ -9,6 +9,7 @@ import java.util.UUID;
 
 public record AnalyticsFact(
         @JsonProperty("source_id") UUID sourceId,
+        @JsonProperty("user_id") UUID userId,
         @JsonProperty("order_uuid") UUID orderUuid,
         @JsonProperty("order_id") long orderId,
         @JsonProperty("created_at") String createdAt,
@@ -21,8 +22,8 @@ public record AnalyticsFact(
     private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter
             .ofPattern("uuuu-MM-dd HH:mm:ss.SSS").withZone(ZoneOffset.UTC);
 
-    static AnalyticsFact from(UUID sourceId, PurchaseOrder order, OrderLine line) {
-        return new AnalyticsFact(sourceId, order.getEventId(), order.getId(), TIMESTAMP.format(order.getCreatedAt()),
+    static AnalyticsFact from(UUID sourceId, UUID userId, PurchaseOrder order, OrderLine line) {
+        return new AnalyticsFact(sourceId, userId, order.getEventId(), order.getId(), TIMESTAMP.format(order.getCreatedAt()),
                 line.getLineNumber(), line.getProductId(), line.getSku(), line.getTitle(), line.getPrice(), line.getQuantity());
     }
 }

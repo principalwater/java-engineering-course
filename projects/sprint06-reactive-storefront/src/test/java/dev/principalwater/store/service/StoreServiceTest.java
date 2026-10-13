@@ -1,36 +1,26 @@
 package dev.principalwater.store.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.principalwater.store.DatabaseTestBase;
 import dev.principalwater.store.dao.OrderRepository;
 import dev.principalwater.store.dao.OutboxRepository;
 import dev.principalwater.store.dao.ProductRepository;
-import dev.principalwater.store.model.CartAction;
-import dev.principalwater.store.model.CartView;
-import dev.principalwater.store.model.CatalogQuery;
-import dev.principalwater.store.model.ImageAsset;
-import dev.principalwater.store.model.ProductInput;
-import dev.principalwater.store.model.SortMode;
-import dev.principalwater.store.model.StoreError;
-import dev.principalwater.store.model.StoreException;
+import dev.principalwater.store.model.*;
+
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.List;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 import javax.sql.DataSource;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.ApplicationContext;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.r2dbc.core.DatabaseClient;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.ReactiveTransactionManager;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -38,14 +28,11 @@ import reactor.core.publisher.Signal;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static dev.principalwater.store.ProductFixtures.productInput;
+import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest
-@ActiveProfiles("test")
-class StoreServiceTest {
-    private static final Duration TIMEOUT = Duration.ofSeconds(15);
+class StoreServiceTest extends DatabaseTestBase {
     @Autowired private CatalogImportService importer;
     @Autowired private CatalogService catalog;
     @Autowired private CartService carts;
@@ -55,21 +42,11 @@ class StoreServiceTest {
     @Autowired private OrderRepository orders;
     @Autowired private OutboxRepository outbox;
     @Autowired private ObjectMapper json;
-    @Autowired private DatabaseClient database;
-    @Autowired private ApplicationContext context;
-
-    @BeforeEach
-    @AfterEach
-    void cleanDatabase() {
-        // R2DBC-транзакции не откатываются test-managed @Transactional: чистим отдельную БД в порядке FK.
-        Flux.just("analytics_outbox", "order_items", "purchase_orders", "cart_items", "shopping_carts", "products")
-                .concatMap(table -> database.sql("DELETE FROM " + table).fetch().rowsUpdated()).then().block(TIMEOUT);
-    }
 
     @Test
     void catalogSupportsLiteralDescriptionSearchStableSortingAndPagination() throws Exception {
-        importItems(input("alpha", "Alpha", "First", 20), input("beta", "Beta", "Second", 10),
-                input("gamma", "Beta", "C++ & blue", 10), input("zeta", "Zeta", "Literal 100%_! fragment", 30));
+        importItems(productInput("alpha", "Alpha", "First", 20), productInput("beta", "Beta", "Second", 10),
+                productInput("gamma", "Beta", "C++ & blue", 10), productInput("zeta", "Zeta", "Literal 100%_! fragment", 30));
         var empty = new CartView(List.of());
 
         StepVerifier.create(catalog.list(new CatalogQuery("", SortMode.PRICE, 1, 2), empty)).assertNext(page -> {
@@ -95,13 +72,13 @@ class StoreServiceTest {
 
     @Test
     void skuUpsertKeepsTheProductIdentityAndExistingCartQuantity() throws Exception {
-        importItems(input("upsert", "Before", "Description", 100));
+        importItems(productInput("upsert", "Before", "Description", 100));
         long id = id("upsert");
         UUID cartId = await(carts.identify(null));
         await(carts.change(cartId, id, CartAction.PLUS));
         await(carts.change(cartId, id, CartAction.PLUS));
 
-        StepVerifier.create(importer.importJson(json.writeValueAsBytes(List.of(input("upsert", "After", "Updated", 300)))))
+        StepVerifier.create(importer.importJson(json.writeValueAsBytes(List.of(productInput("upsert", "After", "Updated", 300)))))
                 .assertNext(result -> {
                     assertEquals(0, result.added());
                     assertEquals(1, result.updated());
@@ -119,12 +96,7 @@ class StoreServiceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {
-            "{\"sku\":\"second\",\"title\":\"Second\",\"description\":\"D\",\"image\":\"CUP\",\"price\":12.9}",
-            "{\"sku\":\"second\",\"title\":\" \",\"description\":\"D\",\"image\":\"CUP\",\"price\":12}",
-            "{\"sku\":\"atomic\",\"title\":\"Duplicate\",\"description\":\"D\",\"image\":\"CUP\",\"price\":12}",
-            "{\"sku\":\"second\",\"title\":\"Second\",\"description\":\"D\",\"image\":\"../../secret\",\"price\":12}"
-    })
+    @MethodSource("invalidCatalogItems")
     void invalidCatalogRejectsTheWholeFileBeforeWritingItsValidFirstRow(String invalid) {
         String first = """
                 {"sku":"atomic","title":"First","description":"D","image":"KEYBOARD","price":100}
@@ -136,7 +108,7 @@ class StoreServiceTest {
 
     @Test
     void checkoutCreatesOwnedOrderAndDeliveryThenClearsTheCart() throws Exception {
-        importItems(input("checkout", "Keyboard", "Description", 2500));
+        importItems(productInput("checkout", "Keyboard", "Description", 2500));
         UUID cartId = await(carts.identify(null));
         long productId = id("checkout");
         await(carts.change(cartId, productId, CartAction.SET, 2));
@@ -164,7 +136,7 @@ class StoreServiceTest {
 
     @Test
     void failedOutboxWriteRollsBackTheOrderAndCartDeletion() throws Exception {
-        importItems(input("rollback", "Rollback", "Description", 700));
+        importItems(productInput("rollback", "Rollback", "Description", 700));
         UUID cartId = await(carts.identify(null));
         await(carts.change(cartId, id("rollback"), CartAction.PLUS));
         // Ошибка последней записи проверяет настоящий rollback сервисной транзакции, а не откат теста.
@@ -182,7 +154,7 @@ class StoreServiceTest {
 
     @Test
     void simultaneousCheckoutCreatesExactlyOneCommittedOrder() throws Exception {
-        importItems(input("concurrent", "Concurrent", "Description", 700));
+        importItems(productInput("concurrent", "Concurrent", "Description", 700));
         UUID cartId = await(carts.identify(null));
         await(carts.change(cartId, id("concurrent"), CartAction.PLUS));
 
@@ -198,7 +170,7 @@ class StoreServiceTest {
 
     @Test
     void simultaneousIncrementsCannotExceedTheQuantityLimit() throws Exception {
-        importItems(input("limit", "Limited", "Description", 700));
+        importItems(productInput("limit", "Limited", "Description", 700));
         UUID cartId = await(carts.identify(null));
         long productId = id("limit");
         await(carts.change(cartId, productId, CartAction.SET, 98));
@@ -214,7 +186,7 @@ class StoreServiceTest {
 
     @Test
     void checkoutRacingIncrementDoesNotLoseAnyProduct() throws Exception {
-        importItems(input("race", "Race", "Description", 700));
+        importItems(productInput("race", "Race", "Description", 700));
         UUID cartId = await(carts.identify(null));
         long productId = id("race");
         await(carts.change(cartId, productId, CartAction.PLUS));
@@ -230,7 +202,7 @@ class StoreServiceTest {
 
     @Test
     void setRequiresAQuantityAndZeroRemovesTheExistingLine() throws Exception {
-        importItems(input("set", "Set", "Description", 700));
+        importItems(productInput("set", "Set", "Description", 700));
         UUID cartId = await(carts.identify(null));
         long productId = id("set");
         await(carts.change(cartId, productId, CartAction.PLUS));
@@ -244,7 +216,7 @@ class StoreServiceTest {
     @ParameterizedTest
     @ValueSource(ints = {-1, 100})
     void setRejectsAnOutOfRangeQuantityWithoutChangingTheCart(int quantity) throws Exception {
-        importItems(input("quantity", "Quantity", "Description", 700));
+        importItems(productInput("quantity", "Quantity", "Description", 700));
         UUID cartId = await(carts.identify(null));
         long productId = id("quantity");
         await(carts.change(cartId, productId, CartAction.SET, 2));
@@ -257,6 +229,14 @@ class StoreServiceTest {
     void applicationUsesOneReactiveTransactionManagerAndNoJdbcDataSource() {
         assertEquals(1, context.getBeansOfType(ReactiveTransactionManager.class).size());
         assertTrue(context.getBeansOfType(DataSource.class).isEmpty());
+    }
+
+    static Stream<String> invalidCatalogItems() {
+        return Stream.of(
+                "{\"sku\":\"second\",\"title\":\"Second\",\"description\":\"D\",\"image\":\"CUP\",\"price\":12.9}",
+                "{\"sku\":\"second\",\"title\":\" \",\"description\":\"D\",\"image\":\"CUP\",\"price\":12}",
+                "{\"sku\":\"atomic\",\"title\":\"Duplicate\",\"description\":\"D\",\"image\":\"CUP\",\"price\":12}",
+                "{\"sku\":\"second\",\"title\":\"Second\",\"description\":\"D\",\"image\":\"../../secret\",\"price\":12}");
     }
 
     private List<Signal<Boolean>> race(Mono<Boolean> first, Mono<Boolean> second) throws Exception {
@@ -292,28 +272,11 @@ class StoreServiceTest {
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
-    private void expectError(Mono<?> publisher, StoreError error) {
-        StepVerifier.create(publisher).expectErrorSatisfies(failure ->
-                assertEquals(error, assertInstanceOf(StoreException.class, failure).getError())).verify(TIMEOUT);
-    }
-
-    private <T> T await(Mono<T> publisher) {
-        return Objects.requireNonNull(publisher.block(TIMEOUT), "Expected a value");
-    }
-
-    private void execute(String sql) {
-        database.sql(sql).fetch().rowsUpdated().then().block(TIMEOUT);
-    }
-
     private void importItems(ProductInput... inputs) throws Exception {
         await(importer.importJson(json.writeValueAsBytes(List.of(inputs))));
     }
 
     private long id(String sku) {
         return await(products.findAllBySkuIn(List.of(sku)).single()).id();
-    }
-
-    private ProductInput input(String sku, String title, String description, long price) {
-        return new ProductInput(sku, title, description, ImageAsset.KEYBOARD, price);
     }
 }

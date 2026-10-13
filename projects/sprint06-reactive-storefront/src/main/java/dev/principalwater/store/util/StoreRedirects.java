@@ -1,4 +1,4 @@
-package dev.principalwater.store.controller;
+package dev.principalwater.store.util;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.web.reactive.result.view.RedirectView;

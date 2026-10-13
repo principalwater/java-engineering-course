@@ -35,7 +35,7 @@ class AnalyticsDashboardServiceTest {
         when(clickhouse.dashboard(source, LocalDate.parse("2026-10-06"), LocalDate.parse("2026-10-12")))
                 .thenReturn(Mono.just(List.of(
                         new AnalyticsRow(AnalyticsBucket.TOTAL, "1970-01-01", "", "", 3, 3, 101),
-                        new AnalyticsRow(AnalyticsBucket.PREVIOUS, "1970-01-01", "", "", 1, 2, 20),
+                        new AnalyticsRow(AnalyticsBucket.PREVIOUS, "1970-01-01", "", "", 0, 0, 0),
                         new AnalyticsRow(AnalyticsBucket.DAILY, "2026-10-12", "", "Alpha", 3, 3, 101),
                         new AnalyticsRow(AnalyticsBucket.PRODUCT, "1970-01-01", "zulu", "Zulu", 1, 1, 1),
                         new AnalyticsRow(AnalyticsBucket.PRODUCT, "1970-01-01", "alpha", "Alpha", 2, 2, 100))));
@@ -43,7 +43,8 @@ class AnalyticsDashboardServiceTest {
         StepVerifier.create(service(queue, clickhouse, null, clock).load(AnalyticsPeriod.LAST_7_DAYS))
                 .assertNext(view -> {
                     assertEquals(new BigDecimal("33.67"), view.summary().averageOrder());
-                    assertEquals(new AnalyticsSummary(1, 2, 20), view.previous());
+                    assertEquals(new AnalyticsSummary(0, 0, 0), view.previous());
+                    assertNull(view.previous().averageOrder());
                     assertEquals(7, view.daily().size());
                     assertEquals(LocalDate.parse("2026-10-12"), view.daily().getLast().date());
                     assertEquals(6, view.daily().stream().filter(day -> day.orderValue() == 0).count());
@@ -83,7 +84,9 @@ class AnalyticsDashboardServiceTest {
         var unrelated = new StoreException(StoreError.INVALID_REQUEST);
         when(clickhouse.dashboard(source, LocalDate.parse("2026-10-06"), LocalDate.parse("2026-10-12")))
                 .thenReturn(Mono.error(outage), Mono.error(unrelated), Mono.just(List.of(
-                        new AnalyticsRow(AnalyticsBucket.TOTAL, "1970-01-01", "", "", 0, 0, 0))));
+                        new AnalyticsRow(AnalyticsBucket.TOTAL, "1970-01-01", "", "", 0, 0, 0))), Mono.just(List.of(
+                        new AnalyticsRow(AnalyticsBucket.TOTAL, "1970-01-01", "", "", 0, 0, 0),
+                        new AnalyticsRow(AnalyticsBucket.PREVIOUS, "1970-01-01", "", "", 0, 0, 0))));
         when(delivery.flush()).thenReturn(Mono.just(DeliveryResult.delivered(0)),
                 Mono.just(DeliveryResult.inProgress()), Mono.error(outage), Mono.error(unrelated));
         var service = service(queue, clickhouse, delivery, clock);
@@ -103,6 +106,13 @@ class AnalyticsDashboardServiceTest {
         StepVerifier.create(service.load(AnalyticsPeriod.LAST_7_DAYS))
                 .assertNext(view -> assertEquals(AnalyticsDashboard.State.UNAVAILABLE, view.state()))
                 .expectComplete().verify(TIMEOUT);
+        StepVerifier.create(service.load(AnalyticsPeriod.LAST_7_DAYS)).assertNext(view -> {
+            assertEquals(AnalyticsDashboard.State.AVAILABLE, view.state());
+            assertEquals(0, view.summary().orders());
+            assertEquals(0, view.summary().orderValue());
+            assertNull(view.summary().averageOrder());
+            assertNull(view.previous().averageOrder());
+        }).expectComplete().verify(TIMEOUT);
     }
 
     private AnalyticsDashboardService service(AnalyticsQueue queue, ClickHouseClient client,

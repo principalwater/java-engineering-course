@@ -77,13 +77,17 @@
 </p>
 <div class="compare-bars" aria-hidden="true" hidden><span class="bar-previous"><i></i></span><span class="bar-current"><i></i></span></div>
 </div>
-<div class="metric-card" data-key="average" th:attr="data-current=${analytics.summary.averageOrder},data-previous=${comparable ? analytics.previous.averageOrder : null}">
+<div class="metric-card" data-key="average"
+     th:with="averageComparable=${comparable and analytics.summary.orders > 0 and analytics.previous.orders > 0}"
+     th:attr="data-current=${analytics.summary.averageOrder},data-previous=${comparable ? analytics.previous.averageOrder : null}">
 <p class="metric-label">Средний заказ</p>
-<strong class="metric-value" data-metric="average-order" th:text="${@display.money(analytics.summary.averageOrder)}">0,00 ₽</strong>
+<strong class="metric-value" data-metric="average-order" th:text="${analytics.summary.averageOrder == null ? '—' : @display.money(analytics.summary.averageOrder)}">—</strong>
 <p class="metric-note">сумма ÷ число заказов</p>
-<p class="metric-change" th:if="${comparable}" th:with="delta=${analytics.summary.averageOrder.subtract(analytics.previous.averageOrder)}">
-<span class="metric-delta" th:text="${delta.signum() == 0 ? 'Без изменений' : (delta.signum() > 0 ? '+' : '−') + @display.money(delta.abs())}"></span>
-<span class="metric-was" th:text="|Было ${@display.money(analytics.previous.averageOrder)} за предыдущие ${analytics.period.days} дней|"></span>
+<!--/* Узлы остаются для обновления через JSON; сравнение допустимо только при заказах в обоих периодах. */-->
+<p class="metric-change" th:attr="hidden=${averageComparable ? null : 'hidden'}"
+   th:with="delta=${averageComparable ? analytics.summary.averageOrder.subtract(analytics.previous.averageOrder) : null}">
+<span class="metric-delta" th:text="${delta == null ? '' : (delta.signum() == 0 ? 'Без изменений' : (delta.signum() > 0 ? '+' : '−') + @display.money(delta.abs()))}"></span>
+<span class="metric-was" th:text="${averageComparable ? 'Было ' + @display.money(analytics.previous.averageOrder) + ' за предыдущие ' + analytics.period.days + ' дней' : ''}"></span>
 </p>
 <div class="compare-bars" aria-hidden="true" hidden><span class="bar-previous"><i></i></span><span class="bar-current"><i></i></span></div>
 </div>

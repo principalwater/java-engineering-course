@@ -43,7 +43,7 @@
   };
   // «1250.5» или число → копейки; округление как у BigDecimal HALF_UP на втором знаке.
   const cents = value => {
-    const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(String(value ?? "0").trim());
+    const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(String(value).trim());
     if (!match) throw new Error("Invalid analytics amount");
     const fraction = `${match[3] ?? ""}000`.slice(0, 3);
     let result = BigInt(match[2]) * 100n + BigInt(fraction.slice(0, 2));
@@ -91,8 +91,7 @@
       orders,
       units: int(source.units),
       value,
-      average: source.averageOrder != null ? cents(source.averageOrder)
-        : (orders === 0n ? 0n : (value * 200n + orders) / (2n * orders)),
+      average: orders === 0n ? null : cents(source.averageOrder),
     };
   };
 
@@ -127,9 +126,11 @@
     const stamp = name => instant(page.querySelector(`[data-queue="${name}"] time`)?.getAttribute("datetime"));
     const side = attribute => {
       if (card("orders").dataset[attribute] === undefined) return null;
+      const orders = int(card("orders").dataset[attribute]);
       return {
-        orders: int(card("orders").dataset[attribute]), value: int(card("value").dataset[attribute]),
-        units: int(card("units").dataset[attribute]), average: cents(card("average").dataset[attribute]),
+        orders, value: int(card("value").dataset[attribute]),
+        units: int(card("units").dataset[attribute]),
+        average: orders === 0n ? null : cents(card("average").dataset[attribute]),
       };
     };
     return {
@@ -209,12 +210,13 @@
       if (!card) continue;
       const current = model.summary[key];
       const previous = model.previous?.[key];
+      const comparable = current != null && previous != null;
       const change = card.querySelector(".metric-change");
+      if (change) change.hidden = !comparable;
       if (texts) {
-        card.querySelector("[data-metric]").textContent = format(current);
+        card.querySelector("[data-metric]").textContent = current == null ? "—" : format(current);
         if (change) {
-          change.hidden = previous === undefined;
-          if (previous !== undefined) {
+          if (comparable) {
             const delta = current - previous;
             change.querySelector(".metric-delta").textContent = delta === 0n
               ? "Без изменений" : `${delta > 0n ? "+" : "−"}${format(absolute(delta))}`;
@@ -225,10 +227,10 @@
       // Две полосы «было / стало» на общей шкале; сами числа уже есть в тексте, поэтому полосы декоративны.
       const bars = card.querySelector(".compare-bars");
       if (bars) {
-        const peak = Math.max(Number(current), Number(previous ?? 0n));
-        const scale = d3.scaleLinear().domain([0, peak || 1]).range([0, 100]);
-        bars.hidden = previous === undefined || peak === 0;
+        const peak = comparable ? Math.max(Number(current), Number(previous)) : 0;
+        bars.hidden = !comparable || peak === 0;
         if (!bars.hidden) {
+          const scale = d3.scaleLinear().domain([0, peak]).range([0, 100]);
           bars.querySelector(".bar-previous i").style.width = `${scale(Number(previous)).toFixed(1)}%`;
           bars.querySelector(".bar-current i").style.width = `${scale(Number(current)).toFixed(1)}%`;
         }
@@ -480,7 +482,7 @@
       if (ticket !== sequence) return;
       console.warn("Analytics refresh failed:", error);
       // Серверная страница сама покажет актуальное состояние, включая недоступную аналитику.
-      location.assign(`${page.dataset.page}?days=${encodeURIComponent(days)}`);
+      location.replace(`${page.dataset.page}?days=${encodeURIComponent(days)}`);
     } finally {
       clearTimeout(timer);
       if (ticket === sequence) setBusy(false);

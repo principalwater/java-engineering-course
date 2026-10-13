@@ -83,6 +83,14 @@ class AnalyticsIntegrationTest {
 
     @Test
     void realCheckoutRetriesUnknownOutcomeAndRecoversAfterWarehouseOutage() throws Exception {
+        // Пустое окно доступно, но среднего без заказов нет: wire-контракт сохраняет явный null.
+        web.get().uri("/profile/analytics/data").accept(MediaType.APPLICATION_JSON)
+                .exchange().expectStatus().isOk().expectBody()
+                .jsonPath("$.summary.orders").isEqualTo("0")
+                .jsonPath("$.summary.averageOrder").hasJsonPath()
+                .jsonPath("$.summary.averageOrder").value(value -> assertNull(value));
+        web.get().uri("/profile/analytics").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
+                .expectBody(String.class).value(html -> assertTrue(html.contains("data-metric=\"average-order\">—")));
         value(importer.importJson(json.writeValueAsBytes(List.of(new ProductInput(
                 "analytics-keyboard", "Клавиатура", "Снимок заказа", ImageAsset.KEYBOARD, 7900L)))));
         long productId = value(products.findAllBySkuIn(List.of("analytics-keyboard")).single()).id();
@@ -112,6 +120,7 @@ class AnalyticsIntegrationTest {
                 .expectBody(String.class).value(html -> {
                     assertTrue(html.contains("data-metric=\"orders\">1"));
                     assertTrue(html.contains("Клавиатура"));
+                    assertFalse(html.contains("Было 0,00"));
                 });
 
         docker("stop");
@@ -162,6 +171,8 @@ class AnalyticsIntegrationTest {
                 .jsonPath("$.summary.orderValue").isEqualTo("23700")
                 .jsonPath("$.summary.averageOrder").isEqualTo("11850.00")
                 .jsonPath("$.previous.orders").isEqualTo("0")
+                .jsonPath("$.previous.averageOrder").hasJsonPath()
+                .jsonPath("$.previous.averageOrder").value(value -> assertNull(value))
                 .jsonPath("$.period.days").isEqualTo(30)
                 .jsonPath("$.daily.length()").isEqualTo(30);
         web.get().uri("/profile/analytics?days=365").accept(MediaType.TEXT_HTML)

@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org"><head th:replace="~{fragments :: head('Корзина')}"></head>
+<body><header th:replace="~{fragments :: header('cart')}"></header><main id="main">
+<div class="page-heading"><p class="eyebrow">ПОДБОРКА ДЛЯ СЕБЯ</p><h1>Ваша корзина</h1><p class="lead">Можно изменить количество или убрать то, что пока не нужно.</p></div>
+<section class="cart-layout" th:if="${!cart.items.isEmpty()}"><div class="cart-lines">
+<article class="cart-line" th:each="item : ${cart.items}" th:attr="data-product-id=${item.id},data-count=${item.count}">
+<a th:href="@{/items/{id}(id=${item.id})}"><img th:src="@{${item.imgPath}}" th:alt="${item.title}" width="160" height="120"></a><div><a class="item-title" th:href="@{/items/{id}(id=${item.id})}" th:text="${item.title}"></a><p class="muted" th:text="|${@display.money(item.price)} за предмет|"></p><div th:replace="~{fragments :: quantity(${item}, @{/cart/items}, ${null})}"></div></div><strong class="line-total" th:text="${@display.money(item.total())}"></strong>
+</article></div><aside class="order-summary"><p class="eyebrow">ВСЁ ГОТОВО</p><h2>Ваш выбор</h2><div class="summary-row"><span>Предметов</span><strong th:text="${cart.itemCount()}"></strong></div><div class="summary-total"><span>Итого</span><strong th:text="${@display.money(cart.total())}" th:attr="data-cart-total=${cart.total()}"></strong></div><form method="post" th:action="@{/buy}"><button class="primary full-width" type="submit">Оформить заказ →</button></form><p class="quiet-note">Никаких списаний. Заказ сохраняется в вашей истории.</p></aside></section>
+<section class="empty-state" th:if="${cart.items.isEmpty()}"><p class="eyebrow">ЕСТЬ МЕСТО ДЛЯ НОВОГО</p><h2>Корзина пока пуста</h2><p>Выберите то, что хочется добавить на рабочий стол.</p><a class="primary button-link" th:href="@{/items}">В коллекцию →</a></section>
+</main><footer th:replace="~{fragments :: footer}"></footer></body></html>

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:fragment="head(title)">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title th:text="|${title} · Мастерская|">Мастерская</title>
+<link rel="stylesheet" th:href="@{/store.css}"><script defer th:src="@{/store.js}"></script>
+</head>
+<body>
+<header th:fragment="header(active)" class="site-header">
+<a class="skip-link" href="#main">К содержимому</a>
+<a class="brand" th:href="@{/items}"><span class="brand-symbol" aria-hidden="true">м</span><span>мастерская<span class="brand-note">вещи для рабочего стола</span></span></a>
+<nav aria-label="Основная навигация">
+<a th:href="@{/items}" th:classappend="${active == 'items'} ? 'active'" th:attr="aria-current=${active == 'items' ? 'page' : null}">Витрина</a>
+<a th:href="@{/orders}" th:classappend="${active == 'orders'} ? 'active'" th:attr="aria-current=${active == 'orders' ? 'page' : null}">Заказы</a>
+<a th:href="@{/analytics}" th:classappend="${active == 'analytics'} ? 'active'" th:attr="aria-current=${active == 'analytics' ? 'page' : null}">Аналитика</a>
+<a class="cart-link" th:href="@{/cart/items}" th:classappend="${active == 'cart'} ? 'active'" th:attr="aria-current=${active == 'cart' ? 'page' : null}">Корзина <span class="nav-count" th:text="${cart == null ? 0 : cart.itemCount()}">0</span></a>
+<button class="theme-button" type="button" id="theme-switch" aria-label="Тёмная тема" aria-pressed="false">◐</button>
+</nav>
+</header>
+<footer th:fragment="footer" class="site-footer"><span>Мастерская · демонстрационный магазин. Оплата не производится.</span><a th:href="@{/catalog}">Управление каталогом</a></footer>
+<div th:fragment="notice" th:if="${notice != null}" class="notice" role="status" th:text="${notice}"></div>
+<form th:fragment="quantity(item, url, query)" class="quantity-form" method="post" th:action="${url}">
+<input type="hidden" name="id" th:value="${item.id}">
+<th:block th:if="${query != null}">
+<input type="hidden" name="search" th:value="${query.search}"><input type="hidden" name="sort" th:value="${query.sort}">
+<input type="hidden" name="pageNumber" th:value="${query.pageNumber}"><input type="hidden" name="pageSize" th:value="${query.pageSize}">
+</th:block>
+<button class="quantity-step" name="action" value="MINUS" th:disabled="${item.count == 0}" th:attr="aria-label=|Уменьшить количество «${item.title}»|">−</button>
+<span class="quantity-value" th:text="${item.count}" th:attr="aria-label=|Количество в корзине: ${item.count}|">0</span>
+<button class="quantity-add" name="action" value="PLUS" th:disabled="${item.count >= maxQuantity}" th:attr="aria-label=|Добавить «${item.title}» в корзину|" th:text="${item.count == 0} ? 'Добавить' : '+'">Добавить</button>
+<button class="quantity-remove" th:if="${item.count > 0}" name="action" value="DELETE" th:attr="aria-label=|Удалить «${item.title}» из корзины|">×</button>
+</form>
+</body></html>

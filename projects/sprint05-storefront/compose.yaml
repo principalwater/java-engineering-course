@@ -1,0 +1,48 @@
+name: sprint05-storefront
+services:
+  db:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-storefront}
+      POSTGRES_USER: ${POSTGRES_USER:-storefront}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes:
+      - storefront-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+  backend:
+    build: .
+    # Bind-mounted secrets на Linux сохраняют владельца хоста и права 0600.
+    user: "${STORE_UID:-10001}:${STORE_GID:-10001}"
+    environment:
+      SERVER_PORT: "8080"
+      SPRING_PROFILES_ACTIVE: postgresql
+      DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-storefront}
+      DB_USER: ${POSTGRES_USER:-storefront}
+    secrets:
+      - source: db_password
+        target: spring.datasource.password
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8085}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health/readiness"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: 512m
+volumes:
+  storefront-data:
+secrets:
+  db_password:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint05}/db_password

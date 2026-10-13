@@ -38,6 +38,6 @@ def initialize(directory, repository):
 
 if __name__ == "__main__":
     repository = Path(__file__).resolve().parents[3]
-    directory = os.environ.get("STORE_SECRETS_DIR", Path.home() / ".config/java-engineering-course/sprint05")
+    directory = os.environ.get("STORE_SECRETS_DIR", Path.home() / ".config/java-engineering-course/sprint06")
     initialize(directory, repository)
     print("Local secrets are ready; existing values were preserved")

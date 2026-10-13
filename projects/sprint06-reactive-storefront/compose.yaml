@@ -1,4 +1,4 @@
-name: sprint05-storefront
+name: sprint06-reactive-storefront
 services:
   db:
     image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
@@ -22,13 +22,13 @@ services:
     environment:
       SERVER_PORT: "8080"
       SPRING_PROFILES_ACTIVE: postgresql
-      DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-storefront}
+      DB_URL: r2dbc:postgresql://db:5432/${POSTGRES_DB:-storefront}
       DB_USER: ${POSTGRES_USER:-storefront}
     secrets:
       - source: db_password
-        target: spring.datasource.password
+        target: spring.r2dbc.password
     ports:
-      - "127.0.0.1:${WEB_PORT:-8085}:8080"
+      - "127.0.0.1:${WEB_PORT:-8086}:8080"
     depends_on:
       db:
         condition: service_healthy
@@ -45,4 +45,4 @@ volumes:
   storefront-data:
 secrets:
   db_password:
-    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint05}/db_password
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint06}/db_password

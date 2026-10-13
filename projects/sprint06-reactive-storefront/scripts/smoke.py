@@ -131,6 +131,6 @@ class MarketProbe:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default="http://localhost:8085")
+    parser.add_argument("--base-url", default="http://localhost:8086")
     arguments = parser.parse_args()
     MarketProbe(arguments.base_url).run()

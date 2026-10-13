@@ -4,6 +4,7 @@
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import time
 from urllib.error import URLError
@@ -12,7 +13,7 @@ from urllib.request import urlopen
 from smoke import MarketProbe
 
 PROJECT = Path(__file__).resolve().parents[1]
-TEST_HTTP_PORT = 18095
+TEST_HTTP_PORT = 18096
 
 
 def main():
@@ -26,6 +27,7 @@ def main():
                                         "--store.analytics.enabled=false", "--server.address=127.0.0.1",
                                         f"--server.port={TEST_HTTP_PORT}"], cwd=directory,
                                        stdout=log, stderr=subprocess.STDOUT)
+            succeeded = False
             try:
                 deadline = time.monotonic() + 60
                 while True:
@@ -43,16 +45,23 @@ def main():
                 with urlopen(base + "/actuator/info", timeout=3) as response:
                     assert json.load(response)["build"]["name"] == "storefront"
                 MarketProbe(base).run()
-                print("Executable JAR: embedded Tomcat, native H2, readiness and real HTTP passed")
+                succeeded = True
+                print("Executable JAR: embedded Netty, native H2, readiness and real HTTP passed")
+            except Exception:
+                log.flush()
+                print((Path(directory) / "application.log").read_text(), file=sys.stderr)
+                raise
             finally:
-                process.terminate()
+                if process.poll() is None:
+                    process.terminate()
                 try:
                     process.wait(timeout=25)
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait()
                     raise RuntimeError("The executable JAR exceeded its shutdown budget")
-                assert process.returncode in (0, 143, -15), "Unexpected executable JAR termination"
+                if succeeded:
+                    assert process.returncode in (0, 143, -15), "Unexpected executable JAR termination"
 
 
 if __name__ == "__main__":

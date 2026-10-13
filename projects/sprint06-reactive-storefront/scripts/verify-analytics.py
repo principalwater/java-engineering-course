@@ -14,7 +14,7 @@ import uuid
 
 PROJECT = Path(__file__).resolve().parents[1]
 # Автоматически назначенный published port меняется при stop/start; проверке восстановления нужен стабильный.
-TEST_ANALYTICS_PORT = 18125
+TEST_ANALYTICS_PORT = 18126
 
 
 def main():

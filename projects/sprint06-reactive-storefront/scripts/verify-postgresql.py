@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Проверяет JPA/транзакции на отдельной БД; данные работающего магазина не затрагиваются."""
+"""Проверяет R2DBC/транзакции на отдельной БД; данные работающего магазина не затрагиваются."""
 
 import json
 import os
@@ -39,11 +39,12 @@ def main():
                     raise TimeoutError("The isolated PostgreSQL instance did not become ready")
                 time.sleep(1)
             port = subprocess.check_output(["docker", "port", name, "5432"], text=True).strip().rsplit(":", 1)[1]
-            environment = {**os.environ, "STORE_TEST_DB_URL": f"jdbc:postgresql://127.0.0.1:{port}/store_tests",
-                           "STORE_TEST_DB_USER": "store_tests", "STORE_TEST_DB_PASSWORD": password}
+            environment = {**os.environ, "STORE_TEST_DB_URL": f"r2dbc:postgresql://127.0.0.1:{port}/store_tests",
+                           "STORE_TEST_DB_USER": "store_tests", "STORE_TEST_DB_PASSWORD": password,
+                           "STORE_TEST_DB_PLATFORM": "postgresql"}
             subprocess.run([str(PROJECT / "gradlew"), "--no-daemon", "--console=plain", "postgresTest"],
                            cwd=PROJECT, env=environment, check=True)
-            print("Isolated PostgreSQL: JPA, migrations, rollback and concurrent checkout passed")
+            print("Isolated PostgreSQL: R2DBC, schema, rollback and concurrent checkout passed")
         finally:
             if created:
                 subprocess.run(["docker", "rm", "-f", name], check=True, stdout=subprocess.DEVNULL)

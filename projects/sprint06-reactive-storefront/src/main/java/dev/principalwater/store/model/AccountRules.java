@@ -9,7 +9,7 @@ public final class AccountRules {
     public static final int DISPLAY_NAME_MAX_LENGTH = 64;
     public static final int PASSWORD_MIN_LENGTH = 12;
     public static final int PASSWORD_MAX_BYTES = 72;
-    public static final String USERNAME_PATTERN = "[A-Za-z0-9][A-Za-z0-9._-]{2,31}";
+    public static final String USERNAME_PATTERN = "[A-Za-z0-9][A-Za-z0-9._\\-]{2,31}";
 
     private AccountRules() {
     }

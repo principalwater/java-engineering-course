@@ -36,6 +36,7 @@ public class ClickHouseClient implements AutoCloseable {
     private static final int MAX_RESPONSE_BYTES = 256 * 1024;
     private static final int MAX_CONNECTIONS = 4;
     private static final int MAX_PENDING_REQUESTS = 16;
+    private static final int MAX_COORDINATORS = 16;
     private static final String INSERT = "INSERT INTO storefront.purchase_facts FORMAT JSONEachRow";
     private final AnalyticsProperties properties;
     private final List<URI> endpoints;
@@ -48,8 +49,8 @@ public class ClickHouseClient implements AutoCloseable {
 
     public ClickHouseClient(AnalyticsProperties properties, ObjectMapper json, WebClient.Builder builder) {
         endpoints = properties.endpoints();
-        if (endpoints.isEmpty() || endpoints.size() > MAX_PENDING_REQUESTS) {
-            throw new IllegalArgumentException("ClickHouse requires 1..16 coordinator endpoints");
+        if (endpoints.isEmpty() || endpoints.size() > MAX_COORDINATORS) {
+            throw new IllegalArgumentException("ClickHouse requires 1.." + MAX_COORDINATORS + " coordinator endpoints");
         }
         for (URI url : endpoints) {
             if (url == null || !List.of("http", "https").contains(url.getScheme()) || url.getHost() == null
@@ -139,6 +140,7 @@ public class ClickHouseClient implements AutoCloseable {
         return Mono.defer(() -> {
             int first = Math.floorMod(nextEndpoint.getAndIncrement(), endpoints.size());
             return executeAt(first, 0, request, payload, user, password);
+        // shortcut: зависший узел расходует общий бюджет; для мгновенного failover нужен отдельный budget >= server timeout.
         }).timeout(OPERATION_TIMEOUT).onErrorMap(TimeoutException.class, this::unavailable);
     }
 
@@ -148,8 +150,7 @@ public class ClickHouseClient implements AutoCloseable {
         return execute(request.apply(endpoint), payload, user, password).onErrorResume(error -> {
             Throwable cause = error instanceof StoreException ? error.getCause() : error;
             // Не повторяем SQL/HTTP-ошибки. Неясный сетевой исход допускает replay неизменяемого ключа, без раннего ACK.
-            boolean networkFailure = cause instanceof WebClientRequestException || cause instanceof TimeoutException
-                    || cause instanceof io.netty.handler.timeout.TimeoutException;
+            boolean networkFailure = cause instanceof WebClientRequestException;
             return networkFailure && attempt + 1 < endpoints.size()
                     ? executeAt(first, attempt + 1, request, payload, user, password) : Mono.error(error);
         });

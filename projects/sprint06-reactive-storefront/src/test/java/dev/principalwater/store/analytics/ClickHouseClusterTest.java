@@ -18,7 +18,8 @@ import org.junit.jupiter.api.Timeout;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.test.StepVerifier;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Timeout(120)
 class ClickHouseClusterTest extends TestBase {
@@ -44,23 +45,31 @@ class ClickHouseClusterTest extends TestBase {
         List<AnalyticsFact> facts = java.util.stream.LongStream.rangeClosed(1, 16).mapToObj(index ->
                 new AnalyticsFact(source, new UUID(0, index), UUID.randomUUID(), index,
                         day + " 10:00:00.000", 0, index, "sku-" + index, "Item " + index, 100, 2)).toList();
+        var grownBatch = new java.util.ArrayList<>(facts);
+        grownBatch.addAll(facts.stream().map(fact -> new AnalyticsFact(source, fact.userId(), UUID.randomUUID(),
+                fact.orderId() + 50, fact.createdAt(), fact.lineNumber(), fact.productId(), fact.sku(), fact.title(),
+                fact.price(), fact.quantity())).toList());
+        for (URI endpoint : endpoints) {
+            admin(endpoint, "SYSTEM STOP MERGES storefront.purchase_facts_local");
+        }
         try (var client = new ClickHouseClient(properties, json, WebClient.builder())) {
             StepVerifier.create(client.insert(facts)).expectComplete().verify(TIMEOUT);
-            StepVerifier.create(client.insert(facts)).expectComplete().verify(TIMEOUT);
+            // Расширенный replay имеет другой block hash: ReplicatedMergeTree не скрывает дубли за нас.
+            StepVerifier.create(client.insert(grownBatch)).expectComplete().verify(TIMEOUT);
             for (URI endpoint : endpoints) {
                 admin(endpoint, "SYSTEM SYNC REPLICA storefront.purchase_facts_local");
             }
             long firstShard = count(endpoints.get(0), source);
             long secondShard = count(endpoints.get(2), source);
             assertTrue(firstShard > 0 && secondShard > 0, "Deterministic user keys must reach both shards");
-            assertEquals(16, firstShard + secondShard);
+            assertEquals(32, firstShard + secondShard);
             assertEquals(firstShard, count(endpoints.get(1), source));
             assertEquals(secondShard, count(endpoints.get(3), source));
             StepVerifier.create(client.dashboard(source, facts.getFirst().userId(), day, day)).assertNext(rows -> {
                 var total = rows.stream().filter(row -> row.bucket() == AnalyticsBucket.TOTAL).findFirst().orElseThrow();
-                assertEquals(1, total.orders());
-                assertEquals(2, total.units());
-                assertEquals(200, total.orderValue());
+                assertEquals(2, total.orders());
+                assertEquals(4, total.units());
+                assertEquals(400, total.orderValue());
             }).expectComplete().verify(TIMEOUT);
             // Реплика и coordinator совпадают: чтение переключается, INSERT с quorum=2 не получает ложного ACK.
             var nextFacts = facts.stream().map(fact -> new AnalyticsFact(source, fact.userId(), UUID.randomUUID(),
@@ -69,7 +78,7 @@ class ClickHouseClusterTest extends TestBase {
             docker("stop", containers[0]);
             try {
                 StepVerifier.create(client.dashboard(source, facts.getFirst().userId(), day, day))
-                        .assertNext(rows -> assertEquals(200, rows.stream()
+                        .assertNext(rows -> assertEquals(400, rows.stream()
                                 .filter(row -> row.bucket() == AnalyticsBucket.TOTAL).findFirst().orElseThrow().orderValue()))
                         .expectComplete().verify(TIMEOUT);
                 StepVerifier.create(client.insert(nextFacts)).expectErrorSatisfies(error ->
@@ -80,7 +89,7 @@ class ClickHouseClusterTest extends TestBase {
             }
             StepVerifier.create(client.insert(nextFacts)).expectComplete().verify(TIMEOUT);
             StepVerifier.create(client.dashboard(source, facts.getFirst().userId(), day, day))
-                    .assertNext(rows -> assertEquals(2, rows.stream()
+                    .assertNext(rows -> assertEquals(3, rows.stream()
                             .filter(row -> row.bucket() == AnalyticsBucket.TOTAL).findFirst().orElseThrow().orders()))
                     .expectComplete().verify(TIMEOUT);
         }
@@ -119,7 +128,10 @@ class ClickHouseClusterTest extends TestBase {
     private void docker(String action, String container) throws Exception {
         Process process = new ProcessBuilder("docker", action, container).redirectErrorStream(true).start();
         String output = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-        assertTrue(process.waitFor(20, java.util.concurrent.TimeUnit.SECONDS), "Container command timed out");
+        if (!process.waitFor(20, java.util.concurrent.TimeUnit.SECONDS)) {
+            process.destroyForcibly();
+            throw new AssertionError("Container command timed out");
+        }
         assertEquals(0, process.exitValue(), output);
     }
 

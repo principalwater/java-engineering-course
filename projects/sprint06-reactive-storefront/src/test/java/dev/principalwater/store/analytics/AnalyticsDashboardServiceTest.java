@@ -22,6 +22,7 @@ import static org.mockito.Mockito.when;
 
 class AnalyticsDashboardServiceTest extends ReactiveTestBase {
     private final UUID userId = UUID.randomUUID();
+        UUID cartId = UUID.randomUUID();
 
     @Test
     void dashboardZeroFillsItsUtcWindowRanksProductsAndRoundsTheAverageExactly() {
@@ -30,7 +31,7 @@ class AnalyticsDashboardServiceTest extends ReactiveTestBase {
         UUID source = UUID.randomUUID();
         var clock = Clock.fixed(Instant.parse("2026-10-12T23:30:00Z"), ZoneOffset.UTC);
         when(queue.sourceId()).thenReturn(Mono.just(source));
-        when(queue.status(userId)).thenReturn(Mono.just(new QueueStatus(0, clock.instant(), null)));
+        when(queue.status(cartId)).thenReturn(Mono.just(new QueueStatus(0, clock.instant(), null)));
         when(clickhouse.dashboard(source, userId, LocalDate.parse("2026-10-06"), LocalDate.parse("2026-10-12")))
                 .thenReturn(Mono.just(List.of(
                         new AnalyticsRow(AnalyticsBucket.TOTAL, "1970-01-01", "", "", 3, 3, 101),
@@ -39,7 +40,7 @@ class AnalyticsDashboardServiceTest extends ReactiveTestBase {
                         new AnalyticsRow(AnalyticsBucket.PRODUCT, "1970-01-01", "zulu", "Zulu", 1, 1, 1),
                         new AnalyticsRow(AnalyticsBucket.PRODUCT, "1970-01-01", "alpha", "Alpha", 2, 2, 100))));
 
-        StepVerifier.create(service(queue, clickhouse, null, clock).load(AnalyticsPeriod.LAST_7_DAYS, userId, userId))
+        StepVerifier.create(service(queue, clickhouse, null, clock).load(AnalyticsPeriod.LAST_7_DAYS, userId, cartId))
                 .assertNext(view -> {
                     assertEquals(new BigDecimal("33.67"), view.summary().averageOrder());
                     assertEquals(new AnalyticsSummary(0, 0, 0), view.previous());
@@ -57,10 +58,10 @@ class AnalyticsDashboardServiceTest extends ReactiveTestBase {
     void disabledAnalyticsRetainsTheQueueWithoutInventingMetricsOrAllowingDelivery() {
         var queue = mock(AnalyticsQueue.class);
         var pending = new QueueStatus(3, null, Instant.parse("2026-10-12T10:00:00Z"));
-        when(queue.status(userId)).thenReturn(Mono.just(pending));
+        when(queue.status(cartId)).thenReturn(Mono.just(pending));
         var service = service(queue, null, null, Clock.systemUTC());
 
-        StepVerifier.create(service.load(AnalyticsPeriod.LAST_7_DAYS, userId, userId)).assertNext(view -> {
+        StepVerifier.create(service.load(AnalyticsPeriod.LAST_7_DAYS, userId, cartId)).assertNext(view -> {
             assertEquals(AnalyticsDashboard.State.DISABLED, view.state());
             assertEquals(pending, view.queue());
             assertNull(view.summary());
@@ -77,7 +78,7 @@ class AnalyticsDashboardServiceTest extends ReactiveTestBase {
         var clock = Clock.fixed(Instant.parse("2026-10-12T23:30:00Z"), ZoneOffset.UTC);
         UUID source = UUID.randomUUID();
         when(queue.sourceId()).thenReturn(Mono.just(source));
-        when(queue.status(userId)).thenReturn(Mono.just(new QueueStatus(2, null, clock.instant())));
+        when(queue.status(cartId)).thenReturn(Mono.just(new QueueStatus(2, null, clock.instant())));
         var outage = new StoreException(StoreError.ANALYTICS_UNAVAILABLE);
         var unrelated = new StoreException(StoreError.INVALID_REQUEST);
         when(clickhouse.dashboard(source, userId, LocalDate.parse("2026-10-06"), LocalDate.parse("2026-10-12")))
@@ -89,7 +90,7 @@ class AnalyticsDashboardServiceTest extends ReactiveTestBase {
                 Mono.just(DeliveryResult.inProgress()), Mono.error(outage), Mono.error(unrelated));
         var service = service(queue, clickhouse, delivery, clock);
 
-        StepVerifier.create(service.load(AnalyticsPeriod.LAST_7_DAYS, userId, userId)).assertNext(view -> {
+        StepVerifier.create(service.load(AnalyticsPeriod.LAST_7_DAYS, userId, cartId)).assertNext(view -> {
             assertEquals(AnalyticsDashboard.State.UNAVAILABLE, view.state());
             assertNull(view.summary());
             assertNull(view.previous());
@@ -98,13 +99,13 @@ class AnalyticsDashboardServiceTest extends ReactiveTestBase {
         StepVerifier.create(service.sync()).expectNext(DeliveryResult.inProgress()).expectComplete().verify(TIMEOUT);
         StepVerifier.create(service.sync()).expectNext(DeliveryResult.unavailable()).expectComplete().verify(TIMEOUT);
         StepVerifier.create(service.sync()).expectErrorSatisfies(failure -> assertSame(unrelated, failure)).verify(TIMEOUT);
-        StepVerifier.create(service.load(AnalyticsPeriod.LAST_7_DAYS, userId, userId))
+        StepVerifier.create(service.load(AnalyticsPeriod.LAST_7_DAYS, userId, cartId))
                 .expectErrorSatisfies(failure -> assertSame(unrelated, failure)).verify(TIMEOUT);
         // Неполный ответ без предыдущего периода также не становится выдуманным сравнением с нулём.
-        StepVerifier.create(service.load(AnalyticsPeriod.LAST_7_DAYS, userId, userId))
+        StepVerifier.create(service.load(AnalyticsPeriod.LAST_7_DAYS, userId, cartId))
                 .assertNext(view -> assertEquals(AnalyticsDashboard.State.UNAVAILABLE, view.state()))
                 .expectComplete().verify(TIMEOUT);
-        StepVerifier.create(service.load(AnalyticsPeriod.LAST_7_DAYS, userId, userId)).assertNext(view -> {
+        StepVerifier.create(service.load(AnalyticsPeriod.LAST_7_DAYS, userId, cartId)).assertNext(view -> {
             assertEquals(AnalyticsDashboard.State.AVAILABLE, view.state());
             assertEquals(0, view.summary().orders());
             assertEquals(0, view.summary().orderValue());

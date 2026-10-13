@@ -1,8 +1,28 @@
 <!DOCTYPE html>
-<html lang="ru" xmlns:th="http://www.thymeleaf.org"><head th:replace="~{fragments :: head('Заказ')}"></head>
-<body><header th:replace="~{fragments :: header('orders')}"></header><main id="main">
-<a class="back-link" th:href="@{/orders}">← В историю заказов</a><div class="success-banner" th:if="${newOrder}" role="status"><span aria-hidden="true">✓</span><div><strong>Заказ оформлен</strong><p>Всё сохранилось в вашей истории. Оплата не проводилась.</p></div></div>
-<div class="page-heading"><p class="eyebrow">ВАША ПОДБОРКА</p><h1 th:text="|Заказ № ${order.id}|"></h1><time class="muted" th:datetime="${order.createdAt}" th:text="${@display.time(order.createdAt)}"></time></div>
-<section class="order-detail" th:attr="data-order-id=${order.id}"><article class="purchased-line" th:each="item : ${order.items}"><img th:src="@{${item.imgPath}}" th:alt="${item.title}" width="160" height="120"><div><h2 th:text="${item.title}"></h2><p class="muted" th:text="|${item.count} × ${@display.money(item.price)}|"></p></div><strong th:text="${@display.money(item.total())}"></strong></article><div class="purchase-total"><span>Стоимость заказа</span><strong th:text="${@display.money(order.totalSum)}" th:attr="data-order-total=${order.totalSum}"></strong></div></section>
-<p class="quiet-note">Названия и цены зафиксированы при оформлении и не меняются вместе с каталогом.</p><a class="primary button-link" th:href="@{/items}">Продолжить выбор →</a>
-</main><footer th:replace="~{fragments :: footer}"></footer></body></html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('Заказ')}"></head>
+<body>
+<header th:replace="~{fragments :: header('orders')}"></header>
+<main id="main">
+<a class="back-link" th:href="@{/orders}">В историю заказов</a>
+<div class="success-banner" th:if="${newOrder}" role="status"><span aria-hidden="true">✓</span><div><strong>Заказ оформлен</strong><p>Он сохранён в вашей истории. Оплата не проводилась.</p></div></div>
+<div class="page-heading">
+<h1 th:text="|Заказ № ${order.id}|"></h1>
+<time class="muted" th:datetime="${order.createdAt}" th:text="${@display.time(order.createdAt)}"></time>
+</div>
+<section class="order-detail" th:attr="data-order-id=${order.id}">
+<ul class="purchased-lines">
+<li class="purchased-line" th:each="item : ${order.items}">
+<img th:src="@{${item.imgPath}}" th:alt="${item.title}" width="160" height="120">
+<div><h2 th:text="${item.title}"></h2><p class="muted" th:text="|${item.count} × ${@display.money(item.price)}|"></p></div>
+<strong th:text="${@display.money(item.total)}"></strong>
+</li>
+</ul>
+<div class="purchase-total"><span>Стоимость заказа</span><strong th:text="${@display.money(order.totalSum)}" th:attr="data-order-total=${order.totalSum}"></strong></div>
+</section>
+<p class="quiet-note">Названия и цены зафиксированы при оформлении и не меняются вместе с каталогом.</p>
+<a class="button primary" th:href="@{/items}">Продолжить выбор</a>
+</main>
+<footer th:replace="~{fragments :: footer}"></footer>
+</body>
+</html>

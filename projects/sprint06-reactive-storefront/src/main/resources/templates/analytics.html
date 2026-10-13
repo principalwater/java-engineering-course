@@ -1,74 +1,153 @@
 <!DOCTYPE html>
 <html lang="ru" xmlns:th="http://www.thymeleaf.org">
-<head th:replace="~{fragments :: head('Аналитика')}"></head>
+<head th:replace="~{fragments :: head('Аналитика магазина')}"></head>
 <body>
 <header th:replace="~{fragments :: header('analytics')}"></header>
-<main id="main">
-    <div class="page-heading">
-        <p class="eyebrow">МАСТЕРСКАЯ В ЦИФРАХ</p>
-        <h1>Как живёт коллекция</h1>
-        <p class="lead">Оформленные заказы, выбранные предметы и их стоимость. По всему текущему магазину.</p>
-    </div>
-    <div th:replace="~{fragments :: notice}"></div>
-    <div class="analytics-toolbar">
-        <form method="get" th:action="@{/analytics}" class="period-selector" aria-label="Период аналитики">
-            <button class="secondary" th:each="period : ${periods}" name="days" th:value="${period.days}"
-                    th:classappend="${period == analytics.period} ? 'selected'"
-                    th:attr="aria-pressed=${period == analytics.period}" th:text="|${period.days} дней|"></button>
-        </form>
-        <form th:if="${analytics.state.name() != 'DISABLED'}" method="post" th:action="@{/analytics/sync}">
-            <input type="hidden" name="days" th:value="${analytics.period.days}">
-            <button class="secondary" type="submit">Обновить очередь →</button>
-        </form>
-    </div>
-    <div class="delivery-status">
-        <span th:text="|В очереди: ${analytics.queue.pendingOrders} заказов|"></span>
-        <span th:if="${analytics.queue.lastDelivery != null}"
-              th:text="|Последняя доставка: ${@display.time(analytics.queue.lastDelivery)}|"></span>
-        <span th:unless="${analytics.queue.lastDelivery != null}">Доставленных заказов пока нет</span>
-    </div>
+<main id="main" data-analytics
+      th:with="live=${analytics.state.name() == 'AVAILABLE'}, comparable=${analytics.previous != null}"
+      th:attr="data-state=${analytics.state.name()},data-days=${analytics.period.days},data-source=@{/profile/analytics/data},data-page=@{/profile/analytics}">
+<a class="back-link" th:href="@{/profile}">В кабинет</a>
+<div class="page-heading">
+<p class="scope-tag">По магазину</p>
+<h1>Заказы магазина</h1>
+<p class="lead">Общие показатели по всем заказам магазина за выбранный период. Это не ваша история и не данные покупателей: здесь только суммы и количества.</p>
+</div>
+<div th:replace="~{fragments :: notice}"></div>
 
-    <th:block th:if="${analytics.available()}">
-        <section class="metrics-grid" aria-label="Показатели магазина">
-            <article class="metric-card"><p>Заказы</p><strong th:text="${analytics.summary.orders}" data-metric="orders"></strong><span>оформлено за период</span></article>
-            <article class="metric-card"><p>Сумма заказов</p><strong th:text="${@display.money(analytics.summary.orderValue)}" data-metric="order-value"></strong><span>без реальных платежей</span></article>
-            <article class="metric-card"><p>Предметы</p><strong th:text="${analytics.summary.units}" data-metric="units"></strong><span>в сохранённых заказах</span></article>
-            <article class="metric-card"><p>Средний заказ</p><strong th:text="${@display.money(analytics.summary.averageOrder())}"></strong><span>сумма / число заказов</span></article>
-        </section>
-        <section class="surface analytics-surface">
-            <div class="section-heading"><h2>Стоимость заказов по дням</h2><p>UTC · дни без заказов показаны нулём</p></div>
-            <div class="analytics-chart" th:style="|--days:${analytics.period.days}|"
-                 th:attr="data-days=${analytics.period.days}" aria-label="Дневная стоимость заказов">
-                <div class="chart-column" th:each="point, position : ${analytics.daily}" tabindex="0" role="img"
-                     th:style="|--point-index:${position.index}|"
-                     th:attr="aria-label=|${point.date}. Заказов: ${point.orders}. Сумма в рублях: ${point.orderValue}.|">
-                    <span class="chart-tooltip"><b th:text="${point.date}"></b><span th:text="${@display.money(point.orderValue)}"></span><small th:text="|Заказов: ${point.orders} · Предметов: ${point.units}|"></small></span>
-                    <div class="chart-track"><div class="chart-bar" th:classappend="${point.orderValue > 0} ? 'has-value'" th:style="|--height:${point.percent}%|"></div></div>
-                    <span class="chart-day" th:text="${point.date.dayOfMonth}" aria-hidden="true"></span>
-                </div>
-            </div>
-            <details class="chart-table"><summary>Посмотреть точные значения</summary><div class="table-scroll"><table><thead><tr><th scope="col">День, UTC</th><th scope="col">Заказы</th><th scope="col">Предметы</th><th scope="col">Сумма заказов</th></tr></thead><tbody><tr th:each="point : ${analytics.daily}"><th scope="row" th:text="${point.date}"></th><td th:text="${point.orders}"></td><td th:text="${point.units}"></td><td th:text="${@display.money(point.orderValue)}"></td></tr></tbody></table></div></details>
-        </section>
-        <section class="surface analytics-surface">
-            <div class="section-heading"><h2>Что выбирают чаще</h2><p>Топ по количеству предметов</p></div>
-            <ol class="product-ranking" th:if="${!analytics.products.isEmpty()}">
-                <li th:each="product : ${analytics.products}">
-                    <div class="ranking-row">
-                        <div><strong th:text="${product.title}"></strong><span class="muted" th:text="${product.sku}"></span></div>
-                        <div><strong th:text="|${product.units} шт.|"></strong><span class="muted" th:text="${@display.money(product.orderValue)}"></span></div>
-                    </div>
-                </li>
-            </ol>
-            <p class="muted" th:if="${analytics.products.isEmpty()}">Когда появятся заказы, здесь будут выбранные товары.</p>
-        </section>
-    </th:block>
-    <section class="empty-state" th:unless="${analytics.available()}" role="status">
-        <p class="eyebrow">ЗАКАЗЫ СОХРАНЯЮТСЯ</p>
-        <h2 th:text="${analytics.state.name() == 'DISABLED'} ? 'Аналитика не подключена' : 'Аналитика временно недоступна'"></h2>
-        <p>Покупки продолжают сохраняться в магазине. Отложенные показатели появятся после подключения аналитики.</p>
-        <a class="primary button-link" th:href="@{/items}">В коллекцию →</a>
-    </section>
+<div class="analytics-toolbar">
+<form method="get" th:action="@{/profile/analytics}" data-period-form>
+<div class="segmented" role="group" aria-label="Период">
+<button type="submit" name="days" th:each="period : ${periods}" th:value="${period.days}"
+        th:classappend="${period == analytics.period} ? 'is-selected'"
+        th:attr="aria-pressed=${period == analytics.period}" th:text="|${period.days} дней|">7 дней</button>
+</div>
+</form>
+<div class="toolbar-actions">
+<!--/* Кнопка «Обновить» без JavaScript бесполезна: период уже перечитывается формой выше. Скрипт её показывает. */-->
+<button class="button secondary" type="button" data-refresh hidden>Обновить данные</button>
+<form th:if="${analytics.state.name() != 'DISABLED'}" method="post" th:action="@{/profile/analytics/sync}">
+<input type="hidden" name="days" th:value="${analytics.period.days}" data-sync-days>
+<button class="button secondary" type="submit">Доставить ожидающие заказы</button>
+</form>
+</div>
+</div>
+<p class="visually-hidden" role="status" aria-live="polite" data-status></p>
+
+<section class="surface delivery" aria-labelledby="delivery-title">
+<div>
+<h2 id="delivery-title">Доставка в аналитику</h2>
+<p class="muted">Заказ сначала сохраняется в магазине, затем попадает в аналитику. Здесь видно, что ещё в пути.</p>
+</div>
+<dl class="facts">
+<div><dt>Ждут доставки</dt><dd data-queue="pending" th:text="${analytics.queue.pendingOrders}">0</dd></div>
+<div><dt>Последняя доставка</dt><dd data-queue="last"><time th:if="${analytics.queue.lastDelivery != null}" th:datetime="${analytics.queue.lastDelivery}" th:text="${@display.time(analytics.queue.lastDelivery)}"></time><th:block th:if="${analytics.queue.lastDelivery == null}">Пока не было</th:block></dd></div>
+<div><dt>Самый старый в очереди</dt><dd data-queue="oldest"><time th:if="${analytics.queue.oldestPending != null}" th:datetime="${analytics.queue.oldestPending}" th:text="${@display.time(analytics.queue.oldestPending)}"></time><th:block th:if="${analytics.queue.oldestPending == null}">Очередь пуста</th:block></dd></div>
+</dl>
+</section>
+
+<th:block th:if="${live}">
+<section class="metric-grid" aria-label="Показатели за период" data-metrics>
+<div class="metric-card" data-key="orders" th:attr="data-current=${analytics.summary.orders},data-previous=${comparable ? analytics.previous.orders : null}">
+<p class="metric-label">Заказы</p>
+<strong class="metric-value" data-metric="orders" th:text="${analytics.summary.orders}">0</strong>
+<p class="metric-note">за период</p>
+<p class="metric-change" th:if="${comparable}" th:with="delta=${analytics.summary.orders - analytics.previous.orders}">
+<span class="metric-delta" th:text="${delta == 0 ? 'Без изменений' : (delta > 0 ? '+' : '−') + (delta > 0 ? delta : -delta)}"></span>
+<span class="metric-was" th:text="|Было ${analytics.previous.orders} за предыдущие ${analytics.period.days} дней|"></span>
+</p>
+<div class="compare-bars" aria-hidden="true" hidden><span class="bar-previous"><i></i></span><span class="bar-current"><i></i></span></div>
+</div>
+<div class="metric-card" data-key="value" th:attr="data-current=${analytics.summary.orderValue},data-previous=${comparable ? analytics.previous.orderValue : null}">
+<p class="metric-label">Сумма заказов</p>
+<strong class="metric-value" data-metric="order-value" th:text="${@display.money(analytics.summary.orderValue)}">0 ₽</strong>
+<p class="metric-note">платежи не проводились</p>
+<p class="metric-change" th:if="${comparable}" th:with="delta=${analytics.summary.orderValue - analytics.previous.orderValue}">
+<span class="metric-delta" th:text="${delta == 0 ? 'Без изменений' : (delta > 0 ? '+' : '−') + @display.money(delta > 0 ? delta : -delta)}"></span>
+<span class="metric-was" th:text="|Было ${@display.money(analytics.previous.orderValue)} за предыдущие ${analytics.period.days} дней|"></span>
+</p>
+<div class="compare-bars" aria-hidden="true" hidden><span class="bar-previous"><i></i></span><span class="bar-current"><i></i></span></div>
+</div>
+<div class="metric-card" data-key="units" th:attr="data-current=${analytics.summary.units},data-previous=${comparable ? analytics.previous.units : null}">
+<p class="metric-label">Предметы</p>
+<strong class="metric-value" data-metric="units" th:text="${analytics.summary.units}">0</strong>
+<p class="metric-note">в этих заказах</p>
+<p class="metric-change" th:if="${comparable}" th:with="delta=${analytics.summary.units - analytics.previous.units}">
+<span class="metric-delta" th:text="${delta == 0 ? 'Без изменений' : (delta > 0 ? '+' : '−') + (delta > 0 ? delta : -delta)}"></span>
+<span class="metric-was" th:text="|Было ${analytics.previous.units} за предыдущие ${analytics.period.days} дней|"></span>
+</p>
+<div class="compare-bars" aria-hidden="true" hidden><span class="bar-previous"><i></i></span><span class="bar-current"><i></i></span></div>
+</div>
+<div class="metric-card" data-key="average" th:attr="data-current=${analytics.summary.averageOrder},data-previous=${comparable ? analytics.previous.averageOrder : null}">
+<p class="metric-label">Средний заказ</p>
+<strong class="metric-value" data-metric="average-order" th:text="${@display.money(analytics.summary.averageOrder)}">0,00 ₽</strong>
+<p class="metric-note">сумма ÷ число заказов</p>
+<p class="metric-change" th:if="${comparable}" th:with="delta=${analytics.summary.averageOrder.subtract(analytics.previous.averageOrder)}">
+<span class="metric-delta" th:text="${delta.signum() == 0 ? 'Без изменений' : (delta.signum() > 0 ? '+' : '−') + @display.money(delta.abs())}"></span>
+<span class="metric-was" th:text="|Было ${@display.money(analytics.previous.averageOrder)} за предыдущие ${analytics.period.days} дней|"></span>
+</p>
+<div class="compare-bars" aria-hidden="true" hidden><span class="bar-previous"><i></i></span><span class="bar-current"><i></i></span></div>
+</div>
+</section>
+
+<section class="surface chart-section" aria-labelledby="daily-title" data-daily>
+<div class="section-heading">
+<div><h2 id="daily-title">По дням</h2><p class="muted">Дни считаются по UTC. В днях без заказов стоят нули.</p></div>
+<!--/* Вкладки и график скрыты до запуска скрипта; без него остаётся полная таблица ниже. */-->
+<div class="segmented" role="tablist" aria-label="Что показывать на графике" hidden data-tabs>
+<button type="button" role="tab" id="series-value" data-series="value" aria-selected="true">Сумма заказов</button>
+<button type="button" role="tab" id="series-orders" data-series="orders" aria-selected="false" tabindex="-1">Заказы</button>
+<button type="button" role="tab" id="series-units" data-series="units" aria-selected="false" tabindex="-1">Предметы</button>
+</div>
+</div>
+<div class="chart-panel" role="tabpanel" aria-labelledby="series-value" hidden data-chart-panel>
+<p class="chart-caption" data-chart-caption></p>
+<div class="chart-canvas" tabindex="0" role="group" aria-roledescription="график" aria-label="График по дням" aria-describedby="chart-help" data-chart-canvas></div>
+<p class="chart-help muted" id="chart-help">Стрелки влево и вправо выбирают день, Home и End — первый и последний день, Escape скрывает подсказку.</p>
+<p class="visually-hidden" aria-live="polite" data-chart-live></p>
+</div>
+<details class="exact" open data-exact>
+<summary>Точные значения по дням</summary>
+<div class="table-scroll">
+<table class="data-table" data-daily-table>
+<caption class="visually-hidden">Заказы, предметы и сумма заказов по дням, UTC</caption>
+<thead><tr><th scope="col">День</th><th scope="col">Заказы</th><th scope="col">Предметы</th><th scope="col">Сумма заказов</th></tr></thead>
+<tbody>
+<tr th:each="point : ${analytics.daily}" th:attr="data-date=${point.date},data-orders=${point.orders},data-units=${point.units},data-value=${point.orderValue}">
+<th scope="row"><time th:datetime="${point.date}" th:text="|${#numbers.formatInteger(point.date.dayOfMonth, 2)}.${#numbers.formatInteger(point.date.monthValue, 2)}.${point.date.year}|"></time></th>
+<td th:text="${point.orders}"></td>
+<td th:text="${point.units}"></td>
+<td class="cell-with-bar"><span th:text="${@display.money(point.orderValue)}"></span><span class="cell-bar" aria-hidden="true"><i th:style="|width:${point.percent}%|"></i></span></td>
+</tr>
+</tbody>
+</table>
+</div>
+</details>
+</section>
+
+<section class="surface" aria-labelledby="products-title" data-products>
+<div class="section-heading"><div><h2 id="products-title">Что выбирают чаще</h2><p class="muted">Лидеры по числу предметов в заказах магазина</p></div></div>
+<ol class="ranking" data-ranking th:attr="hidden=${analytics.products.isEmpty() ? 'hidden' : null}">
+<li th:each="product : ${analytics.products}" th:attr="data-orders=${product.orders},data-units=${product.units},data-value=${product.orderValue}">
+<div class="ranking-head"><span class="ranking-title" th:text="${product.title}"></span><span class="ranking-sku muted" th:text="${product.sku}"></span></div>
+<div class="ranking-bar" aria-hidden="true"><i th:style="|width:${analytics.products[0].units > 0 ? product.units * 100 / analytics.products[0].units : 0}%|"></i></div>
+<p class="ranking-values"><strong th:text="|${product.units} шт.|"></strong> <span class="muted" th:text="${@display.money(product.orderValue)}"></span></p>
+</li>
+</ol>
+<p class="muted" data-ranking-empty th:attr="hidden=${analytics.products.isEmpty() ? null : 'hidden'}">Когда в магазине появятся заказы, здесь будут самые частые товары.</p>
+</section>
+</th:block>
+
+<section class="empty-state" th:unless="${live}" role="status">
+<h2 th:text="${analytics.state.name() == 'DISABLED'} ? 'Аналитика не подключена' : 'Аналитика сейчас недоступна'"></h2>
+<p th:text="${analytics.state.name() == 'DISABLED'} ? 'Заказы сохраняются в магазине. Показатели появятся, когда подключат аналитику.' : 'Заказы не пропадают: они ждут в очереди и попадут в показатели позже.'"></p>
+<a class="button primary" th:href="@{/items}">В коллекцию</a>
+</section>
 </main>
 <footer th:replace="~{fragments :: footer}"></footer>
+<!--/* `live` задан на <main> и здесь уже не виден, поэтому условие записано заново. */-->
+<th:block th:if="${analytics.state.name() == 'AVAILABLE'}">
+<script defer th:src="@{/vendor/d3.min.js}"></script>
+<script defer th:src="@{/analytics.js}"></script>
+</th:block>
 </body>
 </html>

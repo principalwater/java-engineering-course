@@ -1,33 +1,56 @@
 <!DOCTYPE html>
 <html lang="ru" xmlns:th="http://www.thymeleaf.org">
 <head th:fragment="head(title)">
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="display-zone" th:content="${@display.zone()}">
 <title th:text="|${title} · Мастерская|">Мастерская</title>
-<link rel="stylesheet" th:href="@{/store.css}"><script defer th:src="@{/store.js}"></script>
+<link rel="stylesheet" th:href="@{/store.css}">
+<!--/* Без defer: скрипт выставляет тему до первой отрисовки, чтобы не мигала светлая. */-->
+<script th:src="@{/store.js}"></script>
 </head>
 <body>
 <header th:fragment="header(active)" class="site-header">
 <a class="skip-link" href="#main">К содержимому</a>
-<a class="brand" th:href="@{/items}"><span class="brand-symbol" aria-hidden="true">м</span><span>мастерская<span class="brand-note">вещи для рабочего стола</span></span></a>
-<nav aria-label="Основная навигация">
-<a th:href="@{/items}" th:classappend="${active == 'items'} ? 'active'" th:attr="aria-current=${active == 'items' ? 'page' : null}">Витрина</a>
-<a th:href="@{/orders}" th:classappend="${active == 'orders'} ? 'active'" th:attr="aria-current=${active == 'orders' ? 'page' : null}">Заказы</a>
-<a th:href="@{/analytics}" th:classappend="${active == 'analytics'} ? 'active'" th:attr="aria-current=${active == 'analytics' ? 'page' : null}">Аналитика</a>
-<a class="cart-link" th:href="@{/cart/items}" th:classappend="${active == 'cart'} ? 'active'" th:attr="aria-current=${active == 'cart' ? 'page' : null}">Корзина <span class="nav-count" th:text="${cart == null ? 0 : cart.itemCount()}">0</span></a>
-<button class="theme-button" type="button" id="theme-switch" aria-label="Тёмная тема" aria-pressed="false">◐</button>
+<a class="brand" th:href="@{/items}"><span class="brand-symbol" aria-hidden="true">м</span><span class="brand-text">мастерская<small>вещи для рабочего стола</small></span></a>
+<nav class="site-nav" aria-label="Основная навигация">
+<a class="nav-link" th:href="@{/items}" th:classappend="${active == 'items'} ? 'active'" th:attr="aria-current=${active == 'items' ? 'page' : null}">Витрина</a>
+<a class="nav-link" th:href="@{/orders}" th:classappend="${active == 'orders'} ? 'active'" th:attr="aria-current=${active == 'orders' ? 'page' : null}">Заказы</a>
+<a class="nav-link" th:href="@{/profile}" th:classappend="${active == 'profile' or active == 'analytics'} ? 'active'" th:attr="aria-current=${active == 'profile' ? 'page' : (active == 'analytics' ? 'true' : null)}">Кабинет</a>
+<a class="nav-link cart-link" th:href="@{/cart/items}" th:classappend="${active == 'cart'} ? 'active'" th:attr="aria-current=${active == 'cart' ? 'page' : null}">Корзина <span class="nav-count" data-cart-count th:attr="hidden=${cart == null or cart.itemCount == 0 ? 'hidden' : null}" th:text="${cart == null ? 0 : cart.itemCount}">0</span></a>
 </nav>
+<button class="theme-button" type="button" id="theme-switch" aria-label="Тёмная тема" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"/></svg></button>
 </header>
-<footer th:fragment="footer" class="site-footer"><span>Мастерская · демонстрационный магазин. Оплата не производится.</span><a th:href="@{/catalog}">Управление каталогом</a></footer>
+<footer th:fragment="footer" class="site-footer">
+<p>Мастерская — демонстрационный магазин. Оплата не проводится.</p>
+<a th:href="@{/catalog}">Управление каталогом</a>
+<!--/* Общая живая область: сюда попадают сообщения, у которых больше нет своего элемента (например, удалённая строка корзины). */-->
+<div class="visually-hidden" role="status" aria-live="polite" data-live-region></div>
+</footer>
 <div th:fragment="notice" th:if="${notice != null}" class="notice" role="status" th:text="${notice}"></div>
-<form th:fragment="quantity(item, url, query)" class="quantity-form" method="post" th:action="${url}">
+<!--/*
+  Количество в корзине. Работает и без JavaScript: каждая кнопка — обычная POST-форма с Redirect/GET.
+  Скрытая кнопка SET стоит первой, чтобы Enter в поле числа применял введённое значение, а не уменьшал его.
+  Состояние «0 в корзине» и «есть в корзине» переключается CSS по data-count.
+*/-->
+<form th:fragment="quantity(item, url, query)" class="quantity-form" method="post" th:action="${url}"
+      th:attr="data-item-id=${item.id},data-count=${item.count},data-max=${maxQuantity},data-title=${item.title},data-endpoint=@{/cart/items}">
 <input type="hidden" name="id" th:value="${item.id}">
-<th:block th:if="${query != null}">
-<input type="hidden" name="search" th:value="${query.search}"><input type="hidden" name="sort" th:value="${query.sort}">
-<input type="hidden" name="pageNumber" th:value="${query.pageNumber}"><input type="hidden" name="pageSize" th:value="${query.pageSize}">
-</th:block>
-<button class="quantity-step" name="action" value="MINUS" th:disabled="${item.count == 0}" th:attr="aria-label=|Уменьшить количество «${item.title}»|">−</button>
-<span class="quantity-value" th:text="${item.count}" th:attr="aria-label=|Количество в корзине: ${item.count}|">0</span>
-<button class="quantity-add" name="action" value="PLUS" th:disabled="${item.count >= maxQuantity}" th:attr="aria-label=|Добавить «${item.title}» в корзину|" th:text="${item.count == 0} ? 'Добавить' : '+'">Добавить</button>
-<button class="quantity-remove" th:if="${item.count > 0}" name="action" value="DELETE" th:attr="aria-label=|Удалить «${item.title}» из корзины|">×</button>
+<fieldset class="query-state" th:if="${query != null}" hidden>
+<input type="hidden" name="search" th:value="${query.search}">
+<input type="hidden" name="sort" th:value="${query.sort}">
+<input type="hidden" name="pageNumber" th:value="${query.pageNumber}">
+<input type="hidden" name="pageSize" th:value="${query.pageSize}">
+</fieldset>
+<button class="quantity-default" type="submit" name="action" value="SET" tabindex="-1" aria-hidden="true"></button>
+<div class="quantity-controls">
+<button class="quantity-step quantity-minus" type="submit" name="action" value="MINUS" formnovalidate th:disabled="${item.count == 0}" th:attr="aria-label=|Уменьшить количество «${item.title}»|">−</button>
+<input class="quantity-input quantity-value" type="number" name="quantity" inputmode="numeric" min="0" step="1" autocomplete="off" required th:value="${item.count}" th:max="${maxQuantity}" th:attr="aria-label=|Количество «${item.title}» в корзине|">
+<button class="quantity-step quantity-plus quantity-add" type="submit" name="action" value="PLUS" formnovalidate th:disabled="${item.count >= maxQuantity}" th:attr="aria-label=${item.count == 0 ? 'Добавить «' + item.title + '» в корзину' : 'Увеличить количество «' + item.title + '»'}"><span class="quantity-add-label">В корзину</span><span class="quantity-plus-sign" aria-hidden="true">+</span></button>
+</div>
+<button class="quantity-apply" type="submit" name="action" value="SET">Применить</button>
+<button class="quantity-remove" type="submit" name="action" value="DELETE" formnovalidate th:attr="aria-label=|Удалить «${item.title}» из корзины|"><span class="quantity-remove-icon" aria-hidden="true">×</span><span class="quantity-remove-label" aria-hidden="true">Удалить</span></button>
+<p class="quantity-status" role="status" aria-live="polite"></p>
 </form>
 </body></html>

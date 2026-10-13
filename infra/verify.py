@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise deployed HTTP/JDBC paths, retained data and a clean second plan."""
+"""Exercise deployed HTTP/database paths, retained data and a clean second plan."""
 
 import argparse
 import importlib.util
@@ -56,7 +56,7 @@ def main():
             subprocess.run(driver + ["plan"] + optional + list(options), stdout=log, stderr=subprocess.STDOUT, check=True)
         return json.loads(subprocess.check_output(tofu + ["show", "-json", str(state / "reviewed.tfplan")], env=environment))
 
-    if args.stack.startswith("sprint05"):
+    if args.stack.startswith(("sprint05", "sprint06")):
         specification = importlib.util.spec_from_file_location("storefront_smoke", deploy.REPOSITORY / deploy.STACKS[args.stack] / "scripts/smoke.py")
         smoke = importlib.util.module_from_spec(specification)
         specification.loader.exec_module(smoke)
@@ -64,14 +64,16 @@ def main():
         proof = probe.run()
         if args.analytics:
             dashboard = probe.read("/analytics")
-            synced = probe.post("/analytics/sync", dashboard, days=7)
-            assert int(synced.metrics["orders"]) >= 1
-        persistent = args.stack == "sprint05-postgresql"
+            probe.post("/analytics/sync", dashboard, days=7)
+            # A concurrent delivery may return before its owner has published the dashboard facts.
+            await_value(lambda: int(probe.read("/analytics").metrics.get("orders", "0")) >= 1, True)
+        persistent = args.stack.endswith("-postgresql")
+        sprint = args.stack.split("-", 1)[0]
         service = "database" if persistent else "backend"
         container = deployed["containers"][service]
         old_container = subprocess.check_output(["docker", "inspect", "--format", "{{.Id}}", container], text=True).strip()
-        address = (f'module.sprint05["{args.stack}"].module.postgres[0].docker_container.database' if persistent
-                   else f'module.sprint05["{args.stack}"].docker_container.application')
+        address = (f'module.{sprint}["{args.stack}"].module.postgres[0].docker_container.database' if persistent
+                   else f'module.{sprint}["{args.stack}"].docker_container.application')
         replacement = plan("--replace", address)
         changes = [change for change in replacement["resource_changes"] if change["change"]["actions"] != ["no-op"]]
         assert len(changes) == 1 and changes[0]["address"] == address

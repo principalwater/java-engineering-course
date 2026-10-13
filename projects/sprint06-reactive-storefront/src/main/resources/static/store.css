@@ -441,7 +441,7 @@ pre { overflow: auto; margin: 16px 0; padding: 20px; border-radius: 18px; backgr
 .ranking-head { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
 .ranking-title { font-weight: 650; }
 .ranking-head .muted { margin-top: 2px; }
-.ranking-values { display: flex; flex-direction: column; text-align: right; font-variant-numeric: tabular-nums; }
+.ranking-values { grid-column: 3; grid-row: 1; display: flex; flex-direction: column; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ranking-bar { grid-column: 2 / -1; height: 8px; overflow: hidden; border-radius: 999px; background: var(--fill); }
 main[aria-busy="true"] .metric-grid, main[aria-busy="true"] .chart-section, main[aria-busy="true"] [data-products] { opacity: .6; }
 

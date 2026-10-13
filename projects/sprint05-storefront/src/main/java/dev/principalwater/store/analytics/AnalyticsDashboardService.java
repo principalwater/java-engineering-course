@@ -9,31 +9,64 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Comparator;
 import java.util.List;
+import java.util.OptionalInt;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 @Service
-@ConditionalOnProperty(name = "store.analytics.enabled", havingValue = "true")
 public class AnalyticsDashboardService {
     private static final int TOP_PRODUCTS = 10;
     private static final BigDecimal MAXIMUM_PERCENT = BigDecimal.valueOf(100);
     private final AnalyticsQueue queue;
-    private final ClickHouseClient clickhouse;
+    private final ObjectProvider<ClickHouseClient> clickhouse;
+    private final ObjectProvider<AnalyticsDeliveryCoordinator> delivery;
     private final Clock clock;
 
-    public AnalyticsDashboardService(AnalyticsQueue queue, ClickHouseClient clickhouse, Clock clock) {
+    public AnalyticsDashboardService(AnalyticsQueue queue, ObjectProvider<ClickHouseClient> clickhouse,
+                                     ObjectProvider<AnalyticsDeliveryCoordinator> delivery, Clock clock) {
         this.queue = queue;
         this.clickhouse = clickhouse;
+        this.delivery = delivery;
         this.clock = clock;
     }
 
     public AnalyticsDashboard load(AnalyticsPeriod period) {
         var status = queue.status();
+        var client = clickhouse.getIfAvailable();
+        if (client == null) {
+            return AnalyticsDashboard.inactive(AnalyticsDashboard.State.DISABLED, period, status);
+        }
+        try {
+            return available(period, status, client);
+        } catch (StoreException exception) {
+            if (exception.getError() != StoreError.ANALYTICS_UNAVAILABLE) {
+                throw exception;
+            }
+            return AnalyticsDashboard.inactive(AnalyticsDashboard.State.UNAVAILABLE, period, status);
+        }
+    }
+
+    public OptionalInt sync() {
+        var coordinator = delivery.getIfAvailable();
+        if (coordinator == null) {
+            throw new StoreException(StoreError.ANALYTICS_UNAVAILABLE);
+        }
+        try {
+            return OptionalInt.of(coordinator.flush());
+        } catch (StoreException exception) {
+            if (exception.getError() != StoreError.ANALYTICS_UNAVAILABLE) {
+                throw exception;
+            }
+            return OptionalInt.empty();
+        }
+    }
+
+    private AnalyticsDashboard available(AnalyticsPeriod period, QueueStatus status, ClickHouseClient client) {
         var end = LocalDate.now(clock.withZone(ZoneOffset.UTC));
         var start = end.minusDays(period.getDays() - 1L);
-        var rows = clickhouse.dashboard(queue.sourceId(), start, end);
+        var rows = client.dashboard(queue.sourceId(), start, end);
         var total = rows.stream().filter(row -> row.bucket() == AnalyticsBucket.TOTAL).findFirst()
                 .orElseThrow(() -> new StoreException(StoreError.ANALYTICS_UNAVAILABLE));
         var byDate = rows.stream().filter(row -> row.bucket() == AnalyticsBucket.DAILY)

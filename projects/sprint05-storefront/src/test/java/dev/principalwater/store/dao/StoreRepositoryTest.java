@@ -3,6 +3,7 @@ package dev.principalwater.store.dao;
 import dev.principalwater.store.model.AnalyticsOutbox;
 import dev.principalwater.store.model.CartLine;
 import dev.principalwater.store.model.ImageAsset;
+import dev.principalwater.store.model.OrderView;
 import dev.principalwater.store.model.Product;
 import dev.principalwater.store.model.ProductInput;
 import dev.principalwater.store.model.PurchaseOrder;
@@ -50,11 +51,15 @@ class StoreRepositoryTest {
         entityManager.flush();
         entityManager.clear();
 
-        var saved = orders.findByIdAndCartId(orderId, cart.getId()).orElseThrow();
-        assertEquals(5000, saved.getTotalSum());
-        assertEquals("Original keyboard", saved.getLines().getFirst().getTitle());
-        assertEquals(ImageAsset.KEYBOARD, saved.getLines().getFirst().getImage());
-        assertEquals(2500, saved.getLines().getFirst().getPrice());
+        var saved = OrderView.from(orders.findByIdAndCartId(orderId, cart.getId()).orElseThrow());
+        var savedLine = saved.items().getFirst();
+        assertEquals(5000, saved.totalSum());
+        assertEquals(productId, savedLine.id());
+        assertEquals("Original keyboard", savedLine.title());
+        assertEquals("/images/keyboard.svg", savedLine.imgPath());
+        assertEquals(2500, savedLine.price());
+        assertEquals(2, savedLine.count());
+        assertEquals(5000, savedLine.total());
         assertTrue(orders.findByIdAndCartId(orderId, UUID.randomUUID()).isEmpty());
     }
 

@@ -6,6 +6,7 @@ import dev.principalwater.store.model.CatalogPage;
 import dev.principalwater.store.model.CatalogQuery;
 import dev.principalwater.store.model.ImportResult;
 import dev.principalwater.store.model.ItemView;
+import dev.principalwater.store.model.OrderLineView;
 import dev.principalwater.store.model.OrderView;
 import dev.principalwater.store.model.Paging;
 import dev.principalwater.store.model.SortMode;
@@ -84,7 +85,8 @@ class StoreWebTest {
         var item = new ItemView(7, "test", "Keyboard", "Description", "/images/keyboard.svg", 2500, 2);
         when(catalog.item(anyLong(), any())).thenReturn(item);
         when(carts.view(any())).thenReturn(new CartView(List.of(item)));
-        var order = new OrderView(42, Instant.parse("2026-10-12T10:00:00Z"), List.of(item), 5000);
+        var line = new OrderLineView(7, "test", "Keyboard", "/images/keyboard.svg", 2500, 2);
+        var order = new OrderView(42, Instant.parse("2026-10-12T10:00:00Z"), List.of(line), 5000);
         when(orders.list(CART_ID)).thenReturn(List.of(order));
         when(orders.get(42, CART_ID)).thenReturn(order);
 

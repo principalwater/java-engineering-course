@@ -18,20 +18,24 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.awaitility.Awaitility.await;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.flash;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.not;
 
 @SpringBootTest(properties = {
         "store.analytics.enabled=true",
@@ -49,7 +53,7 @@ class AnalyticsIntegrationTest {
     @Autowired private CheckoutService checkout;
     @Autowired private OrderService orders;
     @Autowired private AnalyticsQueue queue;
-    @Autowired private AnalyticsExporter exporter;
+    @Autowired private AnalyticsDeliveryCoordinator delivery;
     @Autowired private ClickHouseClient clickhouse;
     @Autowired private ObjectMapper json;
     @Autowired private MockMvc mvc;
@@ -74,7 +78,7 @@ class AnalyticsIntegrationTest {
         assertEquals(2, total.units());
         assertEquals(15800, total.orderValue());
         assertEquals(1, queue.status().pendingOrders());
-        assertEquals(1, exporter.flush());
+        assertEquals(1, delivery.flush());
         assertEquals(0, queue.status().pendingOrders());
         mvc.perform(get("/analytics"))
                 .andExpect(status().isOk())
@@ -88,18 +92,22 @@ class AnalyticsIntegrationTest {
             long secondOrder = checkout.buy(secondCart);
             assertEquals(7900, orders.get(secondOrder, secondCart).totalSum());
             assertTrue(carts.view(secondCart).items().isEmpty());
-            assertEquals(StoreError.ANALYTICS_UNAVAILABLE, assertThrows(StoreException.class, exporter::flush).getError());
+            assertEquals(StoreError.ANALYTICS_UNAVAILABLE, assertThrows(StoreException.class, delivery::flush).getError());
             assertEquals(1, queue.status().pendingOrders());
             mvc.perform(get("/analytics"))
                     .andExpect(status().isOk())
                     .andExpect(content().string(containsString("Аналитика временно недоступна")))
                     .andExpect(content().string(not(containsString("data-metric=\"orders\""))));
+            mvc.perform(post("/analytics/sync").with(csrf()).param("days", "30"))
+                    .andExpect(status().isSeeOther())
+                    .andExpect(redirectedUrl("/analytics?days=30"))
+                    .andExpect(flash().attribute("notice", "Аналитика пока недоступна. Заказы остаются в очереди."));
         } finally {
             docker("start");
         }
         await().atMost(Duration.ofSeconds(45)).pollInterval(Duration.ofMillis(500)).ignoreExceptions()
                 .untilAsserted(() -> assertEquals(1, total().orders()));
-        assertEquals(1, exporter.flush());
+        assertEquals(1, delivery.flush());
         assertEquals(0, queue.status().pendingOrders());
         total = total();
         assertEquals(2, total.orders());

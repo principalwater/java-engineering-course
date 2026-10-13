@@ -6,7 +6,7 @@
 <main id="main">
 <div class="page-heading">
 <h1>Ваш кабинет</h1>
-<p class="lead">Регистрации здесь нет: магазин узнаёт этот браузер по cookie и показывает его заказы. В другом браузере или после очистки cookie история начнётся заново.</p>
+<p class="lead">Регистрации здесь нет: магазин узнаёт этот браузер по cookie и показывает его заказы. Cookie действует 30 дней с первого визита. После истечения срока, очистки cookie или в другом браузере история начнётся заново.</p>
 </div>
 <div th:replace="~{fragments :: notice}"></div>
 <!--/* Все числа ниже — только заказы текущего браузера. Показатели всего магазина живут на /profile/analytics. */-->
@@ -26,18 +26,6 @@
 <h2>Первый заказ появится здесь</h2>
 <p>Добавьте предметы в корзину и оформите заказ — он сохранится в истории этого браузера.</p>
 <a class="button primary" th:href="@{/items}">В коллекцию</a>
-</section>
-<section class="profile-section" th:if="${orders != null and !orders.isEmpty()}" aria-labelledby="recent-title">
-<div class="section-heading"><h2 id="recent-title">Последние заказы</h2><a class="text-link" th:href="@{/orders}">Вся история</a></div>
-<ul class="recent-orders">
-<li th:each="order, state : ${orders}" th:if="${state.index < 3}">
-<a class="recent-order" th:href="@{/orders/{id}(id=${order.id})}">
-<span class="recent-title" th:text="|Заказ № ${order.id}|"></span>
-<time class="muted" th:datetime="${order.createdAt}" th:text="${@display.time(order.createdAt)}"></time>
-<strong th:text="${@display.money(order.totalSum)}"></strong>
-</a>
-</li>
-</ul>
 </section>
 <section class="profile-links" aria-label="Разделы кабинета">
 <a class="link-card" th:href="@{/orders}">

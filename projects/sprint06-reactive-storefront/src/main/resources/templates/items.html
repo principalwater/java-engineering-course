@@ -4,9 +4,9 @@
 <body>
 <header th:replace="~{fragments :: header('items')}"></header>
 <main id="main">
-<section class="hero">
+<section class="hero" th:classappend="${!query.search.isBlank() or query.pageNumber > 1} ? 'hero-compact'">
 <div class="hero-copy">
-<h1>Хорошие вещи.<br><span>Ясные мысли.</span></h1>
+<h1>Хорошие вещи.<br> <span>Ясные мысли.</span></h1>
 <p class="lead">Предметы, которые помогают сосредоточиться, создавать и чувствовать себя на своём месте.</p>
 </div>
 <div class="hero-mark" aria-hidden="true"><span>м</span><small>собрать своё</small></div>

@@ -58,7 +58,8 @@ public class StoreExceptionHandler {
         if (exchange.getRequest().getHeaders().getAccept().stream().anyMatch(MediaType.APPLICATION_JSON::equalsTypeAndSubtype)) {
             return ResponseEntity.status(status).body(ProblemDetail.forStatusAndDetail(status, message));
         }
-        return Rendering.view("error").status(status).modelAttribute("status", status.value())
+        // Общий путь WebFlux позволяет ошибкам фильтра CSRF и контроллеров использовать один шаблон.
+        return Rendering.view("error/error").status(status).modelAttribute("status", status.value())
                 .modelAttribute("message", message).build();
     }
 }

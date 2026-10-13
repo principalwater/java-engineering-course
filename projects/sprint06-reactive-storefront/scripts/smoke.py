@@ -69,7 +69,9 @@ class MarketProbe:
         self.http = build_opener(HTTPCookieProcessor(self.cookies), self.redirects)
 
     def read(self, path, data=None, content_type=None):
-        headers = {} if content_type is None else {"Content-Type": content_type}
+        headers = {"Accept": "text/html"}
+        if content_type is not None:
+            headers["Content-Type"] = content_type
         with self.http.open(Request(self.base + path, data=data, headers=headers), timeout=15) as response:
             assert response.status == 200
             page = Page(response.url, response.read().decode())
@@ -111,11 +113,17 @@ class MarketProbe:
         cart = self.post("/cart/items", cart, id=first, action="PLUS")
         cart = self.post("/cart/items", cart, id=second, action="DELETE")
         assert cart.cart_total == 200
+        cart = self.post("/cart/items", cart, id=first, action="SET", quantity=3)
+        assert cart.cart_total == 300
+        cart = self.post("/cart/items", cart, id=first, action="SET", quantity=2)
+        assert cart.cart_total == 200
         cart = self.post("/cart/items", cart, id=second, action="PLUS")
         try:
             self.read("/buy", b"", "application/x-www-form-urlencoded")
         except HTTPError as error:
             assert error.code == 403
+            denied = Page(error.url, error.read().decode())
+            assert "/orders" in denied.links and "/cart/items" in denied.links
         else:
             raise AssertionError("A purchase without CSRF must be rejected")
         order = self.post("/buy", cart)
@@ -123,9 +131,11 @@ class MarketProbe:
         order_path = urlparse(order.url).path
         assert self.read(order_path).order_total == 400
         self.read("/orders")
+        profile = self.read("/profile")
+        assert "/profile/analytics" in profile.links
         assert not self.read("/cart/items").products
         self.read("/analytics")
-        print("HTTP: catalog upload, literal search, product/cart actions, CSRF, order snapshot and navigation passed")
+        print("HTTP: catalog upload, literal search, quantity controls, CSRF, order snapshot, profile and navigation passed")
         return {"order_path": order_path, "cookies": self.cookies, "marker": marker}
 
 

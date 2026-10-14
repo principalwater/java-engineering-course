@@ -46,6 +46,7 @@
   let purchasing = false;
   let refreshPayment = null;
   let confirmedCheckoutKey = null;
+  let cartNeedsReload = false;
 
   class RequestError extends Error {
     constructor(status, code) {
@@ -162,7 +163,7 @@
       node.dataset.cartTotal = String(total);
       node.textContent = money(total);
     });
-    const hasRows = layout.querySelector(".cart-line") !== null;
+    const hasRows = cartNeedsReload || layout.querySelector(".cart-line") !== null;
     layout.hidden = !hasRows;
     const empty = document.querySelector("[data-cart-empty]");
     if (empty) empty.hidden = hasRows;
@@ -276,7 +277,17 @@
           || !checkoutKeyPattern.test(result.checkoutKey)) {
         throw new Error("Unexpected cart response shape");
       }
-      confirmedCheckoutKey = result.checkoutKey;
+      const layout = document.querySelector("[data-cart-layout]");
+      if (layout && !cartNeedsReload) {
+        const rows = new Map([...layout.querySelectorAll(".cart-line")].map(row => [row.dataset.productId, row]));
+        cartNeedsReload = result.cart.items.some(item => {
+          const row = rows.get(String(item.id));
+          return !row || row.querySelector(".item-title").textContent !== item.title
+            || row.querySelector(".cart-art img").getAttribute("src") !== item.imgPath;
+        });
+      }
+      confirmedCheckoutKey = cartNeedsReload ? null : result.checkoutKey;
+      if (cartNeedsReload && refreshPayment) void refreshPayment();
       applyCart(result.cart);
       reportSaved(form, before, Number(result.count));
       return result.cart;
@@ -403,8 +414,14 @@
     let paymentVersion = 0;
     let checking = false;
     let stale = form.dataset.stale === "true";
-    const permitted = () => !stale && (payment.pending || (payment.status === "AVAILABLE" && payment.canBuy));
+    const permitted = () => !cartNeedsReload && !stale && (payment.pending || (payment.status === "AVAILABLE" && payment.canBuy));
     const renderButton = () => {
+      if (cartNeedsReload) {
+        stale = true;
+        message.textContent = "Изменение сохранено. Состав или описание товаров изменились в другом окне. Перезагрузите корзину и проверьте заказ перед оплатой.";
+        message.classList.add("is-error");
+        if (refreshButton) refreshButton.textContent = "Перезагрузить корзину";
+      }
       button.disabled = purchasing || checking || !permitted();
       setDisabled(button, button.disabled);
       button.textContent = payment.pending ? "Проверить платёж" : "Оплатить и оформить";
@@ -414,6 +431,11 @@
     };
     // Баланс не кэшируется в браузере: после изменений корзины и перед оплатой перечитываем состояние сервера.
     refreshPayment = ({ fresh = false } = {}) => {
+      if (cartNeedsReload) {
+        paymentController?.abort();
+        renderButton();
+        return Promise.resolve(false);
+      }
       if (paymentRequest && !fresh) return paymentRequest;
       paymentController?.abort();
       const ticket = ++paymentVersion;
@@ -449,7 +471,7 @@
           const total = document.querySelector("[data-cart-total]").dataset.cartTotal;
           const expectedKey = confirmedCheckoutKey ?? keyInput.value;
           // Только ACK нашего изменения разрешает новый ключ; чужую корзину нельзя оплатить из старой страницы.
-          stale = !next.pending && (next.checkoutKey !== expectedKey || big(next.requiredMinor) !== big(total) * MINOR_UNITS_PER_RUBLE);
+          stale = cartNeedsReload || (!next.pending && (next.checkoutKey !== expectedKey || big(next.requiredMinor) !== big(total) * MINOR_UNITS_PER_RUBLE));
           if (!stale) {
             keyInput.value = next.checkoutKey;
             amountInput.value = next.requiredMinor;

@@ -83,3 +83,19 @@ module "sprint06" {
   secrets_directory          = var.secrets_directory
   runtime_user               = var.runtime_user
 }
+
+module "sprint07" {
+  source   = "./modules/rest-storefront"
+  for_each = contains(["sprint07-postgresql", "sprint07-h2"], var.deployment) ? toset([var.deployment]) : toset([])
+
+  project_directory = "${local.repository}/projects/sprint07-rest-service"
+  stack_name        = local.stack_name
+  profile           = each.key == "sprint07-h2" ? "h2" : "postgresql"
+  artifact_hashes   = var.deployment_artifact_hashes
+  http_port         = each.key == "sprint07-h2" ? 28090 : 28089
+  payments_port     = each.key == "sprint07-h2" ? 29090 : 29089
+  analytics_port    = each.key == "sprint07-h2" ? 28130 : 28129
+  analytics_enabled = var.analytics_enabled
+  secrets_directory = var.secrets_directory
+  runtime_user      = var.runtime_user
+}

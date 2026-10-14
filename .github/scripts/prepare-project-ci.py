@@ -9,12 +9,13 @@ MIRROR = "public.ecr.aws/docker/library/"
 
 
 def mirrored(image):
-    if not re.fullmatch(r"[a-z0-9-]+:[^@\s]+@sha256:[0-9a-f]{64}", image):
+    if not re.fullmatch(r"[a-z0-9-]+(?::[^@\s]+)?@sha256:[0-9a-f]{64}", image):
         raise ValueError("Expected a pinned Docker Official Image")
     return MIRROR + image
 
 
 def prepare_image(image):
+    image = image.removeprefix(MIRROR)
     # Both registries must serve the exact pinned digest; never fall back to a mutable tag.
     for candidate in (mirrored(image), image):
         try:
@@ -30,16 +31,26 @@ def prepare_image(image):
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--exercise", action="store_true")
-exercise = parser.parse_args().exercise
+mode = parser.add_mutually_exclusive_group()
+mode.add_argument("--exercise", action="store_true")
+mode.add_argument("--docker-exercise", action="store_true")
+arguments = parser.parse_args()
 project = Path.cwd()
 output = Path(os.environ["RUNNER_TEMP"]) / (project.name + "-compose")
 output.mkdir(parents=True, exist_ok=True)
-images = re.findall(r"^    image: (\S+)$", (project / "compose.yaml").read_text(), re.MULTILINE)
-if len(images) != 1:
-    raise ValueError("Expected one pinned image in the Compose file")
-services = {"web" if exercise else "db": {"image": prepare_image(images[0])}}
-builds = () if exercise else (("backend", project), ("frontend", project / "frontend"))
+compose = project / ("compose.yml" if arguments.docker_exercise else "compose.yaml")
+if arguments.docker_exercise:
+    configuration = json.loads(subprocess.check_output(
+        ["docker", "compose", "-f", str(compose), "config", "--format", "json"], text=True))
+    services = {name: {"image": prepare_image(service["image"])}
+                for name, service in configuration["services"].items() if "image" in service}
+    builds = (("app", project),)
+else:
+    images = re.findall(r"^    image: (\S+)$", compose.read_text(), re.MULTILINE)
+    if len(images) != 1:
+        raise ValueError("Expected one pinned image in the Compose file")
+    services = {"web" if arguments.exercise else "db": {"image": prepare_image(images[0])}}
+    builds = () if arguments.exercise else (("backend", project), ("frontend", project / "frontend"))
 for service, context in builds:
     source = (context / "Dockerfile").read_text()
     # Prefer the official mirror; rate limits on either registry must not change the digest.
@@ -56,5 +67,5 @@ for service, context in builds:
 override = output / "compose.json"
 override.write_text(json.dumps({"services": services}))
 with Path(os.environ["GITHUB_ENV"]).open("a") as environment:
-    environment.write(f"COMPOSE_FILE={project / 'compose.yaml'}:{override}\n")
+    environment.write(f"COMPOSE_FILE={compose}:{override}\n")
 print("CI Compose override prepared with pinned official images and registry fallback")

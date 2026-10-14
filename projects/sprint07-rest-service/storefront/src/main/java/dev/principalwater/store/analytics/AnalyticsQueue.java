@@ -14,6 +14,7 @@ import java.util.UUID;
 import java.util.function.Function;
 import org.springframework.stereotype.Service;
 import org.springframework.r2dbc.core.DatabaseClient;
+import io.r2dbc.spi.Row;
 import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Mono;
 
@@ -70,13 +71,25 @@ public class AnalyticsQueue {
                        MAX(a.delivered_at) AS delivered,
                        MIN(CASE WHEN a.delivered_at IS NULL THEN o.created_at END) AS oldest
                 FROM analytics_outbox a JOIN purchase_orders o ON o.id = a.order_id
-                WHERE o.cart_id = :cartId
-                """).bind("cartId", cartId).map(row -> {
-                    var delivered = row.get("delivered", OffsetDateTime.class);
-                    var oldest = row.get("oldest", OffsetDateTime.class);
-                    return new QueueStatus(((Number) row.get("pending")).longValue(),
-                            delivered == null ? null : delivered.toInstant(), oldest == null ? null : oldest.toInstant());
-                }).one();
+                WHERE o.cart_id = :cartId AND o.status = 'PAID'
+                """).bind("cartId", cartId).map((row, metadata) -> status(row)).one();
+    }
+
+    public Mono<QueueStatus> statusForSeller() {
+        return database.sql("""
+                SELECT COALESCE(SUM(CASE WHEN a.delivered_at IS NULL THEN 1 ELSE 0 END), 0) AS pending,
+                       MAX(a.delivered_at) AS delivered,
+                       MIN(CASE WHEN a.delivered_at IS NULL THEN o.created_at END) AS oldest
+                FROM analytics_outbox a JOIN purchase_orders o ON o.id = a.order_id
+                WHERE o.status = 'PAID'
+                """).map((row, metadata) -> status(row)).one();
+    }
+
+    private QueueStatus status(Row row) {
+        var delivered = row.get("delivered", OffsetDateTime.class);
+        var oldest = row.get("oldest", OffsetDateTime.class);
+        return new QueueStatus(((Number) row.get("pending")).longValue(),
+                delivered == null ? null : delivered.toInstant(), oldest == null ? null : oldest.toInstant());
     }
 
     @Transactional

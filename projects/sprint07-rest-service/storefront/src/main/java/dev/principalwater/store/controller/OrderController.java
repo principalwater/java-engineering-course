@@ -1,6 +1,8 @@
 package dev.principalwater.store.controller;
 
 import dev.principalwater.store.service.OrderService;
+import dev.principalwater.store.payment.OrderPaymentView;
+import org.springframework.web.bind.annotation.ResponseBody;
 import jakarta.validation.constraints.Positive;
 import java.util.UUID;
 import org.springframework.stereotype.Controller;
@@ -25,6 +27,13 @@ public class OrderController {
             model.addAttribute("orders", selected);
             return "orders";
         });
+    }
+
+    @GetMapping("/orders/{id}/payment")
+    @ResponseBody
+    public Mono<OrderPaymentView> payment(@PathVariable @Positive long id,
+                                          @RequestAttribute(CartIdentityFilter.ATTRIBUTE_NAME) UUID cartId) {
+        return orders.payment(id, cartId);
     }
 
     @GetMapping("/orders/{id}")

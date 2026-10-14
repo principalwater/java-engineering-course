@@ -7,5 +7,6 @@ import reactor.core.publisher.Mono;
 
 public interface StoreUserRepository extends ReactiveCrudRepository<StoreUser, UUID> {
     Mono<StoreUser> findByUsername(String username);
+    Mono<StoreUser> findByCartId(UUID cartId);
     Mono<Boolean> existsByCartId(UUID cartId);
 }

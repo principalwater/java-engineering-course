@@ -2,15 +2,12 @@ package dev.principalwater.store.analytics;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.principalwater.store.util.VisitorIdentity;
-import dev.principalwater.store.DatabaseTestBase;
+import dev.principalwater.store.StoreIntegrationTestBase;
 import dev.principalwater.store.config.CartProperties;
 import dev.principalwater.store.dao.ProductRepository;
-import dev.principalwater.store.model.CartAction;
-import dev.principalwater.store.model.StoreError;
-import dev.principalwater.store.service.CartService;
-import dev.principalwater.store.service.CatalogImportService;
-import dev.principalwater.store.service.CheckoutService;
-import dev.principalwater.store.service.OrderService;
+import dev.principalwater.store.dao.StoreUserRepository;
+import dev.principalwater.store.model.*;
+import dev.principalwater.store.service.*;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -27,6 +24,7 @@ import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWeb
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.web.reactive.function.BodyInserters;
 import reactor.test.StepVerifier;
@@ -35,6 +33,7 @@ import static dev.principalwater.store.ProductFixtures.productInput;
 import static org.junit.jupiter.api.Assertions.*;
 
 import static org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.csrf;
+import static org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.mockAuthentication;
 
 @SpringBootTest(properties = {
         "store.analytics.enabled=true",
@@ -45,7 +44,7 @@ import static org.springframework.security.test.web.reactive.server.SecurityMock
 })
 @AutoConfigureWebTestClient
 @Timeout(value = 2, unit = TimeUnit.MINUTES)
-class AnalyticsIntegrationTest extends DatabaseTestBase {
+class AnalyticsIntegrationTest extends StoreIntegrationTestBase {
     @Autowired private CatalogImportService importer;
     @Autowired private ProductRepository products;
     @Autowired private CartService carts;
@@ -58,6 +57,8 @@ class AnalyticsIntegrationTest extends DatabaseTestBase {
     @Autowired private Clock clock;
     @Autowired private WebTestClient web;
     @Autowired private CartProperties cartProperties;
+    @Autowired private AccountService accounts;
+    @Autowired private StoreUserRepository users;
 
     @BeforeEach
     void boundWebRequests() {
@@ -68,6 +69,8 @@ class AnalyticsIntegrationTest extends DatabaseTestBase {
     void realCheckoutRetriesUnknownOutcomeAndRecoversAfterWarehouseOutage() throws Exception {
         UUID firstCart = await(carts.identify(null));
         web = web.mutate().defaultCookie(cartProperties.cookieName(), firstCart.toString()).build();
+        var buyer = accountClient(AccountRole.BUYER);
+        var seller = accountClient(AccountRole.SELLER);
         // Пустое окно доступно, но среднего без заказов нет: wire-контракт сохраняет явный null.
         web.get().uri("/profile/analytics/data").accept(MediaType.APPLICATION_JSON)
                 .exchange().expectStatus().isOk().expectBody()
@@ -80,7 +83,7 @@ class AnalyticsIntegrationTest extends DatabaseTestBase {
                 "analytics-keyboard", "Клавиатура", "Снимок заказа", 7900)))));
         long productId = await(products.findAllBySkuIn(List.of("analytics-keyboard")).single()).id();
         await(carts.change(firstCart, productId, CartAction.SET, 2));
-        long firstOrder = await(checkout.buy(firstCart));
+        long firstOrder = await(buy(firstCart));
         var batch = await(queue.capture());
         assertEquals(List.of(firstOrder), batch.orderIds());
         assertNotNull(await(queue.status(firstCart)).oldestPending());
@@ -100,6 +103,15 @@ class AnalyticsIntegrationTest extends DatabaseTestBase {
         assertEquals(1, total.orders());
         assertEquals(2, total.units());
         assertEquals(15800, total.orderValue());
+        buyer.mutateWith(csrf()).post().uri("/profile/analytics/sync").accept(MediaType.TEXT_HTML)
+                .body(BodyInserters.fromFormData("days", "30")).exchange().expectStatus().isNotFound();
+        buyer.get().uri("/profile/analytics/data").accept(MediaType.APPLICATION_JSON)
+                .exchange().expectStatus().isOk().expectBody().jsonPath("$.summary.orders").isEqualTo("0");
+        seller.get().uri("/account/seller/analytics/data").accept(MediaType.APPLICATION_JSON)
+                .exchange().expectStatus().isOk().expectBody()
+                .jsonPath("$.summary.orders").isEqualTo("2")
+                .jsonPath("$.summary.units").isEqualTo("101")
+                .jsonPath("$.summary.orderValue").isEqualTo("99015800");
         assertEquals(1, await(queue.status(firstCart)).pendingOrders());
         StepVerifier.create(delivery.flush()).expectNext(DeliveryResult.delivered(1))
                 .expectComplete().verify(TIMEOUT);
@@ -114,7 +126,7 @@ class AnalyticsIntegrationTest extends DatabaseTestBase {
         docker("stop");
         try {
             await(carts.change(firstCart, productId, CartAction.PLUS));
-            long secondOrder = await(checkout.buy(firstCart));
+            long secondOrder = await(buy(firstCart));
             assertEquals(7900, await(orders.get(secondOrder, firstCart)).totalSum());
             assertTrue(await(carts.view(firstCart)).items().isEmpty());
             expectError(delivery.flush(), StoreError.ANALYTICS_UNAVAILABLE);
@@ -125,22 +137,23 @@ class AnalyticsIntegrationTest extends DatabaseTestBase {
                         assertTrue(html.contains("Аналитика сейчас недоступна"));
                         assertFalse(html.contains("data-metric=\"orders\""));
                     });
-            var sync = web.mutateWith(csrf()).post().uri("/profile/analytics/sync").accept(MediaType.TEXT_HTML)
+            var sync = seller.mutateWith(csrf()).post().uri("/account/seller/analytics/sync").accept(MediaType.TEXT_HTML)
                     .body(BodyInserters.fromFormData("days", "30")).exchange().expectStatus().isSeeOther()
-                    .expectHeader().valueEquals(HttpHeaders.LOCATION, "/profile/analytics?days=30")
+                    .expectHeader().valueEquals(HttpHeaders.LOCATION, "/account/seller/analytics?days=30")
                     .expectBody().returnResult();
-            web.get().uri("/profile/analytics?days=30").accept(MediaType.TEXT_HTML)
+            seller.get().uri("/account/seller/analytics?days=30").accept(MediaType.TEXT_HTML)
                     .cookies(cookies -> sync.getResponseCookies().forEach((name, values) ->
                             values.forEach(cookie -> cookies.add(name, cookie.getValue()))))
                     .exchange().expectStatus().isOk().expectBody(String.class).value(html ->
-                            assertTrue(html.contains("Аналитика пока недоступна. Заказы остаются в очереди.")));
+                            assertTrue(html.contains("Аналитика пока недоступна. Оплаченные заказы остаются в очереди.")));
         } finally {
             docker("start");
         }
         Awaitility.await().atMost(Duration.ofSeconds(45)).pollInterval(Duration.ofMillis(500)).ignoreExceptions()
                 .untilAsserted(() -> assertEquals(1, total(firstCart).orders()));
-        StepVerifier.create(delivery.flush()).expectNext(DeliveryResult.delivered(1))
-                .expectComplete().verify(TIMEOUT);
+        seller.mutateWith(csrf()).post().uri("/account/seller/analytics/sync").accept(MediaType.TEXT_HTML)
+                .body(BodyInserters.fromFormData("days", "30")).exchange().expectStatus().isSeeOther()
+                .expectHeader().valueEquals(HttpHeaders.LOCATION, "/account/seller/analytics?days=30");
         var status = await(queue.status(firstCart));
         assertEquals(0, status.pendingOrders());
         assertNotNull(status.lastDelivery());
@@ -160,8 +173,31 @@ class AnalyticsIntegrationTest extends DatabaseTestBase {
                 .jsonPath("$.previous.averageOrder").value(value -> assertNull(value))
                 .jsonPath("$.period.days").isEqualTo(30)
                 .jsonPath("$.daily.length()").isEqualTo(30);
+        seller.get().uri("/account/seller/analytics/data?days=30").accept(MediaType.APPLICATION_JSON)
+                .exchange().expectStatus().isOk().expectBody()
+                .jsonPath("$.summary.orders").isEqualTo("3")
+                .jsonPath("$.summary.units").isEqualTo("102")
+                .jsonPath("$.summary.orderValue").isEqualTo("99023700")
+                .jsonPath("$.previous.orders").isEqualTo("0")
+                .jsonPath("$.period.days").isEqualTo(30)
+                .jsonPath("$.daily.length()").isEqualTo(30);
         web.get().uri("/profile/analytics?days=365").accept(MediaType.TEXT_HTML)
                 .exchange().expectStatus().isBadRequest();
+    }
+
+    private WebTestClient accountClient(AccountRole role) {
+        String username = role == AccountRole.SELLER ? "warehouse.seller" : "warehouse.buyer";
+        StoreUser user = await(accounts.register(new AccountRegistration(username, "Пользователь аналитики", "warehouse account pass")));
+        if (role == AccountRole.SELLER) {
+            await(database.sql("UPDATE store_users SET role = 'SELLER' WHERE id = :id")
+                    .bind("id", user.id()).fetch().rowsUpdated());
+            user = await(users.findById(user.id()));
+        }
+        // Реальный login/сохранённая роль проверены AccountIntegrationTest; здесь изолирована граница warehouse/HTTP.
+        var principal = new StoreUserDetails(user);
+        principal.eraseCredentials();
+        return web.mutateWith(mockAuthentication(UsernamePasswordAuthenticationToken.authenticated(
+                principal, null, principal.getAuthorities())));
     }
 
     private AnalyticsRow total(UUID userId) {

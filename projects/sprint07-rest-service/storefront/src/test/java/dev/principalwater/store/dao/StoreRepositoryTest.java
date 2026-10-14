@@ -59,7 +59,8 @@ class StoreRepositoryTest extends DatabaseTestBase {
         var product = await(products.save(new Product(productInput(
                 "keyboard", "Delivery keyboard", "Description", 2500))));
         var cart = await(carts.save(new ShoppingCart(UUID.randomUUID())));
-        var order = await(orders.save(new PurchaseOrder(cart.id(), List.of(new CartItem(product, 1)), PURCHASE_TIME)));
+        var order = await(orders.save(new PurchaseOrder(null, UUID.randomUUID(), cart.id(), PURCHASE_TIME,
+                product.price(), OrderStatus.PAID, UUID.randomUUID())));
         await(outbox.save(new AnalyticsOutbox(order.id())));
 
         StepVerifier.create(outbox.pendingOrderIds(100)).expectNext(order.id()).expectComplete().verify(TIMEOUT);

@@ -59,6 +59,21 @@ public class AnalyticsDashboardService {
         });
     }
 
+    public Mono<AnalyticsDashboard> loadForSeller(AnalyticsPeriod period) {
+        return Mono.defer(() -> queue.statusForSeller().flatMap(status -> {
+            var client = clickhouse.getIfAvailable();
+            if (client == null) {
+                return Mono.just(AnalyticsDashboard.inactive(AnalyticsDashboard.State.DISABLED, period, status));
+            }
+            var end = LocalDate.now(clock.withZone(ZoneOffset.UTC));
+            var start = end.minusDays(period.getDays() - 1L);
+            return queue.sourceId().flatMap(source -> client.sellerDashboard(source, start, end))
+                    .map(rows -> available(period, status, start, end, rows))
+                    .onErrorResume(this::isUnavailable, error -> Mono.just(AnalyticsDashboard.inactive(
+                            AnalyticsDashboard.State.UNAVAILABLE, period, status)));
+        }));
+    }
+
     private boolean isUnavailable(Throwable error) {
         return error instanceof StoreException failure && failure.getError() == StoreError.ANALYTICS_UNAVAILABLE;
     }

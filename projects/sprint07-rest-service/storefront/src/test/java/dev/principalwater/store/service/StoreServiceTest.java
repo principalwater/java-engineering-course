@@ -1,7 +1,9 @@
 package dev.principalwater.store.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.principalwater.store.DatabaseTestBase;
+import dev.principalwater.store.StoreIntegrationTestBase;
+import dev.principalwater.store.PaymentsStub;
+import dev.principalwater.store.util.VisitorIdentity;
 import dev.principalwater.store.dao.OrderRepository;
 import dev.principalwater.store.dao.OutboxRepository;
 import dev.principalwater.store.dao.ProductRepository;
@@ -19,7 +21,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.ReactiveTransactionManager;
 import reactor.core.publisher.Flux;
@@ -31,8 +32,7 @@ import reactor.test.StepVerifier;
 import static dev.principalwater.store.ProductFixtures.productInput;
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest
-class StoreServiceTest extends DatabaseTestBase {
+class StoreServiceTest extends StoreIntegrationTestBase {
     @Autowired private CatalogImportService importer;
     @Autowired private CatalogService catalog;
     @Autowired private CartService carts;
@@ -113,7 +113,8 @@ class StoreServiceTest extends DatabaseTestBase {
         long productId = id("checkout");
         await(carts.change(cartId, productId, CartAction.SET, 2));
 
-        long orderId = await(checkout.buy(cartId));
+        UUID purchaseKey = UUID.fromString(await(checkout.availability(cartId)).checkoutKey());
+        long orderId = await(checkout.buy(cartId, purchaseKey, 500000));
         StepVerifier.create(orderService.get(orderId, cartId)).assertNext(order -> {
             assertEquals(5000, order.totalSum());
             assertEquals(2, order.items().getFirst().count());
@@ -131,7 +132,8 @@ class StoreServiceTest extends DatabaseTestBase {
             assertEquals(0, profile.orderValue());
         }).expectComplete().verify(TIMEOUT);
         expectError(orderService.get(orderId, UUID.randomUUID()), StoreError.ORDER_NOT_FOUND);
-        expectError(checkout.buy(cartId), StoreError.EMPTY_CART);
+        assertEquals(orderId, await(checkout.buy(cartId, purchaseKey, 500000)), "A replay must return the same confirmed order");
+        assertEquals(1, PaymentsStub.DEBITS.get());
     }
 
     @Test
@@ -142,7 +144,7 @@ class StoreServiceTest extends DatabaseTestBase {
         // Ошибка последней записи проверяет настоящий rollback сервисной транзакции, а не откат теста.
         execute("ALTER TABLE analytics_outbox ADD CONSTRAINT reject_delivery_test CHECK (order_id < 0)");
         try {
-            StepVerifier.create(checkout.buy(cartId)).expectError(DataIntegrityViolationException.class).verify(TIMEOUT);
+            StepVerifier.create(buy(cartId)).expectError(DataIntegrityViolationException.class).verify(TIMEOUT);
             StepVerifier.create(carts.view(cartId)).assertNext(view -> assertEquals(700, view.total()))
                     .expectComplete().verify(TIMEOUT);
             StepVerifier.create(orderService.list(cartId)).assertNext(selected -> assertTrue(selected.isEmpty()))
@@ -150,6 +152,10 @@ class StoreServiceTest extends DatabaseTestBase {
         } finally {
             execute("ALTER TABLE analytics_outbox DROP CONSTRAINT reject_delivery_test");
         }
+        assertEquals(1, PaymentsStub.DEBITS.get());
+        long recovered = await(buy(cartId));
+        assertEquals(OrderStatus.PAID, await(orderService.get(recovered, cartId)).status());
+        assertEquals(1, PaymentsStub.DEBITS.get(), "Recovery must not repeat the remote debit");
     }
 
     @Test
@@ -158,10 +164,10 @@ class StoreServiceTest extends DatabaseTestBase {
         UUID cartId = await(carts.identify(null));
         await(carts.change(cartId, id("concurrent"), CartAction.PLUS));
 
-        var results = race(checkout.buy(cartId).thenReturn(true), checkout.buy(cartId).thenReturn(true));
-        assertEquals(1, results.stream().filter(Signal::isOnNext).count());
-        var failure = results.stream().filter(Signal::isOnError).findFirst().orElseThrow();
-        assertEquals(StoreError.EMPTY_CART, assertInstanceOf(StoreException.class, failure.getThrowable()).getError());
+        UUID key = UUID.fromString(await(checkout.availability(cartId)).checkoutKey());
+        var results = race(checkout.buy(cartId, key, 70000).thenReturn(true), checkout.buy(cartId, key, 70000).thenReturn(true));
+        assertEquals(2, results.stream().filter(Signal::isOnNext).count());
+        assertEquals(1, PaymentsStub.DEBITS.get());
         StepVerifier.create(orders.findByCartIdOrderByCreatedAtDescIdDesc(cartId).count())
                 .expectNext(1L).expectComplete().verify(TIMEOUT);
         StepVerifier.create(carts.view(cartId)).assertNext(view -> assertTrue(view.items().isEmpty()))
@@ -191,13 +197,17 @@ class StoreServiceTest extends DatabaseTestBase {
         long productId = id("race");
         await(carts.change(cartId, productId, CartAction.PLUS));
 
-        var results = race(checkout.buy(cartId).thenReturn(true),
+        UUID key = UUID.fromString(await(checkout.availability(cartId)).checkoutKey());
+        var results = race(checkout.buy(cartId, key, 70000).thenReturn(true),
                 carts.change(cartId, productId, CartAction.PLUS).thenReturn(true));
-        assertEquals(2, results.stream().filter(Signal::isOnNext).count());
+        assertTrue(results.stream().noneMatch(signal -> signal.isOnError()
+                && (!(signal.getThrowable() instanceof StoreException failure)
+                || failure.getError() != StoreError.CHECKOUT_IN_PROGRESS && failure.getError() != StoreError.STALE_CHECKOUT)));
+        long rejectedIncrement = results.stream().filter(signal -> signal.isOnError()
+                && ((StoreException) signal.getThrowable()).getError() == StoreError.CHECKOUT_IN_PROGRESS).count();
         var purchased = await(orderService.list(cartId));
-        assertEquals(1, purchased.size());
-        int orderedQuantity = purchased.getFirst().items().getFirst().count();
-        assertEquals(2, orderedQuantity + await(carts.view(cartId)).itemCount());
+        int orderedQuantity = purchased.stream().flatMap(order -> order.items().stream()).mapToInt(OrderLineView::count).sum();
+        assertEquals(2, orderedQuantity + await(carts.view(cartId)).itemCount() + rejectedIncrement);
     }
 
     @Test
@@ -229,6 +239,68 @@ class StoreServiceTest extends DatabaseTestBase {
     void applicationUsesOneReactiveTransactionManagerAndNoJdbcDataSource() {
         assertEquals(1, context.getBeansOfType(ReactiveTransactionManager.class).size());
         assertTrue(context.getBeansOfType(DataSource.class).isEmpty());
+    }
+
+    @Test
+    void lostResponseFreezesTheSnapshotAndRecoversWithoutAnotherDebit() throws Exception {
+        importItems(productInput("uncertain", "Uncertain", "Description", 700));
+        UUID cartId = await(carts.identify(null));
+        long productId = id("uncertain");
+        await(carts.change(cartId, productId, CartAction.PLUS));
+        PaymentsStub.LOSE_RESPONSE.set(true);
+        expectError(buy(cartId), StoreError.PAYMENT_PENDING);
+        assertEquals(1, PaymentsStub.DEBITS.get());
+        assertTrue(await(orderService.list(cartId)).isEmpty());
+        assertTrue(await(checkout.availability(cartId)).getPending());
+        expectError(carts.change(cartId, productId, CartAction.PLUS), StoreError.CHECKOUT_IN_PROGRESS);
+        // Импорт меняет текущую цену; повтор оплачивает прежний SQL-снимок, а не Redis или новую цену.
+        importItems(productInput("uncertain", "Updated", "Description", 900));
+        long orderId = await(buy(cartId));
+        assertEquals(700, await(orderService.get(orderId, cartId)).totalSum());
+        assertEquals(1, PaymentsStub.DEBITS.get());
+        assertEquals(1L, await(outbox.countByDeliveredAtIsNull()));
+    }
+
+    @Test
+    void unavailableAndInsufficientPaymentsNeverCreateAConfirmedOrder() throws Exception {
+        importItems(productInput("unpaid", "Unpaid", "Description", 700));
+        UUID cartId = await(carts.identify(null));
+        long productId = id("unpaid");
+        await(carts.change(cartId, productId, CartAction.PLUS));
+        PaymentsStub.funds(VisitorIdentity.analyticsId(cartId), 100);
+        assertFalse(await(checkout.availability(cartId)).getCanBuy());
+        expectError(buy(cartId), StoreError.INSUFFICIENT_FUNDS);
+        assertEquals(0, PaymentsStub.DEBITS.get());
+        assertTrue(await(orderService.list(cartId)).isEmpty());
+        // Окончательный отказ снимает блокировку корзины; новый checkout получает новый ключ.
+        await(carts.change(cartId, productId, CartAction.SET, 2));
+        PaymentsStub.UNAVAILABLE.set(true);
+        assertFalse(await(checkout.availability(cartId)).getCanBuy());
+        expectError(buy(cartId), StoreError.PAYMENT_PENDING);
+        assertTrue(await(orderService.list(cartId)).isEmpty());
+        assertEquals(2, await(carts.view(cartId)).itemCount());
+    }
+
+    @Test
+    void oldPurchaseReplayCannotChargeNewCartAndStaleQuotesCannotAuthorizeChangedPrices() throws Exception {
+        importItems(productInput("quote", "Quote", "Description", 700));
+        UUID cartId = await(carts.identify(null));
+        long productId = id("quote");
+        await(carts.change(cartId, productId, CartAction.PLUS));
+        UUID original = UUID.fromString(await(checkout.availability(cartId)).checkoutKey());
+        long orderId = await(checkout.buy(cartId, original, 70000));
+        await(carts.change(cartId, productId, CartAction.SET, 2));
+        assertEquals(orderId, await(checkout.buy(cartId, original, 70000)));
+        assertEquals(1, PaymentsStub.DEBITS.get());
+        assertEquals(2, await(carts.view(cartId)).itemCount());
+        UUID beforeImport = UUID.fromString(await(checkout.availability(cartId)).checkoutKey());
+        importItems(productInput("quote", "New price", "Description", 900));
+        expectError(checkout.buy(cartId, beforeImport, 140000), StoreError.STALE_CHECKOUT);
+        UUID afterImport = UUID.fromString(await(checkout.availability(cartId)).checkoutKey());
+        // Даже свежий key вместе со старой суммой SSR-формы не разрешает невидимое покупателю повышение цены.
+        expectError(checkout.buy(cartId, afterImport, 140000), StoreError.STALE_CHECKOUT);
+        assertEquals(1, PaymentsStub.DEBITS.get());
+        assertEquals(1, await(orderService.list(cartId)).size());
     }
 
     static Stream<String> invalidCatalogItems() {

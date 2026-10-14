@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('Кабинет продавца')}"></head>
+<body>
+<header th:replace="~{fragments :: header('seller')}"></header>
+<main id="main">
+<nav class="cabinet-tabs" aria-label="Кабинет"><a th:href="@{/profile}">Мои покупки</a><a th:href="@{/account/seller}" aria-current="page">Магазин</a></nav>
+<div class="page-heading"><p class="scope-tag">Кабинет продавца</p><h1>Ваша мастерская</h1><p class="lead">Оплаченные заказы всего магазина. Личные покупки и расходы доступны в соседнем разделе.</p></div>
+<div th:replace="~{fragments :: notice}"></div>
+<section aria-labelledby="sales-title"><div class="section-heading"><h2 id="sales-title">Продажи за всё время</h2><p>Только подтверждённая оплата</p></div>
+<dl class="stat-grid">
+<div class="stat-card"><dt>Выручка</dt><dd><strong data-metric="seller-revenue" th:text="${@display.money(seller.paidValue)}">0 ₽</strong><small>Без старых неоплаченных заказов</small></dd></div>
+<div class="stat-card"><dt>Оплаченных заказов</dt><dd><strong data-metric="seller-orders" th:text="${seller.paidOrders}">0</strong></dd></div>
+<div class="stat-card"><dt>Продано предметов</dt><dd><strong data-metric="seller-units" th:text="${seller.units}">0</strong></dd></div>
+<div class="stat-card"><dt>Последняя покупка</dt><dd><strong th:if="${seller.lastOrder != null}" th:text="${@display.time(seller.lastOrder)}"></strong><strong class="stat-empty" th:if="${seller.lastOrder == null}">Пока нет</strong></dd></div>
+</dl></section>
+<p class="quiet-note" th:if="${seller.pendingPayments > 0}" th:text="|Ожидают подтверждения оплаты: ${seller.pendingPayments}. В выручке они появятся после подтверждения.|"></p>
+<section class="profile-links" aria-label="Управление магазином">
+<a class="link-card" th:href="@{/account/seller/analytics}"><h2>Аналитика продаж</h2><p>Выручка, заказы, динамика и популярные товары всего магазина.</p><span class="link-arrow" aria-hidden="true">↗</span></a>
+<a class="link-card" th:href="@{/catalog}"><h2>Управление каталогом</h2><p>Добавить товары или обновить коллекцию из JSON-файла.</p><span class="link-arrow" aria-hidden="true">↗</span></a>
+</section>
+</main>
+<footer th:replace="~{fragments :: footer}"></footer>
+</body>
+</html>

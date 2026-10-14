@@ -3,6 +3,9 @@ package dev.principalwater.store.service;
 import dev.principalwater.store.dao.OrderLineRepository;
 import dev.principalwater.store.dao.OrderRepository;
 import dev.principalwater.store.dao.ProfileQueries;
+import dev.principalwater.store.dao.CheckoutIntentRepository;
+import dev.principalwater.store.payment.OrderPaymentView;
+import dev.principalwater.store.util.Money;
 import dev.principalwater.store.model.*;
 
 import java.util.List;
@@ -16,11 +19,13 @@ public class OrderService {
     private final OrderRepository orders;
     private final OrderLineRepository lines;
     private final ProfileQueries profiles;
+    private final CheckoutIntentRepository intents;
 
-    public OrderService(OrderRepository orders, OrderLineRepository lines, ProfileQueries profiles) {
+    public OrderService(OrderRepository orders, OrderLineRepository lines, ProfileQueries profiles, CheckoutIntentRepository intents) {
         this.orders = orders;
         this.lines = lines;
         this.profiles = profiles;
+        this.intents = intents;
     }
 
     public Mono<List<OrderView>> list(UUID cartId) {
@@ -43,6 +48,14 @@ public class OrderService {
                 .switchIfEmpty(Mono.error(new StoreException(StoreError.ORDER_NOT_FOUND)))
                 .flatMap(order -> lines.findByOrderIdOrderByLineNumber(id).collectList()
                         .map(items -> OrderView.from(order, items)));
+    }
+
+    public Mono<OrderPaymentView> payment(long id, UUID cartId) {
+        return orders.findByIdAndCartId(id, cartId).filter(order -> order.status() == OrderStatus.PAID)
+                .switchIfEmpty(Mono.error(new StoreException(StoreError.ORDER_NOT_FOUND)))
+                .flatMap(order -> intents.findById(order.eventId()).map(intent -> new OrderPaymentView(
+                        intent.payerId(), order.paymentId(), intent.id(), intent.amountMinor(), Money.CURRENCY, "PAID"))
+                        .switchIfEmpty(Mono.error(new IllegalStateException("Paid order has no payment intent"))));
     }
 
     public Mono<ProfileView> profile(UUID cartId) {

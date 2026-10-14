@@ -5,6 +5,9 @@ import dev.principalwater.store.runtime.ResourceAdmissionFilter;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import dev.principalwater.store.config.SecurityConfig;
+import dev.principalwater.store.payment.CheckoutAvailability;
+import dev.principalwater.store.payment.WalletBalanceView;
+import dev.principalwater.store.payment.WalletService;
 import dev.principalwater.store.util.DisplayFormats;
 import dev.principalwater.store.service.*;
 import dev.principalwater.store.config.WebConfig;
@@ -29,6 +32,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.MultipartBodyBuilder;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.reactive.server.WebTestClient;
@@ -39,9 +43,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 import static org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.csrf;
+import static org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.mockAuthentication;
 
 @WebFluxTest(excludeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = ResourceAdmissionFilter.class),
         controllers = {CatalogController.class, CartController.class, OrderController.class,
@@ -51,6 +55,7 @@ import static org.springframework.security.test.web.reactive.server.SecurityMock
 class StoreWebTest extends TestBase {
     @MockitoBean private AccountService accounts;
     private static final UUID CART_ID = UUID.fromString("652b77b8-9b3f-498c-9b99-321bd2fd3949");
+    private static final UUID CHECKOUT_KEY = UUID.fromString("644ddf44-8edf-3cf9-9af1-43d26e0bf5b5");
     private static final CartView EMPTY_CART = new CartView(List.of());
     @Autowired private WebTestClient web;
     @MockitoBean private CartService carts;
@@ -58,12 +63,17 @@ class StoreWebTest extends TestBase {
     @MockitoBean private CheckoutService checkout;
     @MockitoBean private OrderService orders;
     @MockitoBean private CatalogImportService importer;
+    @MockitoBean private WalletService wallets;
 
     @BeforeEach
     void cartOwner() {
         when(carts.identify(any())).thenReturn(Mono.just(CART_ID));
         when(carts.view(any())).thenReturn(Mono.just(EMPTY_CART));
         when(carts.change(any(), anyLong(), any(), any())).thenReturn(Mono.just(EMPTY_CART));
+        when(carts.changeWithReceipt(any(), anyLong(), any(), any())).thenReturn(Mono.just(new CartChange(EMPTY_CART, CHECKOUT_KEY)));
+        when(wallets.balance(any())).thenReturn(Mono.just(WalletBalanceView.available(1_000_000)));
+        when(checkout.availability(any())).thenReturn(Mono.just(new CheckoutAvailability(
+                CheckoutAvailability.Status.AVAILABLE, "1000000", "500000", "0", CHECKOUT_KEY.toString())));
     }
 
     @Test
@@ -91,15 +101,19 @@ class StoreWebTest extends TestBase {
         when(carts.view(any())).thenReturn(Mono.just(new CartView(List.of(item))));
         var line = new OrderLineView(7, "test", "Keyboard", "/images/keyboard.svg", 2500, 2);
         var purchasedAt = Instant.parse("2026-10-12T10:00:00Z");
-        var order = new OrderView(42, purchasedAt, List.of(line), 5000);
+        var order = new OrderView(42, purchasedAt, List.of(line), 5000, OrderStatus.PAID, UUID.randomUUID());
         when(orders.list(CART_ID)).thenReturn(Mono.just(List.of(order)));
         when(orders.get(42, CART_ID)).thenReturn(Mono.just(order));
-        when(orders.profile(CART_ID)).thenReturn(Mono.just(new ProfileView(1, 5000, 2, purchasedAt)));
+        when(orders.profile(CART_ID)).thenReturn(Mono.just(new ProfileView(1, 5000, 2, purchasedAt, 5000, 1, 0)));
 
         web.get().uri("/items/7").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
                 .expectBody(String.class).value(html -> assertTrue(html.contains("Keyboard")));
         web.get().uri("/cart/items").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
-                .expectBody(String.class).value(html -> assertTrue(html.contains("data-cart-total=\"5000\"")));
+                .expectBody(String.class).value(html -> {
+                    assertTrue(html.contains("data-cart-total=\"5000\""));
+                    assertTrue(Pattern.compile("<input\\b(?=[^>]*\\bname=\"checkoutKey\")[^>]*\\bvalue=\""
+                            + CHECKOUT_KEY + "\"").matcher(html).find());
+                });
         web.get().uri("/orders").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
                 .expectBody(String.class).value(html -> assertTrue(html.contains("/orders/42")));
         web.get().uri("/orders/42?newOrder=true").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
@@ -112,6 +126,8 @@ class StoreWebTest extends TestBase {
                 .expectBody(String.class).value(html -> {
                     assertTrue(html.contains("12.10.2026, 13:00"));
                     assertTrue(html.contains("/profile/analytics"));
+                    assertTrue(html.contains("Потрачено"));
+                    assertFalse(html.contains("Выручка"));
                 });
     }
 
@@ -127,20 +143,24 @@ class StoreWebTest extends TestBase {
     @Test
     void cartMutationReturnsItsServerCalculatedQuantityAndTotalsForJson() {
         var item = new ItemView(7, "test", "Keyboard", "Description", "/images/keyboard.svg", 2500, 3);
-        when(carts.change(CART_ID, 7, CartAction.SET, 3))
-                .thenReturn(Mono.just(new CartView(List.of(item))));
+        when(carts.changeWithReceipt(CART_ID, 7, CartAction.SET, 3))
+                .thenReturn(Mono.just(new CartChange(new CartView(List.of(item)), CHECKOUT_KEY)));
         web.mutateWith(csrf()).post().uri("/cart/items").accept(MediaType.APPLICATION_JSON)
                 .body(BodyInserters.fromFormData("id", "7").with("action", "SET").with("quantity", "3"))
                 .exchange().expectStatus().isOk().expectBody()
                 .jsonPath("$.itemId").isEqualTo(7).jsonPath("$.count").isEqualTo(3)
-                .jsonPath("$.cart.total").isEqualTo(7500).jsonPath("$.cart.itemCount").isEqualTo(3);
+                .jsonPath("$.cart.total").isEqualTo(7500).jsonPath("$.cart.itemCount").isEqualTo(3)
+                .jsonPath("$.checkoutKey").isEqualTo(CHECKOUT_KEY.toString());
     }
 
     @Test
     void checkoutNeedsCsrfAndRedirectsToTheNewOrder() {
-        when(checkout.buy(CART_ID)).thenReturn(Mono.just(42L));
+        when(checkout.buy(CART_ID, CHECKOUT_KEY, 500_000)).thenReturn(Mono.just(42L));
         web.post().uri("/buy").accept(MediaType.TEXT_HTML).exchange().expectStatus().isForbidden();
-        web.mutateWith(csrf()).post().uri("/buy").exchange().expectStatus().isSeeOther()
+        web.mutateWith(csrf()).post().uri("/buy").exchange().expectStatus().isBadRequest();
+        web.mutateWith(csrf()).post().uri("/buy")
+                .body(BodyInserters.fromFormData("checkoutKey", CHECKOUT_KEY.toString()).with("amountMinor", "500000"))
+                .exchange().expectStatus().isSeeOther()
                 .expectHeader().valueEquals(HttpHeaders.LOCATION, "/orders/42?newOrder=true");
     }
 
@@ -174,7 +194,8 @@ class StoreWebTest extends TestBase {
     @Test
     void uploadedCatalogUsesMultipartAndTheTokenFromTheRenderedForm() {
         when(importer.importJson(any())).thenReturn(Mono.just(new ImportResult(1, 0)));
-        var page = web.get().uri("/catalog").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
+        var seller = client(AccountRole.SELLER);
+        var page = seller.get().uri("/catalog").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
                 .expectBody(String.class).returnResult();
         String html = Objects.requireNonNull(page.getResponseBody());
         var token = Pattern.compile("<input\\b(?=[^>]*\\bname=\"_csrf\")[^>]*\\bvalue=\"([^\"]+)\"").matcher(html);
@@ -185,10 +206,62 @@ class StoreWebTest extends TestBase {
         form.part("_csrf", token.group(1));
 
         // Здесь нет csrf() mutator: проверяем настоящий multipart token resolver и cookie сессии.
-        web.post().uri("/catalog/import").accept(MediaType.TEXT_HTML)
+        seller.post().uri("/catalog/import").accept(MediaType.TEXT_HTML)
                 .cookies(cookies -> page.getResponseCookies().forEach((name, values) ->
                         values.forEach(cookie -> cookies.add(name, cookie.getValue()))))
                 .body(BodyInserters.fromMultipartData(form.build())).exchange()
                 .expectStatus().isSeeOther().expectHeader().valueEquals(HttpHeaders.LOCATION, "/items");
+    }
+
+    @Test
+    void availabilityReturnsExactMoneyStringsWithoutStartingCheckout() {
+        when(checkout.availability(CART_ID)).thenReturn(Mono.just(new CheckoutAvailability(
+                CheckoutAvailability.Status.AVAILABLE, "1000000000000000", "999999999999999", "0", CHECKOUT_KEY.toString())));
+        web.get().uri("/cart/items/availability").accept(MediaType.APPLICATION_JSON).exchange().expectStatus().isOk()
+                .expectBody().jsonPath("$.status").isEqualTo("AVAILABLE")
+                .jsonPath("$.balanceMinor").isEqualTo("1000000000000000")
+                .jsonPath("$.requiredMinor").isEqualTo("999999999999999")
+                .jsonPath("$.canBuy").isEqualTo(true).jsonPath("$.pending").isEqualTo(false)
+                .jsonPath("$.checkoutKey").isEqualTo(CHECKOUT_KEY.toString());
+        verify(checkout, never()).buy(any(), any(), anyLong());
+    }
+
+    @Test
+    void newerPricesDisableCheckoutAndTheFormKeepsTheAmountActuallyShown() {
+        var item = new ItemView(7, "test", "Keyboard", "Description", "/images/keyboard.svg", 2500, 2);
+        when(carts.view(any())).thenReturn(Mono.just(new CartView(List.of(item))));
+        when(checkout.availability(CART_ID)).thenReturn(Mono.just(new CheckoutAvailability(
+                CheckoutAvailability.Status.AVAILABLE, "1000000", "600000", "0", CHECKOUT_KEY.toString())));
+        web.get().uri("/cart/items").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
+                .expectBody(String.class).value(html -> {
+                    assertTrue(html.contains("Цены изменились"));
+                    assertTrue(html.contains("data-cart-total=\"5000\""));
+                    var form = Pattern.compile("<form\\b[^>]*\\bdata-checkout\\b[^>]*>(.*?)</form>", Pattern.DOTALL).matcher(html);
+                    assertTrue(form.find());
+                    assertTrue(Pattern.compile("<button\\b[^>]*\\sdisabled(?:\\s|=|>)[^>]*>").matcher(form.group(1)).find());
+                    assertTrue(Pattern.compile("<input\\b(?=[^>]*\\bname=\"amountMinor\")[^>]*\\bvalue=\"500000\"")
+                            .matcher(form.group(1)).find());
+                });
+    }
+
+    @Test
+    void legacyOrderCannotDisplayPaymentSuccessFromAnUntrustedQueryFlag() {
+        var order = new OrderView(42, Instant.parse("2026-10-12T10:00:00Z"), List.of(), 5000,
+                OrderStatus.LEGACY_UNPAID, null);
+        when(orders.get(42, CART_ID)).thenReturn(Mono.just(order));
+        web.get().uri("/orders/42?newOrder=true").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
+                .expectBody(String.class).value(html -> {
+                    assertTrue(html.contains("Без подтверждения оплаты"));
+                    assertTrue(html.contains("Его сумма не учитывается в ваших расходах"));
+                    assertFalse(html.contains("Заказ оформлен"));
+                    assertFalse(html.contains("Оплата подтверждена"));
+                });
+    }
+
+    private WebTestClient client(AccountRole role) {
+        var principal = new StoreUserDetails(new StoreUser(UUID.randomUUID(), CART_ID,
+                "role.user", "unused", "Role user", role, null));
+        return web.mutateWith(mockAuthentication(UsernamePasswordAuthenticationToken.authenticated(
+                principal, null, principal.getAuthorities())));
     }
 }

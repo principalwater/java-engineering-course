@@ -1,23 +1,26 @@
 package dev.principalwater.store.controller;
 
-import dev.principalwater.store.DatabaseTestBase;
+import dev.principalwater.store.PaymentsStub;
+import dev.principalwater.store.StoreIntegrationTestBase;
 import dev.principalwater.store.config.CartProperties;
 import dev.principalwater.store.dao.CartRepository;
 import dev.principalwater.store.dao.StoreUserRepository;
 import dev.principalwater.store.model.StoreUser;
+import dev.principalwater.store.model.AccountRole;
 import dev.principalwater.store.service.CatalogImportService;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.test.web.reactive.server.EntityExchangeResult;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.util.LinkedMultiValueMap;
@@ -25,8 +28,7 @@ import org.springframework.web.reactive.function.BodyInserters;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest
-class AccountIntegrationTest extends DatabaseTestBase {
+class AccountIntegrationTest extends StoreIntegrationTestBase {
     private static final String PASSWORD = "correct horse account pass";
     private static final Pattern CSRF = Pattern.compile(
             "<input\\b(?=[^>]*\\bname=\"_csrf\")[^>]*\\bvalue=\"([^\"]+)\"");
@@ -153,6 +155,120 @@ class AccountIntegrationTest extends DatabaseTestBase {
         assertTrue(browser.get("/profile", HttpStatus.OK).contains("Алиса"));
     }
 
+    @Test
+    void onlyPersistedSellersManageTheStoreAndBuyerSpendingRemainsSeparateFromRevenue() {
+        String catalog = """
+                [{"sku":"seller-item","title":"Seller item","description":"Description","image":"CUP","price":1250}]
+                """;
+        var guest = new Browser();
+        guest.get("/account/register", HttpStatus.OK);
+        for (String path : List.of("/account/seller", "/account/seller/analytics", "/account/seller/analytics/data", "/catalog")) {
+            guest.get(path, HttpStatus.FOUND);
+        }
+        guest.upload(catalog, HttpStatus.FOUND);
+        guest.post("/account/seller/analytics/sync", Map.of("days", "7"), true, HttpStatus.FOUND);
+
+        var buyer = new Browser();
+        buyer.get("/account/register", HttpStatus.OK);
+        buyer.post("/account/register", Map.of("username", "buyer.shop", "displayName", "Покупатель",
+                "password", PASSWORD, "role", "SELLER"), true, HttpStatus.SEE_OTHER);
+        assertEquals(AccountRole.BUYER, await(users.findByUsername("buyer.shop")).role(),
+                "Public registration must ignore a requested privileged role");
+        buyer.get("/account/login", HttpStatus.OK);
+        login(buyer, "buyer.shop", PASSWORD);
+        buyer.get("/profile", HttpStatus.OK);
+        for (String path : List.of("/account/seller", "/account/seller/analytics", "/account/seller/analytics/data", "/catalog")) {
+            buyer.get(path, HttpStatus.FORBIDDEN);
+        }
+        buyer.upload(catalog, HttpStatus.FORBIDDEN);
+        buyer.post("/account/seller/analytics/sync", Map.of("days", "7"), true, HttpStatus.FORBIDDEN);
+        assertEquals(0L, await(database.sql("SELECT COUNT(*) AS total FROM products")
+                .map(row -> ((Number) row.get("total")).longValue()).one()));
+
+        var seller = new Browser();
+        seller.get("/account/register", HttpStatus.OK);
+        register(seller, "owner.shop", "Продавец", HttpStatus.SEE_OTHER);
+        // Назначение продавца находится вне публичной регистрации; вход читает реальную сохранённую роль.
+        execute("UPDATE store_users SET role = 'SELLER' WHERE username = 'owner.shop'");
+        seller.get("/account/login", HttpStatus.OK);
+        login(seller, "owner.shop", PASSWORD);
+        seller.get("/catalog", HttpStatus.OK);
+        seller.upload(catalog, HttpStatus.SEE_OTHER);
+        long productId = await(database.sql("SELECT id FROM products WHERE sku = 'seller-item'")
+                .map(row -> row.get("id", Long.class)).one());
+        buyer.get("/profile", HttpStatus.OK);
+        buyer.post("/cart/items", Map.of("id", Long.toString(productId), "action", "SET", "quantity", "2"),
+                true, HttpStatus.SEE_OTHER);
+        buyer.post("/buy", Map.of(), true, HttpStatus.SEE_OTHER);
+        seller.get("/profile", HttpStatus.OK);
+        seller.post("/cart/items", Map.of("id", Long.toString(productId), "action", "SET", "quantity", "1"),
+                true, HttpStatus.SEE_OTHER);
+        seller.post("/buy", Map.of(), true, HttpStatus.SEE_OTHER);
+
+        String buyerProfile = buyer.get("/profile", HttpStatus.OK);
+        String sellerProfile = seller.get("/profile", HttpStatus.OK);
+        String store = seller.get("/account/seller", HttpStatus.OK);
+        assertEquals("2500", metric(buyerProfile, "paid-value"));
+        assertEquals("1250", metric(sellerProfile, "paid-value"));
+        assertEquals("3750", metric(store, "seller-revenue"));
+        assertEquals("2", metric(store, "seller-orders"));
+        assertEquals("3", metric(store, "seller-units"));
+        assertFalse(buyerProfile.contains("Выручка"));
+        assertFalse(sellerProfile.contains("Выручка"));
+        assertTrue(buyer.get("/profile/analytics", HttpStatus.OK).contains("Только ваши покупки"));
+        assertTrue(seller.get("/account/seller/analytics", HttpStatus.OK).contains("Весь магазин"));
+        // Отключённый warehouse отвечает 503 после разрешённого доступа, а не подменяет результаты нулями.
+        seller.post("/account/seller/analytics/sync", Map.of("days", "7"), true, HttpStatus.SERVICE_UNAVAILABLE);
+    }
+
+    @Test
+    void cartExplainsBalanceFailuresAndRecoversOnePendingPaymentThroughTheSamePost() {
+        await(importer.importJson("""
+                [{"sku":"wallet-item","title":"Wallet item","description":"Description","image":"CUP","price":1250}]
+                """.getBytes(StandardCharsets.UTF_8)));
+        long productId = await(database.sql("SELECT id FROM products WHERE sku = 'wallet-item'")
+                .map(row -> row.get("id", Long.class)).one());
+        var buyer = new Browser();
+        buyer.get("/account/register", HttpStatus.OK);
+        register(buyer, "wallet.shop", "Покупатель", HttpStatus.SEE_OTHER);
+        StoreUser account = await(users.findByUsername("wallet.shop"));
+        buyer.get("/account/login", HttpStatus.OK);
+        login(buyer, "wallet.shop", PASSWORD);
+        buyer.get("/profile", HttpStatus.OK);
+        buyer.post("/cart/items", Map.of("id", Long.toString(productId), "action", "SET", "quantity", "1"),
+                true, HttpStatus.SEE_OTHER);
+
+        PaymentsStub.funds(account.id(), 0);
+        String insufficient = buyer.get("/cart/items", HttpStatus.OK);
+        assertTrue(disabledCheckout(insufficient));
+        assertTrue(insufficient.contains("Недостаточно средств"));
+        PaymentsStub.UNAVAILABLE.set(true);
+        String unavailable = buyer.get("/cart/items", HttpStatus.OK);
+        assertTrue(disabledCheckout(unavailable));
+        assertTrue(unavailable.contains("Сервис платежей временно недоступен"));
+        assertTrue(buyer.get("/profile", HttpStatus.OK).contains("Не удалось проверить баланс"));
+        assertEquals(0L, await(database.sql("SELECT COUNT(*) AS total FROM purchase_orders")
+                .map(row -> ((Number) row.get("total")).longValue()).one()));
+
+        PaymentsStub.UNAVAILABLE.set(false);
+        PaymentsStub.funds(account.id(), 125_000);
+        assertFalse(disabledCheckout(buyer.get("/cart/items", HttpStatus.OK)));
+        PaymentsStub.LOSE_RESPONSE.set(true);
+        buyer.post("/buy", Map.of(), true, HttpStatus.SERVICE_UNAVAILABLE);
+        String pending = buyer.get("/cart/items", HttpStatus.OK);
+        assertFalse(disabledCheckout(pending));
+        assertTrue(checkoutForm(pending).contains("Проверить платёж"));
+        assertTrue(pending.contains("Уточняем результат платежа"));
+        assertTrue(Pattern.compile("<ul\\b[^>]*\\sinert(?:\\s|=|>)[^>]*>").matcher(pending).find());
+        buyer.post("/cart/items", Map.of("id", Long.toString(productId), "action", "PLUS"),
+                true, HttpStatus.CONFLICT);
+        var completed = buyer.post("/buy", Map.of(), true, HttpStatus.SEE_OTHER);
+        String orderPath = Objects.requireNonNull(completed.getResponseHeaders().getFirst(HttpHeaders.LOCATION));
+        assertTrue(buyer.get(orderPath, HttpStatus.OK).contains("Оплата подтверждена"));
+        assertEquals("1250", metric(buyer.get("/profile", HttpStatus.OK), "paid-value"));
+        assertEquals(1, PaymentsStub.DEBITS.get());
+    }
+
     private void register(Browser browser, String username, String name, HttpStatus status) {
         browser.post("/account/register", Map.of("username", username, "displayName", name, "password", PASSWORD), true, status);
     }
@@ -165,23 +281,44 @@ class AccountIntegrationTest extends DatabaseTestBase {
     private final class Browser {
         private final Map<String, String> cookies = new HashMap<>();
         private String csrf;
+        private String checkoutKey;
+        private String amountMinor;
 
         private String get(String path, HttpStatus status) {
             var result = web.get().uri(path).accept(MediaType.TEXT_HTML)
                     .cookies(values -> cookies.forEach(values::set)).exchange().expectStatus().isEqualTo(status)
                     .expectBody(String.class).returnResult();
             saveCookies(result);
-            String html = Objects.requireNonNull(result.getResponseBody());
+            String html = Objects.requireNonNullElse(result.getResponseBody(), "");
             var token = CSRF.matcher(html);
             if (token.find()) {
                 csrf = token.group(1);
+            }
+            var key = Pattern.compile("<input\\b(?=[^>]*\\bname=\"checkoutKey\")[^>]*\\bvalue=\"([^\"]+)\"").matcher(html);
+            if (key.find()) {
+                checkoutKey = key.group(1);
+            }
+            var amount = Pattern.compile("<input\\b(?=[^>]*\\bname=\"amountMinor\")[^>]*\\bvalue=\"([^\"]+)\"").matcher(html);
+            if (amount.find()) {
+                amountMinor = amount.group(1);
             }
             return html;
         }
 
         private EntityExchangeResult<String> post(String path, Map<String, String> values, boolean withCsrf, HttpStatus status) {
+            if (path.equals("/buy") && (checkoutKey == null || amountMinor == null)) {
+                get("/cart/items", HttpStatus.OK);
+            }
             var form = new LinkedMultiValueMap<String, String>();
             values.forEach(form::set);
+            if (path.equals("/buy") && !values.containsKey("checkoutKey")) {
+                assertNotNull(checkoutKey, "The rendered checkout must supply its stable payment key");
+                form.set("checkoutKey", checkoutKey);
+            }
+            if (path.equals("/buy") && !values.containsKey("amountMinor")) {
+                assertNotNull(amountMinor, "The rendered checkout must supply its visible amount");
+                form.set("amountMinor", amountMinor);
+            }
             if (withCsrf) {
                 assertNotNull(csrf, "A rendered form must supply the CSRF token");
                 form.set("_csrf", csrf);
@@ -190,7 +327,25 @@ class AccountIntegrationTest extends DatabaseTestBase {
                     .body(BodyInserters.fromFormData(form)).exchange().expectStatus().isEqualTo(status)
                     .expectBody(String.class).returnResult();
             saveCookies(result);
+            if (status.is2xxSuccessful() || status.is3xxRedirection()) {
+                if (path.equals("/cart/items") || path.equals("/account/login") || path.equals("/account/logout")) {
+                    checkoutKey = null;
+                    amountMinor = null;
+                }
+            }
             return result;
+        }
+
+        private void upload(String catalog, HttpStatus status) {
+            assertNotNull(csrf, "A rendered form must supply the CSRF token");
+            var form = new MultipartBodyBuilder();
+            form.part("catalog", catalog.getBytes(StandardCharsets.UTF_8)).filename("catalog.json")
+                    .contentType(MediaType.APPLICATION_JSON);
+            form.part("_csrf", csrf);
+            var result = web.post().uri("/catalog/import").accept(MediaType.TEXT_HTML)
+                    .cookies(request -> cookies.forEach(request::set)).body(BodyInserters.fromMultipartData(form.build()))
+                    .exchange().expectStatus().isEqualTo(status).expectBody(String.class).returnResult();
+            saveCookies(result);
         }
 
         private void saveCookies(EntityExchangeResult<?> result) {
@@ -203,5 +358,22 @@ class AccountIntegrationTest extends DatabaseTestBase {
                 }
             }));
         }
+    }
+
+    private static String metric(String html, String key) {
+        var value = Pattern.compile("<[^>]+\\bdata-metric=\"" + Pattern.quote(key) + "\"[^>]*>([^<]+)</").matcher(html);
+        assertTrue(value.find(), "Expected rendered metric " + key);
+        return value.group(1).replaceAll("[^0-9]", "");
+    }
+
+    private static boolean disabledCheckout(String html) {
+        return Pattern.compile("<button\\b[^>]*\\sdisabled(?:\\s|=|>)[^>]*>")
+                .matcher(checkoutForm(html)).find();
+    }
+
+    private static String checkoutForm(String html) {
+        var form = Pattern.compile("<form\\b[^>]*\\bdata-checkout\\b[^>]*>(.*?)</form>", Pattern.DOTALL).matcher(html);
+        assertTrue(form.find(), "The cart must contain its checkout form");
+        return form.group(1);
     }
 }

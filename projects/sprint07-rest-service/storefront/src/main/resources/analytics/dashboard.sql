@@ -10,7 +10,7 @@ SELECT * FROM
         uniqExact(order_uuid) AS orders,
         sum(quantity) AS units,
         sum(amount) AS order_value
-    FROM storefront.purchase_facts
+    FROM storefront.paid_purchase_facts
     PREWHERE source_id = {source:UUID} AND user_id = {user:UUID} AND order_day >= {start:Date} AND order_day <= {end:Date}
     GROUP BY GROUPING SETS ((), (order_day), (sku))
 
@@ -24,7 +24,7 @@ SELECT * FROM
         uniqExact(order_uuid) AS orders,
         sum(quantity) AS units,
         sum(amount) AS order_value
-    FROM storefront.purchase_facts
+    FROM storefront.paid_purchase_facts
     PREWHERE source_id = {source:UUID} AND user_id = {user:UUID}
         AND order_day >= {start:Date} - toIntervalDay(dateDiff('day', {start:Date}, {end:Date}) + 1)
         AND order_day < {start:Date}

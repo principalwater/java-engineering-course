@@ -10,7 +10,7 @@
 </div>
 <!--/* Обе части всегда в разметке: при обнулении корзины скрипт показывает пустое состояние без перезагрузки. */-->
 <section class="cart-layout" data-cart-layout th:attr="hidden=${cart.items.isEmpty() ? 'hidden' : null}">
-<ul class="cart-lines" aria-label="Состав корзины">
+<ul class="cart-lines" aria-label="Состав корзины" th:attr="inert=${payment.pending ? 'inert' : null}">
 <li class="cart-line" th:each="item : ${cart.items}" th:attr="data-product-id=${item.id},data-price=${item.price},data-count=${item.count}">
 <a class="cart-art" th:href="@{/items/{id}(id=${item.id})}" tabindex="-1" aria-hidden="true"><img th:src="@{${item.imgPath}}" alt="" width="160" height="120"></a>
 <div class="cart-info">
@@ -21,14 +21,28 @@
 <p class="line-total" data-line-total th:text="${@display.money(item.total)}"></p>
 </li>
 </ul>
-<aside class="order-summary" aria-labelledby="summary-title">
+<aside class="order-summary" aria-labelledby="summary-title"
+       th:with="quoteMinor=${cart.total * 100L}, staleQuote=${!payment.pending and payment.requiredMinor != #strings.toString(quoteMinor)}">
 <h2 id="summary-title">Ваш выбор</h2>
 <dl class="summary-list">
 <div><dt>Предметов</dt><dd data-cart-item-count th:text="${cart.itemCount}">0</dd></div>
 </dl>
-<p class="summary-total"><span>Итого</span><strong th:text="${@display.money(cart.total)}" th:attr="data-cart-total=${cart.total}"></strong></p>
-<form method="post" th:action="@{/buy}" data-checkout><button class="button primary wide" type="submit">Оформить заказ</button><p class="quiet-note" role="status" data-checkout-status></p></form>
-<p class="quiet-note">Оплата не проводится. Заказ сохранится в вашей истории.</p>
+<p class="summary-total"><span data-cart-total-label th:text="${payment.pending ? 'Корзина по текущим ценам' : 'Итого'}">Итого</span><strong th:text="${@display.money(cart.total)}" th:attr="data-cart-total=${cart.total}"></strong></p>
+<div class="wallet-inline">
+<div><span class="muted">Доступно в кошельке</span><strong data-wallet-balance th:text="${payment.balanceLabel}"></strong></div>
+<button class="text-link" type="button" data-payment-refresh hidden>Обновить</button>
+</div>
+<p class="payment-message" id="payment-message" role="status" aria-live="polite" data-payment-message th:text="${staleQuote ? 'Цены изменились. Перезагрузите корзину и проверьте состав перед оплатой.' : payment.message}"></p>
+<p class="quiet-note" id="pending-amount" data-pending-amount th:attr="hidden=${payment.pending ? null : 'hidden'}">Сумма проверяемого платежа: <strong data-pending-amount-value th:text="${payment.requiredLabel}"></strong>.</p>
+<a class="text-link" th:if="${staleQuote}" th:href="@{/cart/items}">Перезагрузить корзину</a>
+<form method="post" th:action="@{/buy}" data-checkout
+      th:attr="data-availability=@{/cart/items/availability},data-payment-state=${payment.status.name()},data-pending=${payment.pending},data-stale=${staleQuote}">
+<input type="hidden" name="checkoutKey" th:value="${payment.checkoutKey}">
+<input type="hidden" name="amountMinor" th:value="${payment.pending ? payment.requiredMinor : quoteMinor}">
+<button class="button primary wide" type="submit" th:attr="aria-describedby=${payment.pending ? 'payment-message pending-amount' : 'payment-message'}" th:disabled="${staleQuote or (!payment.canBuy and !payment.pending)}" th:text="${payment.pending ? 'Проверить платёж' : 'Оплатить и оформить'}">Оплатить и оформить</button>
+<p class="quiet-note" role="status" data-checkout-status></p>
+</form>
+<p class="quiet-note">После подтверждения оплаты заказ появится в вашей истории. При повторной проверке сумма не спишется ещё раз.</p>
 </aside>
 </section>
 <section class="empty-state" data-cart-empty th:attr="hidden=${cart.items.isEmpty() ? null : 'hidden'}">

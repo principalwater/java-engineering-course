@@ -1,6 +1,10 @@
 package dev.principalwater.store.controller;
 
 import dev.principalwater.store.util.StoreRedirects;
+import dev.principalwater.store.payment.CheckoutAvailability;
+import dev.principalwater.store.model.CheckoutInput;
+import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.reactive.result.view.Rendering;
 import dev.principalwater.store.model.CartMutationInput;
 import dev.principalwater.store.model.CartMutationResult;
 import dev.principalwater.store.service.CartService;
@@ -31,8 +35,14 @@ public class CartController {
     }
 
     @GetMapping({"/cart", "/cart/items"})
-    public String cart() {
-        return "cart";
+    public Mono<Rendering> cart(@RequestAttribute(CartIdentityFilter.ATTRIBUTE_NAME) UUID cartId) {
+        return checkout.availability(cartId).map(payment -> Rendering.view("cart").modelAttribute("payment", payment).build());
+    }
+
+    @GetMapping("/cart/items/availability")
+    @ResponseBody
+    public Mono<CheckoutAvailability> availability(@RequestAttribute(CartIdentityFilter.ATTRIBUTE_NAME) UUID cartId) {
+        return checkout.availability(cartId);
     }
 
     @PostMapping("/cart/items")
@@ -41,13 +51,15 @@ public class CartController {
                                          ServerWebExchange exchange) {
         boolean json = exchange.getRequest().getHeaders().getAccept().stream()
                 .anyMatch(type -> MediaType.APPLICATION_JSON.equalsTypeAndSubtype(type));
-        return carts.change(cartId, input.id(), input.action(), input.quantity()).map(cart -> json
-                ? ResponseEntity.ok(CartMutationResult.from(input.id(), cart))
+        return carts.changeWithReceipt(cartId, input.id(), input.action(), input.quantity()).map(receipt -> json
+                ? ResponseEntity.ok(CartMutationResult.from(input.id(), receipt.cart(), receipt.checkoutKey()))
                 : ResponseEntity.status(HttpStatus.SEE_OTHER).location(URI.create("/cart/items")).build());
     }
 
+    // В WebFlux поля POST-формы связывает ModelAttribute; RequestParam читает только query string.
     @PostMapping("/buy")
-    public Mono<RedirectView> buy(@RequestAttribute(CartIdentityFilter.ATTRIBUTE_NAME) UUID cartId) {
-        return checkout.buy(cartId).map(id -> StoreRedirects.to("/orders/" + id + "?newOrder=true"));
+    public Mono<RedirectView> buy(@RequestAttribute(CartIdentityFilter.ATTRIBUTE_NAME) UUID cartId,
+                                  @Valid @ModelAttribute CheckoutInput input) {
+        return checkout.buy(cartId, input.checkoutKey(), input.amountMinor()).map(id -> StoreRedirects.to("/orders/" + id + "?newOrder=true"));
     }
 }

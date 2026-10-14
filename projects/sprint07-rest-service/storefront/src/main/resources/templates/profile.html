@@ -1,45 +1,41 @@
 <!DOCTYPE html>
 <html lang="ru" xmlns:th="http://www.thymeleaf.org">
-<head th:replace="~{fragments :: head('Кабинет')}"></head>
+<head th:replace="~{fragments :: head('Мои покупки')}"></head>
 <body>
 <header th:replace="~{fragments :: header('profile')}"></header>
 <main id="main">
+<nav class="cabinet-tabs" aria-label="Кабинет" th:if="${account != null and account.seller}"><a th:href="@{/profile}" aria-current="page">Мои покупки</a><a th:href="@{/account/seller}">Магазин</a></nav>
 <div class="page-heading">
-<h1>Ваш кабинет</h1>
-<p class="lead" th:if="${account != null}" th:text="|${account.displayName}, здесь ваша корзина и заказы. Войдите в этот аккаунт в другом браузере, чтобы продолжить покупки.|"></p>
+<p class="scope-tag">Кабинет покупателя</p>
+<h1>Мои покупки</h1>
+<p class="lead" th:if="${account != null}" th:text="|${account.displayName}, здесь ваши расходы, заказы и доступный баланс. История сохранится во всех браузерах, где вы вошли.|"></p>
 <p class="lead" th:if="${account == null}">Сейчас вы гость: корзина и заказы привязаны к cookie этого браузера на 30 дней с первого визита. Войдите в аккаунт, чтобы пользоваться одной корзиной и историей в разных браузерах.</p>
 <div class="account-actions" th:if="${account == null}"><a class="button primary" th:href="@{/account/login}">Войти</a><a class="button secondary" th:href="@{/account/register}">Создать аккаунт</a></div>
 <form class="account-actions" th:if="${account != null}" method="post" th:action="@{/account/logout}"><span th:text="|Логин: ${account.username}|"></span><button class="button secondary" type="submit">Выйти</button></form>
 </div>
 <div th:replace="~{fragments :: notice}"></div>
-<!--/* Владельца сводки и аналитики определяет серверная сессия; для гостя — отдельная cookie корзины. */-->
+<section class="wallet-card" aria-labelledby="wallet-title">
+<div><p class="eyebrow" id="wallet-title">Доступно для покупок</p><strong class="wallet-value" data-wallet-balance th:text="${wallet.balanceLabel}"></strong><p class="muted" th:unless="${wallet.available}">Не удалось проверить баланс. Откройте страницу позже, чтобы повторить проверку.</p><p class="muted" th:if="${wallet.available}">Окончательная сумма списывается после проверки корзины.</p></div>
+<a class="button primary" th:href="@{/cart/items}">Открыть корзину</a>
+</section>
+<!--/* Покупатель видит только свою историю; неоплаченные старые заказы не становятся расходами. */-->
 <section class="profile-section" aria-labelledby="history-title">
-<div class="section-heading"><h2 id="history-title">Ваши заказы</h2><p th:text="${account != null ? 'Во всех ваших браузерах' : 'Только из этого браузера'}"></p></div>
+<div class="section-heading"><h2 id="history-title">Ваша история</h2><p th:text="${account != null ? 'Во всех ваших браузерах' : 'Только из этого браузера'}"></p></div>
 <dl class="stat-grid">
-<div class="stat-card"><dt>Заказов</dt><dd><strong data-metric="orders" th:text="${profile.totalOrders}">0</strong></dd></div>
-<div class="stat-card"><dt>Предметов</dt><dd><strong data-metric="units" th:text="${profile.units}">0</strong></dd></div>
-<div class="stat-card"><dt>Сумма заказов</dt><dd><strong data-metric="order-value" th:text="${@display.money(profile.orderValue)}">0 ₽</strong><small>Оплата не проводилась</small></dd></div>
-<div class="stat-card"><dt>Последний заказ</dt><dd>
-<strong data-metric="last-order" th:if="${profile.lastOrder != null}" th:text="${@display.time(profile.lastOrder)}"></strong>
-<strong class="stat-empty" th:if="${profile.lastOrder == null}">Пока нет</strong>
-</dd></div>
+<div class="stat-card"><dt>Потрачено</dt><dd><strong data-metric="paid-value" th:text="${@display.money(profile.paidValue)}">0 ₽</strong><small th:text="|Оплаченных заказов: ${profile.paidOrders}|"></small></dd></div>
+<div class="stat-card"><dt>Заказов в истории</dt><dd><strong data-metric="orders" th:text="${profile.totalOrders}">0</strong></dd></div>
+<div class="stat-card"><dt>Предметов заказано</dt><dd><strong data-metric="units" th:text="${profile.units}">0</strong></dd></div>
+<div class="stat-card"><dt>Последний заказ</dt><dd><strong data-metric="last-order" th:if="${profile.lastOrder != null}" th:text="${@display.time(profile.lastOrder)}"></strong><strong class="stat-empty" th:if="${profile.lastOrder == null}">Пока нет</strong></dd></div>
 </dl>
+<p class="quiet-note" th:if="${profile.totalOrders > profile.paidOrders}">В истории есть заказы, созданные до подключения оплаты. Они сохранены отдельно от оплаченных покупок; их сумма — <span data-metric="order-value" th:text="${@display.money(profile.orderValue - profile.paidValue)}"></span>.</p>
 </section>
-<section class="empty-state" th:if="${profile.totalOrders == 0}">
-<h2>Первый заказ появится здесь</h2>
-<p th:text="${account != null ? 'Добавьте предметы в корзину и оформите заказ — он сохранится в вашем аккаунте.' : 'Добавьте предметы в корзину и оформите заказ — он сохранится в истории этого браузера.'}"></p>
-<a class="button primary" th:href="@{/items}">В коллекцию</a>
+<section class="payment-pending surface" th:if="${profile.pendingPayments > 0}" aria-labelledby="pending-title">
+<h2 id="pending-title">Проверяем оплату</h2><p th:text="|Ожидают подтверждения: ${profile.pendingPayments}. Откройте корзину и проверьте платёж. Повторная проверка не создаст новое списание.|"></p><a class="text-link" th:href="@{/cart/items}">Проверить платёж</a>
 </section>
+<section class="empty-state" th:if="${profile.totalOrders == 0 and profile.pendingPayments == 0}"><h2>Первый заказ появится здесь</h2><p>Добавьте предметы в корзину и оплатите покупку — заказ сохранится в вашей истории.</p><a class="button primary" th:href="@{/items}">В коллекцию</a></section>
 <section class="profile-links" aria-label="Разделы кабинета">
-<a class="link-card" th:href="@{/orders}">
-<h2>История заказов</h2>
-<p>Состав и цены каждого заказа, от новых к старым.</p>
-</a>
-<a class="link-card" th:href="@{/profile/analytics}">
-<span class="scope-tag">Ваши покупки</span>
-<h2>Аналитика заказов</h2>
-<p>Показатели ваших заказов за выбранный период: покупки, предметы и суммы.</p>
-</a>
+<a class="link-card" th:href="@{/orders}"><h2>История заказов</h2><p>Состав, исходные цены и статус оплаты каждого заказа.</p><span class="link-arrow" aria-hidden="true">↗</span></a>
+<a class="link-card" th:href="@{/profile/analytics}"><h2>Мои расходы</h2><p>Оплаченные покупки за выбранный период и товары, которые вы выбираете чаще.</p><span class="link-arrow" aria-hidden="true">↗</span></a>
 </section>
 </main>
 <footer th:replace="~{fragments :: footer}"></footer>

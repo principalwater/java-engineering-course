@@ -11,7 +11,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 public interface OutboxRepository extends ReactiveCrudRepository<AnalyticsOutbox, Long> {
-    @Query("SELECT order_id FROM analytics_outbox WHERE delivered_at IS NULL ORDER BY id LIMIT :limit")
+    @Query("SELECT a.order_id FROM analytics_outbox a JOIN purchase_orders o ON o.id = a.order_id WHERE a.delivered_at IS NULL AND o.status = 'PAID' ORDER BY a.id LIMIT :limit")
     Flux<Long> pendingOrderIds(int limit);
 
     Mono<Long> countByDeliveredAtIsNull();

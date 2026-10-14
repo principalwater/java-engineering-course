@@ -1,7 +1,7 @@
 CREATE DATABASE IF NOT EXISTS storefront;
 
 -- Повторная доставка заменяет тот же неизменяемый снимок; FINAL убирает повторы до фонового merge.
-CREATE TABLE IF NOT EXISTS storefront.purchase_facts
+CREATE TABLE IF NOT EXISTS storefront.paid_purchase_facts
 (
     source_id UUID,
     user_id UUID,

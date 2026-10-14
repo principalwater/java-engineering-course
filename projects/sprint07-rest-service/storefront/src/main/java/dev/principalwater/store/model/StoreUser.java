@@ -7,9 +7,9 @@ import org.springframework.data.relational.core.mapping.Table;
 
 @Table("store_users")
 public record StoreUser(@Id UUID id, UUID cartId, String username, String passwordHash,
-                        String displayName, @Version Long version) {
+                        String displayName, AccountRole role, @Version Long version) {
     public StoreUser(UUID id, UUID cartId, String username, String passwordHash, String displayName) {
-        this(id, cartId, username, passwordHash, displayName, null);
+        this(id, cartId, username, passwordHash, displayName, AccountRole.BUYER, null);
     }
 
     @Override

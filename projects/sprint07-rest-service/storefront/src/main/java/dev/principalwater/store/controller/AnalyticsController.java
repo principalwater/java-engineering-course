@@ -9,7 +9,6 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 
-import org.springframework.web.server.WebSession;
 import reactor.core.publisher.Mono;
 
 @Controller
@@ -27,6 +26,8 @@ public class AnalyticsController {
         return dashboard.load(period(days), userId, cartId).map(view -> {
             model.addAttribute("analytics", view);
             model.addAttribute("periods", AnalyticsPeriod.values());
+            model.addAttribute("analyticsBase", "/profile/analytics");
+            model.addAttribute("sellerAnalytics", false);
             return "analytics";
         });
     }
@@ -39,24 +40,7 @@ public class AnalyticsController {
         return dashboard.load(period(days), userId, cartId);
     }
 
-    @PostMapping({"/analytics/sync", "/profile/analytics/sync"})
-    public Mono<String> sync(@ModelAttribute SyncInput input, WebSession session) {
-        var selected = period(input.days());
-        return dashboard.sync().map(result -> {
-            String notice = switch (result.status()) {
-                case DELIVERED -> "Доставка завершена. Показатели ваших покупок обновлены.";
-                case IN_PROGRESS -> "Очередь уже обновляется. Показатели появятся после завершения доставки.";
-                case UNAVAILABLE -> "Аналитика пока недоступна. Заказы остаются в очереди.";
-            };
-            session.getAttributes().put("notice", notice);
-            return "redirect:/profile/analytics?days=" + selected.getDays();
-        });
-    }
-
     private AnalyticsPeriod period(Integer days) {
         return days == null ? AnalyticsPeriod.LAST_7_DAYS : AnalyticsPeriod.fromDays(days);
-    }
-
-    public record SyncInput(Integer days) {
     }
 }

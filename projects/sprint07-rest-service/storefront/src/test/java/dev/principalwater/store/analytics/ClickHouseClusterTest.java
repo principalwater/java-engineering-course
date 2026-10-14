@@ -14,6 +14,10 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
+import reactor.core.scheduler.Scheduler;
+import reactor.core.scheduler.Schedulers;
+import reactor.netty.resources.LoopResources;
 import org.junit.jupiter.api.Timeout;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.test.StepVerifier;
@@ -24,8 +28,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Timeout(120)
 class ClickHouseClusterTest extends TestBase {
     private static final Duration TIMEOUT = Duration.ofSeconds(12);
+    private final Scheduler codec = Schedulers.newBoundedElastic(1, 32, "test-codec");
+    private final LoopResources loops = LoopResources.create("test-http", 2, true);
     private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
     private final HttpClient inspection = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
+
+    @AfterEach
+    void closeRuntime() { codec.dispose(); loops.disposeLater().block(TIMEOUT); }
 
     @Test
     void replicatedShardsDeduplicateAndRejectIncompleteDeliveryWhileAReplicaIsOffline() throws Exception {
@@ -50,14 +59,14 @@ class ClickHouseClusterTest extends TestBase {
                 fact.orderId() + 50, fact.createdAt(), fact.lineNumber(), fact.productId(), fact.sku(), fact.title(),
                 fact.price(), fact.quantity())).toList());
         for (URI endpoint : endpoints) {
-            admin(endpoint, "SYSTEM STOP MERGES storefront.purchase_facts_local");
+            admin(endpoint, "SYSTEM STOP MERGES storefront.paid_purchase_facts_local");
         }
-        try (var client = new ClickHouseClient(properties, json, WebClient.builder())) {
+        try (var client = new ClickHouseClient(properties, json, WebClient.builder(), codec, loops)) {
             StepVerifier.create(client.insert(facts)).expectComplete().verify(TIMEOUT);
             // Расширенный replay имеет другой block hash: ReplicatedMergeTree не скрывает дубли за нас.
             StepVerifier.create(client.insert(grownBatch)).expectComplete().verify(TIMEOUT);
             for (URI endpoint : endpoints) {
-                admin(endpoint, "SYSTEM SYNC REPLICA storefront.purchase_facts_local");
+                admin(endpoint, "SYSTEM SYNC REPLICA storefront.paid_purchase_facts_local");
             }
             long firstShard = count(endpoints.get(0), source);
             long secondShard = count(endpoints.get(2), source);
@@ -96,7 +105,7 @@ class ClickHouseClusterTest extends TestBase {
     }
 
     private long count(URI endpoint, UUID source) throws Exception {
-        return Long.parseLong(admin(endpoint, "SELECT count() FROM storefront.purchase_facts_local FINAL WHERE source_id = '"
+        return Long.parseLong(admin(endpoint, "SELECT count() FROM storefront.paid_purchase_facts_local FINAL WHERE source_id = '"
                 + source + "'" ).strip());
     }
 
@@ -114,7 +123,7 @@ class ClickHouseClusterTest extends TestBase {
         long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
         while (true) {
             try {
-                admin(endpoint, "SYSTEM SYNC REPLICA storefront.purchase_facts_local");
+                admin(endpoint, "SYSTEM SYNC REPLICA storefront.paid_purchase_facts_local");
                 return;
             } catch (IOException | AssertionError failure) {
                 if (System.nanoTime() >= deadline) {

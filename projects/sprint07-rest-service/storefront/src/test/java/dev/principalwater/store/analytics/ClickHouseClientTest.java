@@ -24,6 +24,9 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Scheduler;
+import reactor.core.scheduler.Schedulers;
+import reactor.netty.resources.LoopResources;
 import reactor.test.StepVerifier;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -40,6 +43,8 @@ class ClickHouseClientTest extends dev.principalwater.store.TestBase {
     private HttpServer server;
     private ExecutorService workers;
     private volatile HttpHandler handler;
+    private final Scheduler codec = Schedulers.newBoundedElastic(1, 32, "test-codec");
+    private final LoopResources loops = LoopResources.create("test-http", 2, true);
     private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
 
     @BeforeEach
@@ -53,6 +58,8 @@ class ClickHouseClientTest extends dev.principalwater.store.TestBase {
 
     @AfterEach
     void stopServer() throws InterruptedException {
+        codec.dispose();
+        loops.disposeLater().block(TIMEOUT);
         server.stop(0);
         workers.shutdownNow();
         assertTrue(workers.awaitTermination(3, TimeUnit.SECONDS));
@@ -224,7 +231,7 @@ class ClickHouseClientTest extends dev.principalwater.store.TestBase {
         properties.setUrls(List.of(URI.create("http://127.0.0.1:1"), URI.create(endpoint())));
         properties.setDistributed(true);
         properties.setInsertQuorum(2);
-        try (var client = new ClickHouseClient(properties, json, WebClient.builder())) {
+        try (var client = new ClickHouseClient(properties, json, WebClient.builder(), codec, loops)) {
             StepVerifier.create(client.insert(List.of(fact()))).expectComplete().verify(TIMEOUT);
             assertEquals(1, writes.get());
         }
@@ -247,7 +254,7 @@ class ClickHouseClientTest extends dev.principalwater.store.TestBase {
     }
 
     private ClickHouseClient client() {
-        return new ClickHouseClient(properties(), json, WebClient.builder());
+        return new ClickHouseClient(properties(), json, WebClient.builder(), codec, loops);
     }
 
     private String endpoint() { return "http://127.0.0.1:" + server.getAddress().getPort(); }

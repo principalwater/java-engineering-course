@@ -6,7 +6,7 @@
 <main id="main">
 <div class="page-heading">
 <h1>Ваши заказы</h1>
-<p class="lead">Заказы, оформленные в этом браузере, от новых к старым.</p>
+<p class="lead">Заказы от новых к старым. Откройте заказ, чтобы проверить состав, цены и оплату.</p>
 </div>
 <ul class="orders-grid" th:if="${!orders.isEmpty()}">
 <li th:each="order : ${orders}">
@@ -15,6 +15,7 @@
 <h2><a th:href="@{/orders/{id}(id=${order.id})}" th:text="|Заказ № ${order.id}|"></a></h2>
 <p class="price" th:text="${@display.money(order.totalSum)}"></p>
 </div>
+<span class="order-status" th:classappend="${order.status.name() == 'PAID'} ? 'is-paid'" th:text="${order.status.label}"></span>
 <time class="muted" th:datetime="${order.createdAt}" th:text="${@display.time(order.createdAt)}"></time>
 <div class="order-thumbs" aria-hidden="true">
 <span class="order-thumb" th:each="line, state : ${order.items}" th:if="${state.index < 3}"><img th:src="@{${line.imgPath}}" alt="" width="64" height="48" loading="lazy"></span>

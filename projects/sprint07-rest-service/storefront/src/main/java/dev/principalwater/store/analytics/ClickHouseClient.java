@@ -26,7 +26,8 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientException;
 import org.springframework.web.util.UriComponentsBuilder;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
+import reactor.core.scheduler.Scheduler;
+import reactor.netty.resources.LoopResources;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.resources.ConnectionProvider;
 
@@ -37,7 +38,7 @@ public class ClickHouseClient implements AutoCloseable {
     private static final int MAX_CONNECTIONS = 4;
     private static final int MAX_PENDING_REQUESTS = 16;
     private static final int MAX_COORDINATORS = 16;
-    private static final String INSERT = "INSERT INTO storefront.purchase_facts FORMAT JSONEachRow";
+    private static final String INSERT = "INSERT INTO storefront.paid_purchase_facts FORMAT JSONEachRow";
     private final AnalyticsProperties properties;
     private final List<URI> endpoints;
     private final AtomicInteger nextEndpoint = new AtomicInteger();
@@ -46,8 +47,11 @@ public class ClickHouseClient implements AutoCloseable {
     private final ConnectionProvider connections;
     private final WebClient http;
     private final String dashboardQuery;
+    private final String sellerDashboardQuery;
+    private final Scheduler codec;
 
-    public ClickHouseClient(AnalyticsProperties properties, ObjectMapper json, WebClient.Builder builder) {
+    public ClickHouseClient(AnalyticsProperties properties, ObjectMapper json, WebClient.Builder builder,
+                            Scheduler codec, LoopResources loops) {
         endpoints = properties.endpoints();
         if (endpoints.isEmpty() || endpoints.size() > MAX_COORDINATORS) {
             throw new IllegalArgumentException("ClickHouse requires 1.." + MAX_COORDINATORS + " coordinator endpoints");
@@ -63,20 +67,22 @@ public class ClickHouseClient implements AutoCloseable {
         }
         this.properties = properties;
         this.json = json;
+        this.codec = codec;
         aggregateReader = json.readerFor(AnalyticsRow.class)
                 .with(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES,
                         DeserializationFeature.FAIL_ON_NULL_CREATOR_PROPERTIES,
                         DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .without(DeserializationFeature.ACCEPT_FLOAT_AS_INT);
         // Ресурс читается один раз при создании бина, до обработки HTTP-запросов.
-        try (var input = new ClassPathResource("analytics/dashboard.sql").getInputStream()) {
-            dashboardQuery = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        try {
+            dashboardQuery = new ClassPathResource("analytics/dashboard.sql").getContentAsString(StandardCharsets.UTF_8);
+            sellerDashboardQuery = new ClassPathResource("analytics/seller-dashboard.sql").getContentAsString(StandardCharsets.UTF_8);
         } catch (IOException exception) {
             throw new IllegalStateException("Analytics query resource is missing", exception);
         }
         connections = ConnectionProvider.builder("storefront-analytics").maxConnections(MAX_CONNECTIONS)
                 .pendingAcquireMaxCount(MAX_PENDING_REQUESTS).pendingAcquireTimeout(CONNECT_TIMEOUT).build();
-        var transport = HttpClient.create(connections).followRedirect(false)
+        var transport = HttpClient.create(connections).runOn(loops).followRedirect(false)
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, Math.toIntExact(CONNECT_TIMEOUT.toMillis()))
                 .responseTimeout(OPERATION_TIMEOUT);
         http = builder.clone().clientConnector(new ReactorClientHttpConnector(transport))
@@ -88,7 +94,7 @@ public class ClickHouseClient implements AutoCloseable {
             return Mono.empty();
         }
         // Ограниченный пакет сериализуется вне потоков Netty и R2DBC; транспорт остаётся неблокирующим.
-        return Mono.fromCallable(() -> encode(facts)).subscribeOn(Schedulers.parallel()).flatMap(payload -> {
+        return Mono.fromCallable(() -> encode(facts)).subscribeOn(codec).flatMap(payload -> {
             return executeWithFailover(endpoint -> {
                 var uri = UriComponentsBuilder.fromUri(endpoint).queryParam("wait_end_of_query", 1);
                 if (properties.isDistributed()) {
@@ -117,14 +123,23 @@ public class ClickHouseClient implements AutoCloseable {
                     .queryParam("param_source", sourceId).queryParam("param_user", userId).queryParam("param_start", start)
                     .queryParam("param_end", end).queryParam("param_limit", AnalyticsPeriod.MAXIMUM_DAYS)
                     .queryParam("wait_end_of_query", 1).build().toUri(),
-                    dashboardQuery, "storefront_reader", properties.getReaderPassword()).map(response -> {
-                try (MappingIterator<AnalyticsRow> rows = aggregateReader.readValues(response)) {
-                    return rows.readAll();
-                } catch (IOException | IllegalArgumentException exception) {
-                    throw unavailable(exception);
-                }
-            });
+                    dashboardQuery, "storefront_reader", properties.getReaderPassword()).map(this::decode);
         });
+    }
+
+    public Mono<List<AnalyticsRow>> sellerDashboard(UUID sourceId, LocalDate start, LocalDate end) {
+        return Mono.defer(() -> executeWithFailover(endpoint -> UriComponentsBuilder.fromUri(endpoint)
+                .queryParam("param_source", sourceId).queryParam("param_start", start).queryParam("param_end", end)
+                .queryParam("param_limit", AnalyticsPeriod.MAXIMUM_DAYS).queryParam("wait_end_of_query", 1).build().toUri(),
+                sellerDashboardQuery, "storefront_reader", properties.getReaderPassword()).map(this::decode));
+    }
+
+    private List<AnalyticsRow> decode(byte[] response) {
+        try (MappingIterator<AnalyticsRow> rows = aggregateReader.readValues(response)) {
+            return rows.readAll();
+        } catch (IOException | IllegalArgumentException exception) {
+            throw unavailable(exception);
+        }
     }
 
     private String encode(List<AnalyticsFact> facts) throws IOException {

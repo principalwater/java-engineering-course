@@ -5,9 +5,10 @@
 <header th:replace="~{fragments :: header('orders')}"></header>
 <main id="main">
 <a class="back-link" th:href="@{/orders}">В историю заказов</a>
-<div class="success-banner" th:if="${newOrder}" role="status"><span aria-hidden="true">✓</span><div><strong>Заказ оформлен</strong><p>Он сохранён в вашей истории. Оплата не проводилась.</p></div></div>
+<div class="success-banner" th:if="${newOrder and order.status.name() == 'PAID'}" role="status"><span aria-hidden="true">✓</span><div><strong>Заказ оформлен</strong><p>Оплата подтверждена. Состав и цены сохранены в вашей истории.</p></div></div>
 <div class="page-heading">
 <h1 th:text="|Заказ № ${order.id}|"></h1>
+<p class="order-status" th:classappend="${order.status.name() == 'PAID'} ? 'is-paid'" th:text="${order.status.label}"></p>
 <time class="muted" th:datetime="${order.createdAt}" th:text="${@display.time(order.createdAt)}"></time>
 </div>
 <section class="order-detail" th:attr="data-order-id=${order.id}">
@@ -20,6 +21,7 @@
 </ul>
 <div class="purchase-total"><span>Стоимость заказа</span><strong th:text="${@display.money(order.totalSum)}" th:attr="data-order-total=${order.totalSum}"></strong></div>
 </section>
+<p class="quiet-note" th:if="${order.status.name() == 'LEGACY_UNPAID'}">Этот заказ создан до подключения оплаты. Его сумма не учитывается в ваших расходах.</p>
 <p class="quiet-note">Названия и цены зафиксированы при оформлении и не меняются вместе с каталогом.</p>
 <a class="button primary" th:href="@{/items}">Продолжить выбор</a>
 </main>

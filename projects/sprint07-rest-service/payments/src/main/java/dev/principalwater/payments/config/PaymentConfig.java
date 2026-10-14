@@ -28,10 +28,11 @@ public class PaymentConfig {
     }
 
     @Bean
-    public ConnectionFactoryOptionsBuilderCustomizer paymentDatabaseTimeouts() {
+    public ConnectionFactoryOptionsBuilderCustomizer paymentDatabaseTimeouts(ReactorResourceFactory paymentHttpResources) {
         return builder -> {
             var options = builder.build();
             if ("postgresql".equals(options.getValue(ConnectionFactoryOptions.DRIVER))) {
+                builder.option(Option.valueOf("loopResources"), paymentHttpResources.getLoopResources());
                 builder.option(Option.valueOf("options"), Map.of("lock_timeout", "2000ms", "statement_timeout", "3000ms"));
             }
         };

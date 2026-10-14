@@ -28,6 +28,8 @@
   const MAX_QUEUED = 12;
   const REQUEST_TIMEOUT_MS = 10000;
   const STATUS_VISIBLE_MS = 3500;
+  const MINOR_UNITS_PER_RUBLE = 100n;
+  const checkoutKeyPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const numbers = new Intl.NumberFormat("ru-RU");
   const money = value => `${numbers.format(value)} ₽`;
   const big = value => {
@@ -42,6 +44,8 @@
   let draining = false;
   let queueResult = Promise.resolve(true);
   let purchasing = false;
+  let refreshPayment = null;
+  let confirmedCheckoutKey = null;
 
   class RequestError extends Error {
     constructor(status) {
@@ -248,7 +252,11 @@
         return false;
       }
       const result = await response.json();
-      if (!result?.cart || !Array.isArray(result.cart.items)) throw new Error("Unexpected cart response shape");
+      if (!result?.cart || !Array.isArray(result.cart.items) || typeof result.checkoutKey !== "string"
+          || !checkoutKeyPattern.test(result.checkoutKey)) {
+        throw new Error("Unexpected cart response shape");
+      }
+      confirmedCheckoutKey = result.checkoutKey;
       applyCart(result.cart);
       reportSaved(form, before, Number(result.count));
       return result.cart;
@@ -279,6 +287,7 @@
     }
     draining = false;
     if (lastCart) applyCart(lastCart);
+    if (lastCart && !purchasing && refreshPayment) void refreshPayment({ fresh: true });
     return success;
   };
 
@@ -361,30 +370,143 @@
   const enhanceCheckout = form => {
     const button = form.querySelector('button[type="submit"]');
     const status = form.querySelector("[data-checkout-status]");
+    const message = document.querySelector("[data-payment-message]");
+    const balance = document.querySelector("[data-wallet-balance]");
+    const refreshButton = document.querySelector("[data-payment-refresh]");
+    const keyInput = form.elements.namedItem("checkoutKey");
+    const amountInput = form.elements.namedItem("amountMinor");
+    const pendingAmount = document.querySelector("[data-pending-amount]");
+    const paymentStates = new Set(["AVAILABLE", "INSUFFICIENT", "UNAVAILABLE", "PENDING"]);
+    let payment = { status: form.dataset.paymentState, canBuy: !button.disabled, pending: form.dataset.pending === "true" };
+    let paymentRequest = null;
+    let paymentController = null;
+    let paymentVersion = 0;
+    let checking = false;
+    let stale = form.dataset.stale === "true";
+    const permitted = () => !stale && (payment.pending || (payment.status === "AVAILABLE" && payment.canBuy));
+    const renderButton = () => {
+      button.disabled = purchasing || checking || !permitted();
+      setDisabled(button, button.disabled);
+      button.textContent = payment.pending ? "Проверить платёж" : "Оплатить и оформить";
+      button.setAttribute("aria-describedby", payment.pending ? "payment-message pending-amount" : "payment-message");
+      document.querySelector("[data-cart-total-label]").textContent = payment.pending ? "Корзина по текущим ценам" : "Итого";
+      form.closest("[data-cart-layout]").querySelector(".cart-lines").inert = purchasing || payment.pending || stale;
+    };
+    // Баланс не кэшируется в браузере: после изменений корзины и перед оплатой перечитываем состояние сервера.
+    refreshPayment = ({ fresh = false } = {}) => {
+      if (paymentRequest && !fresh) return paymentRequest;
+      paymentController?.abort();
+      const ticket = ++paymentVersion;
+      const controller = new AbortController();
+      paymentController = controller;
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      checking = true;
+      renderButton();
+      if (refreshButton) refreshButton.disabled = true;
+      message.textContent = "Проверяем баланс и состояние оплаты…";
+      paymentRequest = (async () => {
+        try {
+          const response = await fetch(form.dataset.availability, {
+            headers: { Accept: "application/json" }, credentials: "same-origin", cache: "no-store", signal: controller.signal,
+          });
+          if (!response.ok) throw new Error(`Payment availability request failed with HTTP ${response.status}`);
+          const next = await response.json();
+          if (!paymentStates.has(next?.status) || typeof next.canBuy !== "boolean" || typeof next.pending !== "boolean"
+              || typeof next.message !== "string" || typeof next.balanceLabel !== "string" || typeof next.requiredLabel !== "string"
+              || typeof next.checkoutKey !== "string" || !checkoutKeyPattern.test(next.checkoutKey)
+              || typeof next.requiredMinor !== "string" || !/^\d+$/.test(next.requiredMinor)
+              || (next.balanceMinor != null && (typeof next.balanceMinor !== "string" || !/^\d+$/.test(next.balanceMinor)))) {
+            throw new Error("Invalid payment availability response");
+          }
+          if (ticket !== paymentVersion) return false;
+          if (draining) {
+            await queueResult;
+            return ticket === paymentVersion ? refreshPayment({ fresh: true }) : false;
+          }
+          payment = next;
+          form.dataset.paymentState = next.status;
+          form.dataset.pending = String(next.pending);
+          const total = document.querySelector("[data-cart-total]").dataset.cartTotal;
+          const expectedKey = confirmedCheckoutKey ?? keyInput.value;
+          // Только ACK нашего изменения разрешает новый ключ; чужую корзину нельзя оплатить из старой страницы.
+          stale = !next.pending && (next.checkoutKey !== expectedKey || big(next.requiredMinor) !== big(total) * MINOR_UNITS_PER_RUBLE);
+          if (!stale) {
+            keyInput.value = next.checkoutKey;
+            amountInput.value = next.requiredMinor;
+            confirmedCheckoutKey = null;
+          }
+          pendingAmount.hidden = !next.pending;
+          pendingAmount.querySelector("[data-pending-amount-value]").textContent = next.requiredLabel;
+          message.textContent = stale
+            ? "Корзина или цены изменились в другом окне. Перезагрузите корзину и проверьте состав перед оплатой."
+            : next.message;
+          message.classList.toggle("is-error", stale || next.status === "INSUFFICIENT" || next.status === "UNAVAILABLE");
+          if (refreshButton) refreshButton.textContent = stale ? "Перезагрузить корзину" : "Обновить";
+          balance.textContent = next.balanceLabel;
+          return permitted();
+        } catch (error) {
+          if (ticket !== paymentVersion) return false;
+          payment = { status: "UNAVAILABLE", canBuy: false, pending: payment.pending };
+          message.textContent = payment.pending
+            ? "Платёж пока не подтверждён. Проверьте его ещё раз: повторного списания не будет."
+            : "Не удалось проверить баланс. Покупка недоступна. Нажмите «Обновить», чтобы повторить проверку.";
+          message.classList.add("is-error");
+          balance.textContent = "Не удалось проверить";
+          console.warn("Payment availability refresh failed:", error);
+          return permitted();
+        } finally {
+          clearTimeout(timer);
+          if (ticket === paymentVersion) {
+            checking = false;
+            paymentRequest = null;
+            paymentController = null;
+            if (refreshButton) refreshButton.disabled = false;
+            renderButton();
+          }
+        }
+      })();
+      return paymentRequest;
+    };
+    if (refreshButton) {
+      refreshButton.hidden = false;
+      refreshButton.textContent = stale ? "Перезагрузить корзину" : "Обновить";
+      refreshButton.addEventListener("click", () => {
+        if (purchasing) return;
+        if (stale) location.reload();
+        else void refreshPayment();
+      });
+    }
+    window.addEventListener("focus", () => { if (!purchasing) void refreshPayment(); });
+    renderButton();
     form.addEventListener("submit", async event => {
       event.preventDefault();
-      if (purchasing) return;
+      if (purchasing || button.disabled) return;
       const quantities = [...document.querySelectorAll(".quantity-form")];
-      quantities.forEach(quantity => { if (quantity.querySelector("input[data-dirty]")) commit(quantity); });
-      if (quantities.some(quantity => stateOf(quantity).invalid)) {
+      const recovery = payment.pending;
+      if (!recovery) quantities.forEach(quantity => { if (quantity.querySelector("input[data-dirty]")) commit(quantity); });
+      if (!recovery && quantities.some(quantity => stateOf(quantity).invalid)) {
         status.textContent = "Проверьте количество перед оформлением заказа.";
         return;
       }
       purchasing = true;
       quantities.forEach(quantity => { quantity.inert = true; });
-      setDisabled(button, true);
+      renderButton();
       status.textContent = "Сохраняем изменения корзины…";
       // Покупка отправляется после всей очереди; один FOR UPDATE не сохраняет порядок HTTP-запросов.
       const saved = await queueResult;
-      if (saved && !form.closest("[data-cart-layout]").hidden) {
-        status.textContent = "Оформляем заказ…";
+      const nonempty = !form.closest("[data-cart-layout]").hidden;
+      const ready = (saved || recovery) && nonempty && await refreshPayment({ fresh: true });
+      if (ready) {
+        status.textContent = payment.pending ? "Проверяем платёж…" : "Подтверждаем оплату…";
         form.submit();
       } else {
-        status.textContent = saved ? "Корзина пуста." : "Покупка остановлена: изменение не подтверждено. Обновите страницу и проверьте корзину.";
+        status.textContent = !saved
+          ? "Покупка остановлена: изменение не подтверждено. Обновите страницу и проверьте корзину."
+          : nonempty ? "Покупка не отправлена. Проверьте сообщение о балансе выше." : "Корзина пуста.";
         purchasing = false;
         quantities.forEach(quantity => { quantity.inert = false; });
-        setDisabled(button, false);
-        if (saved) document.querySelector("[data-cart-empty] h2")?.focus();
+        renderButton();
+        if (saved && !nonempty) document.querySelector("[data-cart-empty] h2")?.focus();
       }
     });
   };

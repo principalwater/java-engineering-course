@@ -49,14 +49,14 @@
             <profile>storefront_writer</profile>
             <networks><ip>::/0</ip></networks>
             <quota>default</quota>
-            <grants><query>GRANT INSERT ON storefront.purchase_facts</query></grants>
+            <grants><query>GRANT INSERT ON storefront.paid_purchase_facts</query></grants>
         </storefront_writer>
         <storefront_reader>
             <password from_env="STOREFRONT_READER_PASSWORD"/>
             <profile>storefront_reader</profile>
             <networks><ip>::/0</ip></networks>
             <quota>default</quota>
-            <grants><query>GRANT SELECT ON storefront.purchase_facts</query></grants>
+            <grants><query>GRANT SELECT ON storefront.paid_purchase_facts</query></grants>
         </storefront_reader>
     </users>
 </clickhouse>

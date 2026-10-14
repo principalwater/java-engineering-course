@@ -14,6 +14,7 @@ public final class StoreUserDetails implements UserDetails, CredentialsContainer
     private final String username;
     private final String displayName;
     private String passwordHash;
+    private final AccountRole role;
 
     public StoreUserDetails(StoreUser user) {
         accountId = user.id();
@@ -21,8 +22,11 @@ public final class StoreUserDetails implements UserDetails, CredentialsContainer
         username = user.username();
         displayName = user.displayName();
         passwordHash = user.passwordHash();
+        role = user.role();
     }
 
+    public boolean isSeller() { return role == AccountRole.SELLER; }
+    public AccountRole getRole() { return role; }
     public UUID accountId() { return accountId; }
     public UUID cartId() { return cartId; }
     public String displayName() { return displayName; }
@@ -30,7 +34,7 @@ public final class StoreUserDetails implements UserDetails, CredentialsContainer
     @Override public String getUsername() { return username; }
     @Override public String getPassword() { return passwordHash; }
     @Override public Collection<? extends GrantedAuthority> getAuthorities() {
-        return List.of(new SimpleGrantedAuthority("ROLE_CUSTOMER"));
+        return List.of(new SimpleGrantedAuthority("ROLE_" + role.name()));
     }
     @Override public boolean isAccountNonExpired() { return true; }
     @Override public boolean isAccountNonLocked() { return true; }

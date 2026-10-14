@@ -12,9 +12,10 @@
   }
 
   const ZONE = document.querySelector('meta[name="display-zone"]').content;
+  const valueLabel = page.dataset.valueLabel;
   const REQUEST_TIMEOUT_MS = 10000;
   const SERIES = {
-    value: { caption: "Сумма заказов по дням, ₽" },
+    value: { caption: `${valueLabel} по дням, ₽` },
     orders: { caption: "Число заказов по дням" },
     units: { caption: "Число предметов по дням" },
   };
@@ -136,7 +137,7 @@
     return {
       state: "AVAILABLE",
       days: Number(page.dataset.days),
-      queue: { pending: int(page.querySelector('[data-queue="pending"]')?.textContent), last: stamp("last"), oldest: stamp("oldest") },
+      queue: { pending: int(page.querySelector('[data-queue="pending"]')?.textContent ?? "0"), last: stamp("last"), oldest: stamp("oldest") },
       summary: side("current"),
       previous: side("previous"),
       daily: [...page.querySelectorAll("[data-daily-table] tbody tr")].map(row => ({
@@ -299,7 +300,7 @@
     const title = dayFormat.format(parseDay(day.date));
     tooltip.replaceChildren(
       h("strong", {}, title),
-      tipRow("Сумма заказов", fmtMoney(day.value)),
+      tipRow(valueLabel, fmtMoney(day.value)),
       tipRow("Заказов", fmtInt(day.orders)),
       tipRow("Предметов", fmtInt(day.units)),
     );
@@ -308,7 +309,7 @@
     const left = Math.min(Math.max(center - tooltip.offsetWidth / 2, 4), chart.width - tooltip.offsetWidth - 4);
     tooltip.style.left = `${Math.round(left)}px`;
     if (speak && live) {
-      live.textContent = `${title}: сумма заказов ${fmtMoney(day.value)}, заказов ${fmtInt(day.orders)}, предметов ${fmtInt(day.units)}`;
+      live.textContent = `${title}: ${valueLabel.toLocaleLowerCase("ru-RU")} ${fmtMoney(day.value)}, заказов ${fmtInt(day.orders)}, предметов ${fmtInt(day.units)}`;
     }
   };
 

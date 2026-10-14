@@ -40,8 +40,8 @@
 </th:block>
 <th:block th:if="${totalItems == 0 and query.search.isEmpty()}">
 <h2>Коллекция пока пуста</h2>
-<p>Загрузите свой JSON-каталог или начните с восьми предметов мастерской.</p>
-<a class="button primary" th:href="@{/catalog}">Загрузить каталог</a>
+<p>Новые вещи скоро появятся здесь. Если вы управляете магазином, откройте кабинет продавца.</p>
+<a class="button primary" th:if="${account != null and account.seller}" th:href="@{/catalog}">Загрузить каталог</a>
 </th:block>
 <th:block th:if="${totalItems == 0 and !query.search.isEmpty()}">
 <h2>Ничего не нашлось</h2>

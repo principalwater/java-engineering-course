@@ -75,7 +75,9 @@ public class SecurityConfig {
         clearContext.setSecurityContextRepository(context);
         var signedOut = new RedirectServerLogoutSuccessHandler();
         signedOut.setLogoutSuccessUrl(URI.create("/profile?loggedOut"));
-        return http.authorizeExchange(access -> access.anyExchange().permitAll())
+        return http.authorizeExchange(access -> access
+                        .pathMatchers("/account/seller", "/account/seller/**", "/catalog", "/catalog/**").hasRole("SELLER")
+                        .anyExchange().permitAll())
                 .securityContextRepository(context)
                 .requestCache(cache -> cache.requestCache(NoOpServerRequestCache.getInstance()))
                 .httpBasic(ServerHttpSecurity.HttpBasicSpec::disable)

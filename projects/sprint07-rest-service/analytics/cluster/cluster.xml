@@ -1,0 +1,9 @@
+<clickhouse>
+  <logger><level>warning</level><console>true</console></logger>
+  <max_server_memory_usage>402653184</max_server_memory_usage>
+  <background_pool_size>4</background_pool_size><background_schedule_pool_size>8</background_schedule_pool_size>
+  <background_merges_mutations_concurrency_ratio>8</background_merges_mutations_concurrency_ratio>
+  <zookeeper><node><host>keeper</host><port>9181</port></node></zookeeper>
+  <macros><shard from_env="CLICKHOUSE_SHARD"/><replica from_env="CLICKHOUSE_REPLICA"/></macros>
+  <remote_servers><storefront_cluster><secret from_env="STOREFRONT_CLUSTER_SECRET"/><shard><internal_replication>true</internal_replication><replica><host>ch-a1</host><port>9000</port></replica><replica><host>ch-a2</host><port>9000</port></replica></shard><shard><internal_replication>true</internal_replication><replica><host>ch-b1</host><port>9000</port></replica><replica><host>ch-b2</host><port>9000</port></replica></shard></storefront_cluster></remote_servers>
+</clickhouse>

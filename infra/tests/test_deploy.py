@@ -5,6 +5,7 @@ import importlib.util
 import os
 from pathlib import Path
 import tempfile
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -14,6 +15,76 @@ specification.loader.exec_module(deploy)
 
 
 class DeploymentPlanTest(unittest.TestCase):
+    def test_saved_plan_requires_the_same_two_artifacts_sources_and_builder(self):
+        cases = ["unchanged", "storefront artifact", "payments artifact", "source", "builder",
+                 "documentation", "packaged Markdown", "infrastructure runtime config"]
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                repository = root / "repository"
+                infrastructure = repository / "infra"
+                infrastructure.mkdir(parents=True)
+                (infrastructure / ".terraform.lock.hcl").write_text("locked")
+                (infrastructure / "deploy.py").write_text("driver")
+                (infrastructure / "redis.conf").write_text("maxmemory 32mb")
+                project = repository / "project"
+                artifacts = project / "build/deployment"
+                artifacts.mkdir(parents=True)
+                (project / "build.gradle").write_text("project")
+                markdown = project / "storefront/src/main/resources/README.md"
+                markdown.parent.mkdir(parents=True)
+                markdown.write_text("packaged")
+                for service in ["storefront", "payments"]:
+                    (artifacts / (service + ".jar")).write_bytes(service.encode())
+                calls = []
+
+                def execute(command, **options):
+                    calls.append(command)
+                    for option in command:
+                        if option.startswith("-out="):
+                            Path(option.removeprefix("-out=")).write_bytes(b"saved plan")
+
+                def output(command, **options):
+                    if command[0] == "docker":
+                        return "unix:///var/run/docker.sock\n"
+                    return b'{"resource_changes": []}'
+
+                environment = {"COURSE_DEPLOY_STATE": str(root / "state"),
+                               "COURSE_DEPLOY_SECRETS": str(root / "secrets")}
+                with patch.object(deploy, "REPOSITORY", repository), patch.object(deploy, "INFRA", infrastructure), \
+                     patch.object(deploy, "STACKS", {"sprint07-h2": "project"}), \
+                     patch.dict(os.environ, environment), patch.object(deploy, "prepare") as prepare, \
+                     patch.object(deploy.subprocess, "run", side_effect=execute), \
+                     patch.object(deploy.subprocess, "check_output", side_effect=output):
+                    with patch.object(sys, "argv", ["deploy.py", "sprint07-h2", "plan"]):
+                        deploy.main()
+                    prepare.assert_called_once()
+                    receipt = root / "state/sprint07-h2/plan-inputs.json"
+                    if case.endswith("artifact"):
+                        (artifacts / (case.split()[0] + ".jar")).write_bytes(b"changed executable")
+                    elif case == "source":
+                        (project / "build.gradle").write_text("changed source")
+                    elif case == "documentation":
+                        (project / "README.md").write_text("clarified deployment instructions")
+                    elif case == "packaged Markdown":
+                        markdown.write_text("changed executable resource")
+                    elif case == "infrastructure runtime config":
+                        (infrastructure / "redis.conf").write_text("maxmemory 64mb")
+                    arguments = ["deploy.py", "sprint07-h2", "apply"]
+                    if case == "builder":
+                        arguments += ["--build-tool", "maven"]
+                    with patch.object(sys, "argv", arguments):
+                        if case in {"unchanged", "documentation"}:
+                            deploy.main()
+                            self.assertFalse(receipt.exists())
+                        else:
+                            with self.assertRaisesRegex(ValueError, "inputs changed"):
+                                deploy.main()
+                    self.assertEqual(1 if case in {"unchanged", "documentation"} else 0,
+                                     sum("apply" in command for command in calls))
+                    # Applying the saved plan must never invoke the builder again.
+                    prepare.assert_called_once()
+
     def test_plan_rejects_exposure_and_unowned_changes(self):
         plan = {"resource_changes": [{"type": "docker_container", "change": {
             "actions": ["create"], "after": {

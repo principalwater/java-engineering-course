@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('Корзина')}"></head>
+<body>
+<header th:replace="~{fragments :: header('cart')}"></header>
+<main id="main">
+<div class="page-heading">
+<h1>Корзина</h1>
+<p class="lead">Измените количество или уберите то, что пока не нужно.</p>
+</div>
+<!--/* Обе части всегда в разметке: при обнулении корзины скрипт показывает пустое состояние без перезагрузки. */-->
+<section class="cart-layout" data-cart-layout th:attr="hidden=${cart.items.isEmpty() ? 'hidden' : null}">
+<ul class="cart-lines" aria-label="Состав корзины">
+<li class="cart-line" th:each="item : ${cart.items}" th:attr="data-product-id=${item.id},data-price=${item.price},data-count=${item.count}">
+<a class="cart-art" th:href="@{/items/{id}(id=${item.id})}" tabindex="-1" aria-hidden="true"><img th:src="@{${item.imgPath}}" alt="" width="160" height="120"></a>
+<div class="cart-info">
+<a class="item-title" th:href="@{/items/{id}(id=${item.id})}" th:text="${item.title}"></a>
+<p class="muted" th:text="|${@display.money(item.price)} за предмет|"></p>
+<div th:replace="~{fragments :: quantity(${item}, @{/cart/items}, ${null})}"></div>
+</div>
+<p class="line-total" data-line-total th:text="${@display.money(item.total)}"></p>
+</li>
+</ul>
+<aside class="order-summary" aria-labelledby="summary-title">
+<h2 id="summary-title">Ваш выбор</h2>
+<dl class="summary-list">
+<div><dt>Предметов</dt><dd data-cart-item-count th:text="${cart.itemCount}">0</dd></div>
+</dl>
+<p class="summary-total"><span>Итого</span><strong th:text="${@display.money(cart.total)}" th:attr="data-cart-total=${cart.total}"></strong></p>
+<form method="post" th:action="@{/buy}" data-checkout><button class="button primary wide" type="submit">Оформить заказ</button><p class="quiet-note" role="status" data-checkout-status></p></form>
+<p class="quiet-note">Оплата не проводится. Заказ сохранится в вашей истории.</p>
+</aside>
+</section>
+<section class="empty-state" data-cart-empty th:attr="hidden=${cart.items.isEmpty() ? null : 'hidden'}">
+<h2 tabindex="-1">Корзина пуста</h2>
+<p>Выберите, что добавить на рабочий стол.</p>
+<a class="button primary" th:href="@{/items}">В коллекцию</a>
+</section>
+</main>
+<footer th:replace="~{fragments :: footer}"></footer>
+</body>
+</html>

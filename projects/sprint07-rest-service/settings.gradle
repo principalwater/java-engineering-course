@@ -1,1 +1,2 @@
-rootProject.name = 'storefront'
+rootProject.name = 'rest-storefront'
+include 'storefront', 'payments'

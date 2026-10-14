@@ -1,0 +1,134 @@
+openapi: 3.0.3
+info:
+  title: Сервис платежей витрины
+  version: 1.0.0
+  description: Точные суммы в копейках RUB. Списание и журнал атомарны; повтор ключа возвращает прежнее решение.
+servers:
+  - url: http://localhost:18097
+security:
+  - serviceToken: []
+tags:
+  - name: Payments
+paths:
+  /api/v1/accounts/{accountId}/balance:
+    get:
+      tags: [Payments]
+      operationId: getBalance
+      summary: Получить доступный баланс без изменения счёта
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Доступный баланс
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BalanceResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /api/v1/payments:
+    post:
+      tags: [Payments]
+      operationId: debit
+      summary: Атомарно списать сумму с защитой от повторной оплаты
+      description: Один ключ связан с одним неизменяемым запросом. Неопределённый HTTP-результат разрешается повтором того же запроса и ключа.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DebitRequest'}
+      responses:
+        '201':
+          description: Новое успешное списание
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentReceipt'}
+        '200':
+          description: Ранее принятое успешное решение для того же ключа
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentReceipt'}
+        '402':
+          description: Недостаточно средств; отрицательного баланса и проводок списания нет
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentReceipt'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409':
+          description: Ключ уже связан с другой суммой, валютой, счётом или основанием
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+components:
+  securitySchemes:
+    serviceToken: {type: http, scheme: bearer}
+  schemas:
+    MinorAmount:
+      type: integer
+      format: int64
+      minimum: 0
+      maximum: 1000000000000000
+      description: Копейки RUB; целое значение также точно представимо в JavaScript Number.
+    BalanceResponse:
+      type: object
+      additionalProperties: false
+      required: [accountId, balanceMinor, currency]
+      properties:
+        accountId: {type: string, format: uuid}
+        balanceMinor: {$ref: '#/components/schemas/MinorAmount'}
+        currency: {type: string, enum: [RUB]}
+    DebitRequest:
+      type: object
+      additionalProperties: false
+      required: [accountId, referenceId, amountMinor, currency]
+      properties:
+        accountId: {type: string, format: uuid}
+        referenceId: {type: string, format: uuid}
+        amountMinor: {type: integer, format: int64, minimum: 1, maximum: 1000000000000000}
+        currency: {type: string, enum: [RUB]}
+    PaymentReceipt:
+      type: object
+      additionalProperties: false
+      required: [paymentId, accountId, referenceId, amountMinor, balanceMinor, currency, status]
+      properties:
+        paymentId: {type: string, format: uuid}
+        accountId: {type: string, format: uuid}
+        referenceId: {type: string, format: uuid}
+        amountMinor: {$ref: '#/components/schemas/MinorAmount'}
+        balanceMinor: {$ref: '#/components/schemas/MinorAmount'}
+        currency: {type: string, enum: [RUB]}
+        status: {type: string, enum: [SUCCEEDED, DECLINED]}
+    Problem:
+      type: object
+      required: [type, title, status, detail]
+      properties:
+        type: {type: string, format: uri}
+        title: {type: string}
+        status: {type: integer, format: int32}
+        detail: {type: string}
+        instance: {type: string, format: uri}
+  responses:
+    InvalidRequest:
+      description: Некорректные параметры
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Unauthorized:
+      description: Не подтверждена сервисная идентичность
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Unavailable:
+      description: Сервис временно не может обработать запрос
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}

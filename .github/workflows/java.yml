@@ -287,14 +287,15 @@ jobs:
         if: always() && steps.servlet.outcome != 'skipped'
         working-directory: exercises/sprint03/spring-mvc-jdbc
         run: docker compose -p ci-spring-mvc down
+      - name: Prepare the Docker exercise image fallback
+        working-directory: exercises/supplements/docker
+        run: |
+          python3 init.py
+          python3 ../../../.github/scripts/prepare-project-ci.py --docker-exercise
       - name: Verify Docker routing and persistent data
         working-directory: exercises/supplements/docker
-        env:
-          # Image preparation for the preceding exercise exports another COMPOSE_FILE.
-          COMPOSE_FILE: compose.yml
         run: |
           ../../sprint01/junit5/mvnw -B --no-transfer-progress verify
-          python3 init.py
           cleanup() { docker compose -p java-supplement-docker down; }
           trap cleanup EXIT
           docker compose -p java-supplement-docker up -d --build --wait --wait-timeout 120

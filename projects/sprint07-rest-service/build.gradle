@@ -55,3 +55,5 @@ tasks.register('bootJar') { dependsOn 'packageDeployment' }
 ['postgresTest', 'analyticsTest', 'clusterTest', 'redisTest'].each { taskName ->
     tasks.register(taskName) { dependsOn ":storefront:${taskName}" }
 }
+
+tasks.named('postgresTest') { dependsOn ':payments:postgresTest' }

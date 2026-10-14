@@ -1,48 +1,126 @@
-name: sprint06-reactive-storefront
+name: sprint07-rest-service
+x-java: &java
+  user: "${STORE_UID:-10001}:${STORE_GID:-10001}"
+  healthcheck:
+    test: [CMD, curl, -fsS, http://localhost:8080/actuator/health/readiness]
+    interval: 5s
+    timeout: 3s
+    retries: 30
+    start_period: 30s
+  restart: unless-stopped
+  stop_grace_period: 30s
+  mem_limit: 384m
+  memswap_limit: 384m
+  cpus: 1.0
+x-postgres: &postgres
+  image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+  healthcheck:
+    test: [CMD-SHELL, 'pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB']
+    interval: 2s
+    timeout: 3s
+    retries: 30
+  restart: unless-stopped
+  mem_limit: 256m
+  memswap_limit: 256m
+  cpus: 1.0
 services:
-  db:
-    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+  store-db:
+    <<: *postgres
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-storefront}
-      POSTGRES_USER: ${POSTGRES_USER:-storefront}
+      POSTGRES_DB: storefront
+      POSTGRES_USER: storefront
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
     secrets: [db_password]
+    volumes: [storefront-data:/var/lib/postgresql/data]
+  payments-db:
+    <<: *postgres
+    entrypoint: [sh, /setup/start-payments-db.sh]
+    command: [postgres]
+    environment:
+      POSTGRES_DB: payments
+      POSTGRES_USER: payments_owner
+      POSTGRES_PASSWORD_FILE: /run/secrets/payments_db_password
+    secrets: [payments_db_password, payments_runtime_password]
     volumes:
-      - storefront-data:/var/lib/postgresql/data
+      - payments-data:/var/lib/postgresql/data
+      - ./payments/src/main/resources/db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+      - ./scripts/init-payments-db.sh:/docker-entrypoint-initdb.d/002-runtime.sh:ro
+      - ./scripts/start-payments-db.sh:/setup/start-payments-db.sh:ro
+      - ./payments/src/main/resources/db/postgresql-runtime-grants.sql:/setup/postgresql-runtime-grants.sql:ro
+  redis:
+    image: redis@sha256:fbdbaea47b9ae4ecc2082ecdb4e1cea81e32176ffb1dcf643d422ad07427e5d9
+    user: "${STORE_UID:-10001}:${STORE_GID:-10001}"
+    entrypoint: [redis-server]
+    command: [--bind, 0.0.0.0, --protected-mode, 'yes', --aclfile, /run/secrets/redis_users.acl, --maxmemory, 32mb, --maxmemory-policy, allkeys-lfu, --save, '', --appendonly, 'no', --dir, /tmp]
+    secrets: [redis_users.acl, redis_password]
+    read_only: true
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=1m,mode=1777']
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$(cat /run/secrets/redis_password)" redis-cli --user storefront --no-auth-warning ping | grep -qx PONG']
       interval: 5s
       timeout: 3s
       retries: 12
     restart: unless-stopped
-  backend:
-    build: .
-    # Bind-mounted secrets на Linux сохраняют владельца хоста и права 0600.
-    user: "${STORE_UID:-10001}:${STORE_GID:-10001}"
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 1.0
+  storefront:
+    <<: *java
+    build:
+      context: .
+      args: {JAR_FILE: build/deployment/storefront.jar}
     environment:
-      SERVER_PORT: "8080"
+      SERVER_PORT: '8080'
       SPRING_PROFILES_ACTIVE: postgresql
-      DB_URL: r2dbc:postgresql://db:5432/${POSTGRES_DB:-storefront}
-      DB_USER: ${POSTGRES_USER:-storefront}
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+      DB_URL: r2dbc:postgresql://store-db:5432/storefront
+      DB_USER: storefront
+      STORE_PAYMENTS_URL: http://payments:8080
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: '6379'
+      SPRING_DATA_REDIS_USERNAME: storefront
+      STORE_CACHE_NAMESPACE: sprint07-compose-postgresql
     secrets:
-      - source: db_password
-        target: spring.r2dbc.password
-    ports:
-      - "127.0.0.1:${WEB_PORT:-8086}:8080"
+      - {source: db_password, target: spring.r2dbc.password}
+      - {source: payments_service_token, target: store.payments.service-token}
+      - {source: redis_password, target: spring.data.redis.password}
+      - {source: seller_password, target: store.seller.bootstrap-password}
+    ports: ['127.0.0.1:${WEB_PORT:-8087}:8080']
     depends_on:
-      db:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health/readiness"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-      start_period: 30s
-    restart: unless-stopped
-    stop_grace_period: 30s
-    mem_limit: 512m
+      store-db: {condition: service_healthy}
+  payments:
+    <<: *java
+    build:
+      context: .
+      args: {JAR_FILE: build/deployment/payments.jar}
+    environment:
+      SERVER_PORT: '8080'
+      SPRING_PROFILES_ACTIVE: postgresql
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+      PAYMENTS_DB_URL: r2dbc:postgresql://payments-db:5432/payments
+      PAYMENTS_DB_USER: payments_runtime
+      PAYMENTS_SQL_INIT_MODE: never
+    secrets:
+      - {source: payments_runtime_password, target: spring.r2dbc.password}
+      - {source: payments_service_token, target: payments.service-token}
+    ports: ['127.0.0.1:${PAYMENTS_PORT:-8097}:8080']
+    depends_on:
+      payments-db: {condition: service_healthy}
 volumes:
   storefront-data:
+  payments-data:
 secrets:
   db_password:
-    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint06}/db_password
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/db_password
+  payments_db_password:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/payments_db_password
+  payments_runtime_password:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/payments_runtime_password
+  payments_service_token:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/payments_service_token
+  redis_password:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/redis_password
+  redis_users.acl:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/redis_users.acl
+  seller_password:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/seller_password

@@ -6,11 +6,11 @@ import os
 from pathlib import Path
 import secrets
 import subprocess
-import tempfile
 import time
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 import uuid
+from runtime import run_directory, stop_containers
 
 PROJECT = Path(__file__).resolve().parents[1]
 # Автоматически назначенный published port меняется при stop/start; проверке восстановления нужен стабильный.
@@ -22,7 +22,7 @@ def main():
         "docker", "compose", "-f", "compose.yaml", "-f", "compose.analytics.yaml", "config", "--format", "json"], cwd=PROJECT))
     image = configuration["services"]["clickhouse"]["image"]
     container = "storefront-analytics-test-" + uuid.uuid4().hex
-    with tempfile.TemporaryDirectory(prefix="storefront-analytics-secrets-") as directory:
+    with run_directory("analytics") as directory:
         passwords = {}
         mounts = []
         for role in ("admin", "writer", "reader"):
@@ -41,6 +41,8 @@ def main():
         created = False
         try:
             subprocess.run(["docker", "run", "-d", "--name", container, "--entrypoint", "sh",
+                            "--memory", "768m", "--memory-swap", "768m", "--cpus", "1",
+                            "--label", "dev.principalwater.deployment=" + container,
                             "-p", f"127.0.0.1:{TEST_ANALYTICS_PORT}:8123", "-e", "CLICKHOUSE_USER=storefront_admin",
                             "-e", "CLICKHOUSE_PASSWORD_FILE=/run/secrets/analytics_admin_password",
                             "-e", "CLICKHOUSE_DB=storefront", "-e", "CLICKHOUSE_ALWAYS_RUN_INITDB_SCRIPTS=1",
@@ -51,7 +53,7 @@ def main():
             deadline = time.monotonic() + 60
             while True:
                 try:
-                    query = Request(endpoint, data=b"SYSTEM STOP MERGES storefront.purchase_facts",
+                    query = Request(endpoint, data=b"SYSTEM STOP MERGES storefront.paid_purchase_facts",
                                     headers={"X-ClickHouse-User": "storefront_admin", "X-ClickHouse-Key": passwords["admin"]})
                     with urlopen(query, timeout=5) as response:
                         assert response.status == 200
@@ -70,7 +72,7 @@ def main():
             print("Isolated ClickHouse: duplicate delivery, durable queue and outage recovery passed")
         finally:
             if created:
-                subprocess.run(["docker", "rm", "-f", "-v", container], check=True, stdout=subprocess.DEVNULL)
+                stop_containers([container])
 
 
 if __name__ == "__main__":

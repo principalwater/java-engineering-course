@@ -14,7 +14,7 @@ services:
       - ./analytics/001-order-lines.sql:/docker-entrypoint-initdb.d/001-order-lines.sql:ro
       - ./analytics/start-clickhouse.sh:/setup/start-clickhouse.sh:ro
     ports:
-      - "127.0.0.1:${ANALYTICS_PORT:-8126}:8123"
+      - "127.0.0.1:${ANALYTICS_PORT:-8127}:8123"
     healthcheck:
       test: [CMD, wget, -q, --spider, http://127.0.0.1:8123/ping]
       interval: 5s
@@ -22,7 +22,9 @@ services:
       retries: 20
     restart: unless-stopped
     mem_limit: 768m
-  backend:
+    memswap_limit: 768m
+    cpus: 1.0
+  storefront:
     # Тот же JAR: аналитика подключается настройками и не участвует в транзакции покупки.
     user: "${STORE_UID:-10001}:${STORE_GID:-10001}"
     environment:
@@ -38,8 +40,8 @@ volumes:
   analytics-data:
 secrets:
   analytics_admin_password:
-    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint06}/analytics_admin_password
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/analytics_admin_password
   analytics_writer_password:
-    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint06}/analytics_writer_password
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/analytics_writer_password
   analytics_reader_password:
-    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint06}/analytics_reader_password
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/analytics_reader_password

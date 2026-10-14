@@ -1,10 +1,7 @@
 *
-!gradle/
-!gradle/**
-!gradlew
-!build.gradle
-!settings.gradle
-!src/
-!src/main/
-!src/main/**
 !Dockerfile
+!build/
+build/*
+!build/deployment/
+!build/deployment/storefront.jar
+!build/deployment/payments.jar

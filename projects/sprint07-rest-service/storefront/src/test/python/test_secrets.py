@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 specification = importlib.util.spec_from_file_location(
-    "store_secrets", Path(__file__).resolve().parents[3] / "scripts/init-secrets.py")
+    "store_secrets", Path(__file__).resolve().parents[4] / "scripts/init-secrets.py")
 store_secrets = importlib.util.module_from_spec(specification)
 specification.loader.exec_module(store_secrets)
 
@@ -19,6 +19,7 @@ class SecretStorageTest(unittest.TestCase):
             store_secrets.initialize(directory, repository)
             original = {path.name: path.read_bytes() for path in directory.iterdir()}
             self.assertTrue(all(value.strip() for value in original.values()))
+            self.assertNotIn(original["redis_password"].strip(), original["redis_users.acl"])
             for path in directory.iterdir():
                 path.chmod(0o644)
             store_secrets.initialize(directory, repository)
@@ -41,3 +42,8 @@ class SecretStorageTest(unittest.TestCase):
             (directory / "db_password").write_bytes(b"\n")
             with self.assertRaisesRegex(ValueError, "non-empty"):
                 store_secrets.initialize(directory, repository)
+            (directory / "db_password").unlink()
+            (directory / "redis_users.acl").symlink_to(Path(root) / "outside")
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                store_secrets.initialize(directory, repository)
+            self.assertFalse((Path(root) / "outside").exists())

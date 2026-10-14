@@ -1,67 +1,38 @@
 #!/usr/bin/env python3
-"""Запускает готовый Executable JAR с новой H2 и проверяет настоящий HTTP-путь."""
+"""Проверяет два Executable JAR через настоящий HTTP, H2 и Redis с рабочим ACL."""
 
-import json
-from pathlib import Path
+import argparse
 import subprocess
-import sys
-import tempfile
-import time
-from urllib.error import URLError
-from urllib.request import urlopen
-
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+import uuid
+from runtime import applications, initialize, redis, run_directory
 from smoke import MarketProbe
-
-PROJECT = Path(__file__).resolve().parents[1]
-TEST_HTTP_PORT = 18096
 
 
 def main():
-    jar = PROJECT / "build/libs/storefront.jar"
-    if not jar.is_file():
-        raise FileNotFoundError("Package storefront.jar with bootJar before verification")
-    base = f"http://127.0.0.1:{TEST_HTTP_PORT}"
-    with tempfile.TemporaryDirectory(prefix="storefront-jar-") as directory:
-        with (Path(directory) / "application.log").open("wb") as log:
-            process = subprocess.Popen(["java", "-jar", str(jar), "--spring.profiles.active=h2",
-                                        "--store.analytics.enabled=false", "--server.address=127.0.0.1",
-                                        f"--server.port={TEST_HTTP_PORT}"], cwd=directory,
-                                       stdout=log, stderr=subprocess.STDOUT)
-            succeeded = False
-            try:
-                deadline = time.monotonic() + 60
-                while True:
-                    if process.poll() is not None:
-                        raise RuntimeError("The executable JAR exited before readiness")
-                    try:
-                        with urlopen(base + "/actuator/health/readiness", timeout=3) as response:
-                            if json.load(response)["status"] == "UP":
-                                break
-                    except (URLError, TimeoutError):
-                        pass
-                    if time.monotonic() >= deadline:
-                        raise TimeoutError("The executable JAR did not become ready")
-                    time.sleep(1)
-                with urlopen(base + "/actuator/info", timeout=3) as response:
-                    assert json.load(response)["build"]["name"] == "storefront"
-                MarketProbe(base).run()
-                succeeded = True
-                print("Executable JAR: embedded Netty, native H2, readiness and real HTTP passed")
-            except Exception:
-                log.flush()
-                print((Path(directory) / "application.log").read_text(), file=sys.stderr)
-                raise
-            finally:
-                if process.poll() is None:
-                    process.terminate()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--build-tool", choices=["gradle", "maven"], default="gradle")
+    args = parser.parse_args()
+    with run_directory("jar-" + args.build_tool) as directory:
+        secrets_directory = initialize(directory / "secrets")
+        with redis(secrets_directory, administrative=True) as cache, applications(secrets_directory, cache, args.build_tool) as endpoints:
+            balance = endpoints["payments"] + "/api/v1/accounts/" + str(uuid.uuid4()) + "/balance"
+            for headers in ({}, {"Authorization": "Bearer invalid-service-token"}):
                 try:
-                    process.wait(timeout=25)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
-                    raise RuntimeError("The executable JAR exceeded its shutdown budget")
-                if succeeded:
-                    assert process.returncode in (0, 143, -15), "Unexpected executable JAR termination"
+                    urlopen(Request(balance, headers=headers), timeout=5).close()
+                except HTTPError as error:
+                    assert error.code == 401
+                else:
+                    raise AssertionError("Payments must reject missing or incorrect service credentials")
+            MarketProbe(endpoints["storefront"], endpoints["payments"], secrets_directory).run()
+            # Дополнительная fixture-роль наблюдает keyspace; приложение использует неизменённый production ACL.
+            scan = ('REDISCLI_AUTH="$(cat /run/secrets/redis_password)" '
+                    "redis-cli --user cache_test --no-auth-warning --scan --pattern 'sprint07-jar-test:v1:*'")
+            keys = subprocess.check_output(["docker", "exec", cache["container"], "sh", "-c", scan], text=True).splitlines()
+            assert any(":product:" in key for key in keys) and any(":page:" in key for key in keys), \
+                "The actual storefront ACL must populate both product and page caches"
+    print("Both executable JARs: native Netty/H2, authenticated Redis, payments and graceful shutdown passed")
 
 
 if __name__ == "__main__":

@@ -150,7 +150,10 @@ class StoreServiceTest extends StoreIntegrationTestBase {
         // Ошибка последней записи проверяет настоящий rollback сервисной транзакции, а не откат теста.
         execute("ALTER TABLE analytics_outbox ADD CONSTRAINT reject_delivery_test CHECK (order_id < 0)");
         try {
-            StepVerifier.create(buy(cartId)).expectError(DataIntegrityViolationException.class).verify(TIMEOUT);
+            StepVerifier.create(buy(cartId)).expectErrorSatisfies(failure -> {
+                assertStoreError(StoreError.PAYMENT_PENDING, failure);
+                assertInstanceOf(DataIntegrityViolationException.class, failure.getCause());
+            }).verify(TIMEOUT);
             StepVerifier.create(carts.view(cartId)).assertNext(view -> assertEquals(700, view.total()))
                     .expectComplete().verify(TIMEOUT);
             StepVerifier.create(orderService.list(cartId)).assertNext(selected -> assertTrue(selected.isEmpty()))

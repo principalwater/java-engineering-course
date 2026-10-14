@@ -9,6 +9,8 @@ import dev.principalwater.store.util.VisitorIdentity;
 import java.time.Clock;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Flux;
@@ -16,6 +18,7 @@ import reactor.core.publisher.Mono;
 
 @Service
 public class CheckoutService {
+    private static final Logger LOG = LoggerFactory.getLogger(CheckoutService.class);
     private final CartRepository carts;
     private final CartLineRepository cartLines;
     private final CartQueries queries;
@@ -58,8 +61,13 @@ public class CheckoutService {
         return payments.debit(intent)
                 // Неизвестный исход не равен отказу: intent и снимок остаются для того же ключа повтора.
                 .onErrorMap(failure -> new StoreException(StoreError.PAYMENT_PENDING))
-                .flatMap(receipt -> receipt.getStatus() == PaymentReceipt.StatusEnum.SUCCEEDED
-                        ? confirm(intent, receipt) : decline(intent));
+                .flatMap(receipt -> (receipt.getStatus() == PaymentReceipt.StatusEnum.SUCCEEDED
+                        ? confirm(intent, receipt) : decline(intent)).onErrorMap(failure -> {
+                            if (failure instanceof StoreException) { return failure; }
+                            // Откат локального подтверждения не отменяет уже выполненное удалённое списание.
+                            LOG.warn("Payment finalization deferred for checkout intent {}", intent.id(), failure);
+                            return new StoreException(StoreError.PAYMENT_PENDING, failure);
+                        }));
     }
 
     private Mono<UUID> payer(UUID cartId) {

@@ -3,13 +3,17 @@ package dev.principalwater.store.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.principalwater.store.StoreIntegrationTestBase;
 import dev.principalwater.store.PaymentsStub;
-import dev.principalwater.store.util.VisitorIdentity;
+import dev.principalwater.store.dao.CheckoutIntentRepository;
 import dev.principalwater.store.dao.OrderRepository;
 import dev.principalwater.store.dao.OutboxRepository;
 import dev.principalwater.store.dao.ProductRepository;
+import dev.principalwater.store.util.VisitorIdentity;
 import dev.principalwater.store.model.*;
+import dev.principalwater.store.payment.CheckoutIntent;
+import dev.principalwater.store.payment.PaymentRecovery;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -41,6 +45,8 @@ class StoreServiceTest extends StoreIntegrationTestBase {
     @Autowired private ProductRepository products;
     @Autowired private OrderRepository orders;
     @Autowired private OutboxRepository outbox;
+    @Autowired private CheckoutIntentRepository intents;
+    @Autowired private PaymentRecovery recovery;
     @Autowired private ObjectMapper json;
 
     @Test
@@ -259,6 +265,45 @@ class StoreServiceTest extends StoreIntegrationTestBase {
         assertEquals(700, await(orderService.get(orderId, cartId)).totalSum());
         assertEquals(1, PaymentsStub.DEBITS.get());
         assertEquals(1L, await(outbox.countByDeliveredAtIsNull()));
+    }
+
+    @Test
+    void recoveryReachesLaterPaymentsWhenTheOldestBatchRemainsUnavailable() throws Exception {
+        importItems(productInput("recovery", "Recovery", "Description", 700));
+        long productId = id("recovery");
+        var prepared = new ArrayList<CheckoutIntent>();
+        PaymentsStub.UNAVAILABLE.set(true);
+        for (int index = 0; index < 17; index++) {
+            UUID cartId = await(carts.identify(null));
+            await(carts.change(cartId, productId, CartAction.PLUS));
+            expectError(buy(cartId), StoreError.PAYMENT_PENDING);
+            prepared.add(await(intents.findByActiveCartId(cartId)));
+        }
+        var blocked = await(intents.pending().collectList());
+        assertEquals(16, blocked.size());
+        blocked.forEach(intent -> PaymentsStub.UNAVAILABLE_KEYS.add(intent.id().toString()));
+        var available = prepared.stream().filter(intent -> !PaymentsStub.UNAVAILABLE_KEYS.contains(intent.id().toString()))
+                .findFirst().orElseThrow();
+        PaymentsStub.UNAVAILABLE.set(false);
+
+        // Старые 16 ошибок не должны навсегда удерживать уже доступную следующую операцию вне очереди.
+        recovery.recover().block(TIMEOUT);
+        assertEquals(0, PaymentsStub.DEBITS.get());
+        recovery.recover().block(TIMEOUT);
+
+        var confirmed = await(intents.findById(available.id()));
+        assertEquals(CheckoutIntent.Status.CONFIRMED, confirmed.status());
+        assertEquals(available.id(), confirmed.id());
+        assertEquals(available.amountMinor(), confirmed.amountMinor());
+        assertEquals(700, await(orderService.get(confirmed.orderId(), available.cartId())).totalSum());
+        assertTrue(await(carts.view(available.cartId())).items().isEmpty());
+        assertEquals(confirmed.orderId(), await(checkout.buy(available.cartId(), available.id(), available.amountMinor())));
+        assertEquals(1, PaymentsStub.DEBITS.get(), "Recovery and replay must use the original payment key");
+        for (var intent : blocked) {
+            assertEquals(CheckoutIntent.Status.PREPARED, await(intents.findById(intent.id())).status());
+            assertEquals(700, await(carts.view(intent.cartId())).total());
+            assertTrue(await(orderService.list(intent.cartId())).isEmpty());
+        }
     }
 
     @Test

@@ -3,6 +3,7 @@ package dev.principalwater.store;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -17,6 +18,7 @@ public final class PaymentsStub {
     private static final Map<UUID, Long> BALANCES = new ConcurrentHashMap<>();
     private static final Map<String, String> RECEIPTS = new ConcurrentHashMap<>();
     public static final AtomicBoolean UNAVAILABLE = new AtomicBoolean();
+    public static final Set<String> UNAVAILABLE_KEYS = ConcurrentHashMap.newKeySet();
     public static final AtomicBoolean LOSE_RESPONSE = new AtomicBoolean();
     public static final AtomicInteger DEBITS = new AtomicInteger();
     public static final DisposableServer SERVER = HttpServer.create().host("127.0.0.1").port(0).route(routes -> routes
@@ -27,8 +29,9 @@ public final class PaymentsStub {
                         "{\"accountId\":\"" + id + "\",\"balanceMinor\":" + balance(id) + ",\"currency\":\"RUB\"}"));
             })
             .post("/api/v1/payments", (request, response) -> request.receive().aggregate().asString().flatMap(body -> {
-                if (UNAVAILABLE.get()) { return response.status(503).send().then(); }
-                String receipt = apply(request.requestHeaders().get("Idempotency-Key"), body);
+                String key = request.requestHeaders().get("Idempotency-Key");
+                if (UNAVAILABLE.get() || UNAVAILABLE_KEYS.contains(key)) { return response.status(503).send().then(); }
+                String receipt = apply(key, body);
                 if (LOSE_RESPONSE.compareAndSet(true, false)) { return response.status(503).send().then(); }
                 return response.status(receipt.contains("DECLINED") ? 402 : 200)
                         .header("Content-Type", "application/json").sendString(Mono.just(receipt)).then();
@@ -37,7 +40,8 @@ public final class PaymentsStub {
     public static long balance(UUID id) { return BALANCES.getOrDefault(id, 1_000_000_000L); }
     public static void funds(UUID id, long minor) { BALANCES.put(id, minor); }
     public static void reset() {
-        BALANCES.clear(); RECEIPTS.clear(); DEBITS.set(0); UNAVAILABLE.set(false); LOSE_RESPONSE.set(false);
+        BALANCES.clear(); RECEIPTS.clear(); UNAVAILABLE_KEYS.clear();
+        DEBITS.set(0); UNAVAILABLE.set(false); LOSE_RESPONSE.set(false);
     }
     private static synchronized String apply(String key, String body) {
         return RECEIPTS.computeIfAbsent(key, ignored -> {

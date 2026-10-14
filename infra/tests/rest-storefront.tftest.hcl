@@ -35,12 +35,14 @@ run "two_services_and_independent_databases" {
     error_message = "Storefront and payments must use distinct databases and the private native service endpoints."
   }
   assert {
-    condition = alltrue([for service in values(docker_container.application) : (
-      service.memory == 384 && service.memory_swap == service.memory && service.cpus == "1.0" &&
-      alltrue([for port in service.ports : port.ip == "127.0.0.1"]) &&
-      alltrue([for mount in service.volumes : mount.read_only])
-      )]) && length([for mount in docker_container.application["payments"].volumes : mount if(
-      mount.container_path == "/run/secrets/spring.r2dbc.password" && endswith(mount.host_path, "/payments_runtime_password")
+    condition = docker_container.application["storefront"].memory == 512 && (
+      docker_container.application["payments"].memory == 384
+      ) && alltrue([for service in values(docker_container.application) : (
+        service.memory_swap == service.memory && service.cpus == "1.0" &&
+        alltrue([for port in service.ports : port.ip == "127.0.0.1"]) &&
+        alltrue([for mount in service.volumes : mount.read_only])
+        )]) && length([for mount in docker_container.application["payments"].volumes : mount if(
+        mount.container_path == "/run/secrets/spring.r2dbc.password" && endswith(mount.host_path, "/payments_runtime_password")
     )]) == 1 && output.deployment.payments_url == "http://127.0.0.1:29089"
     error_message = "Both Java services need real resource limits, loopback ports and separate read-only credentials."
   }

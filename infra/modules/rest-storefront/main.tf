@@ -9,6 +9,8 @@ locals {
   services = {
     storefront = {
       port = var.http_port
+      # SQL fallback under a Redis outage exhausted the former 384 MiB cgroup budget.
+      memory_mb = 512
       secrets = merge({
         "store.payments.service-token"                  = "payments_service_token"
         "spring.data.redis.password"                    = "redis_password"
@@ -33,7 +35,8 @@ locals {
       ]
     }
     payments = {
-      port = var.payments_port
+      port      = var.payments_port
+      memory_mb = 384
       secrets = merge({
         "payments.service-token" = "payments_service_token"
       }, local.persistent ? { "spring.r2dbc.password" = "payments_runtime_password" } : {})
@@ -100,8 +103,8 @@ resource "docker_container" "application" {
   image        = docker_image.application[each.key].image_id
   command      = each.value.command
   user         = var.runtime_user
-  memory       = 384
-  memory_swap  = 384
+  memory       = each.value.memory_mb
+  memory_swap  = each.value.memory_mb
   cpus         = "1.0"
   stop_timeout = 30
   restart      = "unless-stopped"

@@ -13,5 +13,5 @@ COPY --from=layers /extract/extracted/snapshot-dependencies/ ./
 COPY --from=layers /extract/extracted/application/ ./
 USER 10001:10001
 EXPOSE 8080
-# Heap 40% оставляет запас Netty, metaspace, стекам и JIT; проверено под лимитом 384 MiB.
+# Heap — часть бюджета: Netty, metaspace, стеки и JIT требуют отдельного запаса вне heap.
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=40.0", "-XX:MaxDirectMemorySize=48m", "-XX:+ExitOnOutOfMemoryError", "-jar", "application.jar"]

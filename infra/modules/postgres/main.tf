@@ -16,6 +16,11 @@ variable "database_name" {
   description = "Database and application login created on first initialization."
   type        = string
 }
+variable "database_user" {
+  description = "Optional database owner login; defaults to the database name for existing stacks."
+  type        = string
+  default     = null
+}
 variable "password_file" {
   description = "External password file mounted read-only, never read into state."
   type        = string
@@ -24,6 +29,46 @@ variable "init_sql" {
   description = "Optional existing initialization SQL file for an empty data volume."
   type        = string
   default     = null
+}
+variable "network_aliases" {
+  description = "DNS aliases; independent databases on one network need distinct names."
+  type        = set(string)
+  default     = ["db", "database"]
+}
+variable "memory_mb" {
+  description = "Optional local container memory and total swap budget in MiB."
+  type        = number
+  default     = null
+}
+variable "cpus" {
+  description = "Optional local CPU quota."
+  type        = string
+  default     = null
+}
+variable "entrypoint" {
+  description = "Optional initialization wrapper; existing stacks use the image entrypoint."
+  type        = list(string)
+  default     = null
+}
+variable "command" {
+  description = "Optional command for a custom initialization entrypoint."
+  type        = list(string)
+  default     = null
+}
+variable "readonly_files" {
+  description = "Additional read-only host files keyed by their absolute container path."
+  type        = map(string)
+  default     = {}
+}
+variable "tmpfs" {
+  description = "Optional temporary runtime filesystems; secret copies never need persistent storage."
+  type        = map(string)
+  default     = null
+}
+variable "tcp_healthcheck" {
+  description = "Wait for the final TCP listener instead of the temporary initdb Unix socket."
+  type        = bool
+  default     = false
 }
 
 resource "docker_image" "postgres" {
@@ -40,18 +85,24 @@ resource "docker_volume" "data" {
 }
 
 resource "docker_container" "database" {
-  name    = "${var.stack_name}-db"
-  image   = docker_image.postgres.image_id
-  restart = "unless-stopped"
-  wait    = true
+  name        = "${var.stack_name}-db"
+  image       = docker_image.postgres.image_id
+  restart     = "unless-stopped"
+  wait        = true
+  memory      = var.memory_mb
+  memory_swap = var.memory_mb
+  cpus        = var.cpus
+  entrypoint  = var.entrypoint
+  command     = var.command
+  tmpfs       = var.tmpfs
   env = [
     "POSTGRES_DB=${var.database_name}",
-    "POSTGRES_USER=${var.database_name}",
+    "POSTGRES_USER=${coalesce(var.database_user, var.database_name)}",
     "POSTGRES_PASSWORD_FILE=/run/secrets/db_password",
   ]
   networks_advanced {
     name    = var.network_name
-    aliases = ["db", "database"]
+    aliases = var.network_aliases
   }
   volumes {
     volume_name    = docker_volume.data.name
@@ -70,8 +121,16 @@ resource "docker_container" "database" {
       read_only      = true
     }
   }
+  dynamic "volumes" {
+    for_each = var.readonly_files
+    content {
+      host_path      = volumes.value
+      container_path = volumes.key
+      read_only      = true
+    }
+  }
   healthcheck {
-    test     = ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+    test     = ["CMD-SHELL", var.tcp_healthcheck ? "pg_isready -h 127.0.0.1 -U $POSTGRES_USER -d $POSTGRES_DB" : "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
     interval = "2s"
     timeout  = "3s"
     retries  = 30

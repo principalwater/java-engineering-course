@@ -42,6 +42,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("stack", choices=deploy.STACKS)
     parser.add_argument("--analytics", action="store_true")
+    parser.add_argument("--build-tool", choices=["gradle", "maven"], default="gradle")
     args = parser.parse_args()
     state = deploy.external_directory(Path(os.environ.get("COURSE_DEPLOY_STATE", Path.home() / ".local/state/java-engineering-course")) / args.stack)
     environment = {**os.environ, "TF_DATA_DIR": str(state / "providers")}
@@ -50,13 +51,65 @@ def main():
     deployed = json.loads(subprocess.check_output(tofu + ["output", "-json", "deployment"], env=environment))
     driver = [sys.executable, str(deploy.INFRA / "deploy.py"), args.stack]
     optional = ["--analytics"] if args.analytics else []
+    if args.stack.startswith("sprint07-"):
+        optional += ["--build-tool", args.build_tool]
 
     def plan(*options):
         with (state / "verification-plan.log").open("w") as log:
             subprocess.run(driver + ["plan"] + optional + list(options), stdout=log, stderr=subprocess.STDOUT, check=True)
         return json.loads(subprocess.check_output(tofu + ["show", "-json", str(state / "reviewed.tfplan")], env=environment))
 
-    if args.stack.startswith(("sprint05", "sprint06")):
+    if args.stack.startswith("sprint07-"):
+        specification = importlib.util.spec_from_file_location("storefront_smoke", deploy.REPOSITORY / deploy.STACKS[args.stack] / "scripts/smoke.py")
+        smoke = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(smoke)
+        secrets_directory = Path(os.environ.get("COURSE_DEPLOY_SECRETS", Path.home() / ".config/java-engineering-course/tofu")) / args.stack
+        probe = smoke.MarketProbe(deployed["frontend_url"], payments_url=deployed["payments_url"],
+                                  secrets_dir=secrets_directory)
+        proof = probe.run()
+        expected_total = probe.read(proof["order_path"]).order_total
+
+        def payment_survives():
+            probe.verify_payment(proof)
+            return True
+
+        def payment_balance():
+            token = (secrets_directory / "payments_service_token").read_text().strip()
+            endpoint = deployed["payments_url"] + "/api/v1/accounts/" + proof["account_id"] + "/balance"
+            with urlopen(Request(endpoint, headers={"Authorization": "Bearer " + token}), timeout=10) as response:
+                return json.load(response)["balanceMinor"]
+
+        persistent = args.stack.endswith("-postgresql")
+        for service in ["storefront", "payments"]:
+            key = service + "_database" if persistent else service
+            container = deployed["containers"][key]
+            old_container = subprocess.check_output(["docker", "inspect", "--format", "{{.Id}}", container], text=True).strip()
+            address = (f'module.sprint07["{args.stack}"].module.postgres["{service}"].docker_container.database' if persistent
+                       else f'module.sprint07["{args.stack}"].docker_container.application["{service}"]')
+            replacement = plan("--replace", address)
+            changes = [change for change in replacement["resource_changes"] if change["change"]["actions"] != ["no-op"]]
+            assert len(changes) == 1 and changes[0]["address"] == address, "Only the selected service may be replaced"
+            subprocess.run(driver + ["apply"] + optional, check=True)
+            new_container = subprocess.check_output(["docker", "inspect", "--format", "{{.Id}}", container], text=True).strip()
+            assert old_container != new_container
+            if persistent:
+                await_value(lambda: probe.read(proof["order_path"]).order_total, expected_total)
+                await_value(payment_survives, True)
+        if persistent:
+            print("Independent PostgreSQL recreation: owned order, balance and idempotent ledger receipt survived")
+        else:
+            try:
+                probe.read(proof["order_path"])
+            except HTTPError as error:
+                assert error.code == 404
+            else:
+                raise AssertionError("A new H2 storefront must not retain the previous order")
+            assert not probe.read("/items").products
+            await_value(payment_balance, proof["balance_minor"] + proof["payment_amount_minor"])
+            # A fresh account/purchase proves both new JVMs can cooperate after their memory reset.
+            probe.run()
+            print("Both H2 services reset their in-memory data and accepted a new purchase")
+    elif args.stack.startswith(("sprint05", "sprint06")):
         specification = importlib.util.spec_from_file_location("storefront_smoke", deploy.REPOSITORY / deploy.STACKS[args.stack] / "scripts/smoke.py")
         smoke = importlib.util.module_from_spec(specification)
         specification.loader.exec_module(smoke)

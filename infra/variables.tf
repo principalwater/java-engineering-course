@@ -2,9 +2,15 @@ variable "deployment" {
   description = "One independently managed local stack."
   type        = string
   validation {
-    condition     = contains(["sprint03", "sprint04", "sprint05-postgresql", "sprint05-h2", "sprint06-postgresql", "sprint06-h2", "docker-exercise", "mvc-exercise"], var.deployment)
+    condition     = contains(["sprint03", "sprint04", "sprint05-postgresql", "sprint05-h2", "sprint06-postgresql", "sprint06-h2", "sprint07-postgresql", "sprint07-h2", "docker-exercise", "mvc-exercise"], var.deployment)
     error_message = "Select an implemented project or exercise deployment."
   }
+}
+
+variable "deployment_artifact_hashes" {
+  description = "Prepared Sprint 7 executable JAR hashes supplied by the reviewed-plan driver."
+  type        = map(string)
+  default     = {}
 }
 
 variable "docker_host" {

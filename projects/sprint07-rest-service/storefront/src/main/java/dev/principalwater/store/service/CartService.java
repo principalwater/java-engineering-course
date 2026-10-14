@@ -1,5 +1,7 @@
 package dev.principalwater.store.service;
 
+import dev.principalwater.store.cache.CatalogReads;
+
 import dev.principalwater.store.dao.*;
 
 import dev.principalwater.store.model.*;
@@ -14,16 +16,16 @@ import reactor.core.publisher.Mono;
 public class CartService {
     private final CartRepository carts;
     private final CartLineRepository lines;
-    private final CartQueries queries;
+    private final CatalogReads catalog;
     private final ProductRepository products;
     private final StoreUserRepository users;
     private final TransactionalOperator transactions;
 
-    public CartService(CartRepository carts, CartLineRepository lines, CartQueries queries,
+    public CartService(CartRepository carts, CartLineRepository lines, CatalogReads catalog,
                        ProductRepository products, StoreUserRepository users, TransactionalOperator transactions) {
         this.carts = carts;
         this.lines = lines;
-        this.queries = queries;
+        this.catalog = catalog;
         this.products = products;
         this.users = users;
         this.transactions = transactions;
@@ -41,7 +43,15 @@ public class CartService {
     }
 
     public Mono<CartView> view(UUID cartId) {
-        return queries.items(cartId).map(item -> item.view()).collectList().map(CartView::new);
+        return lines.findByCartIdOrderById(cartId).collectList().flatMap(selected ->
+                catalog.products(selected.stream().map(CartLine::productId).toList()).map(productsById -> new CartView(
+                        selected.stream().map(line -> {
+                            Product product = productsById.get(line.productId());
+                            if (product == null) {
+                                throw new StoreException(StoreError.PRODUCT_NOT_FOUND);
+                            }
+                            return ItemView.from(product, line.quantity());
+                        }).toList())));
     }
 
     public Mono<CartView> change(UUID cartId, long productId, CartAction action) {
@@ -56,14 +66,14 @@ public class CartService {
             if (action == CartAction.SET && (quantity == null || quantity < 0 || quantity > StoreLimits.MAX_ITEM_QUANTITY)) {
                 return Mono.error(new StoreException(StoreError.INVALID_QUANTITY));
             }
-            // Блокировка живёт до terminal/cancel всей операции, включая чтение возвращаемой корзины.
+            // Redis читается после commit: сетевой кэш не удерживает SQL-блокировку корзины.
             return carts.lockById(cartId).switchIfEmpty(Mono.error(new StoreException(StoreError.CART_NOT_FOUND)))
                     .then(products.findById(productId)
                             .switchIfEmpty(Mono.error(new StoreException(StoreError.PRODUCT_NOT_FOUND))))
                     .then(lines.findByCartIdAndProductId(cartId, productId).map(Optional::of)
                             .defaultIfEmpty(Optional.empty()))
                     .flatMap(existing -> update(cartId, productId, existing.orElse(null), action, quantity))
-                    .then(view(cartId)).as(transactions::transactional);
+                    .then().as(transactions::transactional).then(Mono.defer(() -> view(cartId)));
         });
     }
 

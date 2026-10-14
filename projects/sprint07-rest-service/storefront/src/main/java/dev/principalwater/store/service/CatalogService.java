@@ -1,7 +1,6 @@
 package dev.principalwater.store.service;
 
-import dev.principalwater.store.dao.CatalogQueries;
-import dev.principalwater.store.dao.ProductRepository;
+import dev.principalwater.store.cache.CatalogReads;
 import dev.principalwater.store.model.*;
 
 import org.springframework.stereotype.Service;
@@ -9,24 +8,22 @@ import reactor.core.publisher.Mono;
 
 @Service
 public class CatalogService {
-    private final ProductRepository products;
-    private final CatalogQueries queries;
+    private final CatalogReads reads;
 
-    public CatalogService(ProductRepository products, CatalogQueries queries) {
-        this.products = products;
-        this.queries = queries;
+    public CatalogService(CatalogReads reads) {
+        this.reads = reads;
     }
 
     public Mono<CatalogPage> list(CatalogQuery query, CartView cart) {
         var counts = cart.counts();
-        return queries.list(query).map(product -> ItemView.from(product, counts.getOrDefault(product.id(), 0)))
-                .collectList().flatMap(items -> queries.count(query).map(total -> new CatalogPage(items,
+        return reads.page(query).map(page -> new CatalogPage(page.products().stream()
+                        .map(product -> ItemView.from(product, counts.getOrDefault(product.id(), 0))).toList(),
                         new Paging(query.pageSize(), query.pageNumber(), query.pageNumber() > 1,
-                                (long) query.pageNumber() * query.pageSize() < total), total)));
+                                (long) query.pageNumber() * query.pageSize() < page.totalItems()), page.totalItems()));
     }
 
     public Mono<ItemView> item(long id, CartView cart) {
-        return products.findById(id).switchIfEmpty(Mono.error(new StoreException(StoreError.PRODUCT_NOT_FOUND)))
+        return reads.product(id)
                 .map(product -> ItemView.from(product, cart.counts().getOrDefault(id, 0)));
     }
 }

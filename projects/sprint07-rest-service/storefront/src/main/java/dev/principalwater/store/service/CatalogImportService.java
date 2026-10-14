@@ -5,30 +5,36 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
 import dev.principalwater.store.dao.ProductRepository;
+import dev.principalwater.store.dao.StoreIdentityRepository;
 import dev.principalwater.store.model.*;
 
 import jakarta.validation.Validator;
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
+import reactor.core.scheduler.Scheduler;
 
 @Service
 public class CatalogImportService {
     private final ProductRepository products;
+    private final StoreIdentityRepository identities;
     private final Validator validator;
     private final ObjectReader reader;
     private final TransactionalOperator transactions;
+    private final Scheduler codecScheduler;
 
-    public CatalogImportService(ProductRepository products, Validator validator, ObjectMapper json,
-                                TransactionalOperator transactions) {
+    public CatalogImportService(ProductRepository products, StoreIdentityRepository identities, Validator validator, ObjectMapper json,
+                                TransactionalOperator transactions, @Qualifier("cacheCodecScheduler") Scheduler codecScheduler) {
         this.products = products;
+        this.identities = identities;
         this.validator = validator;
         this.transactions = transactions;
+        this.codecScheduler = codecScheduler;
         reader = json.readerFor(new TypeReference<List<ProductInput>>() {})
                 .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
                 .without(DeserializationFeature.ACCEPT_FLOAT_AS_INT);
@@ -36,14 +42,16 @@ public class CatalogImportService {
 
     public Mono<ImportResult> importJson(byte[] bytes) {
         // Ограниченный CPU-разбор JSON выполняется вне HTTP event loop; SQL остаётся полностью R2DBC.
-        return Mono.fromCallable(() -> validate(bytes)).subscribeOn(Schedulers.boundedElastic())
+        return Mono.fromCallable(() -> validate(bytes)).subscribeOn(codecScheduler)
                 .flatMap(inputs -> {
                     var skus = inputs.stream().map(ProductInput::sku).toList();
                     return products.findAllBySkuIn(skus).collectMap(Product::sku).flatMap(existing ->
                             Flux.fromIterable(inputs).concatMap(input -> {
                                 Product product = existing.get(input.sku());
                                 return products.save(product == null ? new Product(input) : product.update(input));
-                            }).then(Mono.fromSupplier(() -> new ImportResult(inputs.size() - existing.size(), existing.size()))))
+                            }).then(identities.advanceCatalogRevision()).flatMap(updated -> updated == 1
+                                    ? Mono.just(new ImportResult(inputs.size() - existing.size(), existing.size()))
+                                    : Mono.error(new IllegalStateException("Store dataset identity is missing"))))
                             .as(transactions::transactional);
                 });
     }

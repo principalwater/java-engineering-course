@@ -1,6 +1,9 @@
 package dev.principalwater.store.controller;
 
 import dev.principalwater.store.TestBase;
+import dev.principalwater.store.runtime.ResourceAdmissionFilter;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
 import dev.principalwater.store.config.SecurityConfig;
 import dev.principalwater.store.util.DisplayFormats;
 import dev.principalwater.store.service.*;
@@ -40,7 +43,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.csrf;
 
-@WebFluxTest(controllers = {CatalogController.class, CartController.class, OrderController.class,
+@WebFluxTest(excludeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = ResourceAdmissionFilter.class),
+        controllers = {CatalogController.class, CartController.class, OrderController.class,
         CatalogImportController.class, ProfileController.class})
 @ActiveProfiles("test")
 @Import({SecurityConfig.class, WebConfig.class, DisplayFormats.class})

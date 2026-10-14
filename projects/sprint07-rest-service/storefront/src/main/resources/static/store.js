@@ -48,9 +48,10 @@
   let confirmedCheckoutKey = null;
 
   class RequestError extends Error {
-    constructor(status) {
+    constructor(status, code) {
       super(`Cart request failed with HTTP ${status}`);
       this.status = status;
+      this.code = code;
     }
   }
 
@@ -138,6 +139,8 @@
       const item = lines.get(row.dataset.productId);
       if (item) {
         row.dataset.count = String(item.count);
+        row.dataset.price = String(item.price);
+        row.querySelector("[data-unit-price]").textContent = `${money(big(item.price))} за предмет`;
         const lineTotal = row.querySelector("[data-line-total]");
         if (lineTotal) lineTotal.textContent = money(big(item.price) * big(item.count));
         return;
@@ -212,12 +215,19 @@
     }
   };
 
-  const failureMessage = (form, status) => {
+  const failureMessage = (form, status, code) => {
     switch (status) {
       case 400: return { text: `Не удалось принять количество. Введите число от 0 до ${form.dataset.max}.` };
       case 403: return { text: "Страница устарела. Обновите её и повторите.", reload: true };
       case 404: return { text: "Эта вещь уже недоступна. Обновите страницу.", reload: true };
-      case 409: return { text: "Корзина не приняла изменение: достигнут предел количества или числа позиций. Количество прежнее." };
+      case 409:
+        if (code === "CHECKOUT_IN_PROGRESS") {
+          return { text: "Корзина заблокирована на время проверки платежа. Изменение не применено.", cart: true };
+        }
+        if (code === "QUANTITY_LIMIT" || code === "CART_LIMIT") {
+          return { text: "Корзина не приняла изменение: достигнут предел количества или числа позиций. Количество прежнее." };
+        }
+        return { text: "Корзина изменилась. Обновите страницу и проверьте её состав.", reload: true };
       default: return { text: "Не удалось подтвердить изменение. Обновите страницу, чтобы увидеть актуальную корзину.", reload: true };
     }
   };
@@ -225,8 +235,15 @@
   const reportFailed = (form, error) => {
     console.warn("Cart update failed:", error);
     syncInput(form);
-    const message = failureMessage(form, error instanceof RequestError ? error.status : 0);
-    say(form, message.text, { error: true, reload: message.reload });
+    const message = failureMessage(form, error instanceof RequestError ? error.status : 0, error.code);
+    const content = [message.text];
+    if (message.cart) {
+      const link = document.createElement("a");
+      link.href = form.dataset.endpoint;
+      link.textContent = "Проверить платёж в корзине";
+      content.push(" ", link);
+    }
+    say(form, content, { error: true, reload: message.reload });
   };
 
   const perform = async ({ form, action, quantity }) => {
@@ -245,7 +262,10 @@
         headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
         body,
       });
-      if (!response.ok) throw new RequestError(response.status);
+      if (!response.ok) {
+        const problem = await response.json().catch(() => null);
+        throw new RequestError(response.status, problem?.code);
+      }
       if (response.redirected || !(response.headers.get("content-type") ?? "").includes("json")) {
         // Сервер применил изменение, но ответил страницей: актуальное состояние покажет перезагрузка.
         location.reload();

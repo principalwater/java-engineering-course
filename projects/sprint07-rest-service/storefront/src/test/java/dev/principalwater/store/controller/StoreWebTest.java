@@ -175,6 +175,13 @@ class StoreWebTest extends TestBase {
                     assertTrue(html.contains("Order not found"));
                     assertTrue(html.contains("/cart/items"));
                 });
+        when(carts.changeWithReceipt(CART_ID, 7, CartAction.PLUS, null))
+                .thenReturn(Mono.error(new StoreException(StoreError.CHECKOUT_IN_PROGRESS)));
+        web.mutateWith(csrf()).post().uri("/cart/items").accept(MediaType.APPLICATION_JSON)
+                .body(BodyInserters.fromFormData("id", "7").with("action", "PLUS"))
+                .exchange().expectStatus().isEqualTo(409).expectBody()
+                .jsonPath("$.code").isEqualTo("CHECKOUT_IN_PROGRESS")
+                .jsonPath("$.detail").isEqualTo(StoreError.CHECKOUT_IN_PROGRESS.getMessage());
     }
 
     @ParameterizedTest

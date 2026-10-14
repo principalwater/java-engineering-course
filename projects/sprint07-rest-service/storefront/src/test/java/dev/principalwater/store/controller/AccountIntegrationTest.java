@@ -254,7 +254,10 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
         PaymentsStub.funds(account.id(), 125_000);
         assertFalse(disabledCheckout(buyer.get("/cart/items", HttpStatus.OK)));
         PaymentsStub.LOSE_RESPONSE.set(true);
-        buyer.post("/buy", Map.of(), true, HttpStatus.SERVICE_UNAVAILABLE);
+        String uncertain = buyer.post("/buy", Map.of(), true, HttpStatus.SERVICE_UNAVAILABLE).getResponseBody();
+        assertNotNull(uncertain);
+        assertTrue(uncertain.contains("Деньги могли быть списаны"));
+        assertTrue(uncertain.contains("Проверить платёж"));
         String pending = buyer.get("/cart/items", HttpStatus.OK);
         assertFalse(disabledCheckout(pending));
         assertTrue(checkoutForm(pending).contains("Проверить платёж"));

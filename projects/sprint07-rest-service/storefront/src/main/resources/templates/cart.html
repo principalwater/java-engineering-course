@@ -15,7 +15,7 @@
 <a class="cart-art" th:href="@{/items/{id}(id=${item.id})}" tabindex="-1" aria-hidden="true"><img th:src="@{${item.imgPath}}" alt="" width="160" height="120"></a>
 <div class="cart-info">
 <a class="item-title" th:href="@{/items/{id}(id=${item.id})}" th:text="${item.title}"></a>
-<p class="muted" th:text="|${@display.money(item.price)} за предмет|"></p>
+<p class="muted" data-unit-price th:text="|${@display.money(item.price)} за предмет|"></p>
 <div th:replace="~{fragments :: quantity(${item}, @{/cart/items}, ${null})}"></div>
 </div>
 <p class="line-total" data-line-total th:text="${@display.money(item.total)}"></p>

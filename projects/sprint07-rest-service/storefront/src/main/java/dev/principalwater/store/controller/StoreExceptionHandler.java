@@ -25,7 +25,7 @@ public class StoreExceptionHandler {
 
     @ExceptionHandler(StoreException.class)
     public Object domain(StoreException exception, ServerWebExchange exchange) {
-        return error(exception.getError().getStatus(), exception.getMessage(), exchange);
+        return error(exception.getError().getStatus(), exception.getMessage(), exception.getError(), exchange);
     }
 
     @ExceptionHandler({ServerWebInputException.class, HandlerMethodValidationException.class})
@@ -55,11 +55,23 @@ public class StoreExceptionHandler {
     }
 
     private Object error(HttpStatus status, String message, ServerWebExchange exchange) {
+        return error(status, message, null, exchange);
+    }
+
+    private Object error(HttpStatus status, String message, StoreError code, ServerWebExchange exchange) {
         if (exchange.getRequest().getHeaders().getAccept().stream().anyMatch(MediaType.APPLICATION_JSON::equalsTypeAndSubtype)) {
-            return ResponseEntity.status(status).body(ProblemDetail.forStatusAndDetail(status, message));
+            var problem = ProblemDetail.forStatusAndDetail(status, message);
+            if (code != null) {
+                problem.setProperty("code", code.name());
+            }
+            return ResponseEntity.status(status).body(problem);
         }
         // Общий путь WebFlux позволяет ошибкам фильтра CSRF и контроллеров использовать один шаблон.
-        return Rendering.view("error/error").status(status).modelAttribute("status", status.value())
-                .modelAttribute("message", message).build();
+        var view = Rendering.view("error/error").status(status).modelAttribute("status", status.value())
+                .modelAttribute("message", message);
+        if (code != null) {
+            view.modelAttribute("storeError", code);
+        }
+        return view.build();
     }
 }

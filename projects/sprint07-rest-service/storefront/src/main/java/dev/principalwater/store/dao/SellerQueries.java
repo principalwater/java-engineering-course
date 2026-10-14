@@ -1,6 +1,7 @@
 package dev.principalwater.store.dao;
 
 import dev.principalwater.store.model.SellerView;
+import dev.principalwater.store.util.ExactNumbers;
 import java.time.OffsetDateTime;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Repository;
@@ -23,9 +24,11 @@ public class SellerQueries {
                 FROM purchase_orders o WHERE o.status = 'PAID'
                 """).map(row -> {
                     var last = row.get("last_order", OffsetDateTime.class);
-                    return new SellerView(((Number) row.get("paid_orders")).longValue(),
-                            ((Number) row.get("paid_value")).longValue(), ((Number) row.get("units")).longValue(),
-                            last == null ? null : last.toInstant(), ((Number) row.get("pending_payments")).longValue());
+                    return new SellerView(ExactNumbers.longValueExact((Number) row.get("paid_orders")),
+                            ExactNumbers.longValueExact((Number) row.get("paid_value")),
+                            ExactNumbers.longValueExact((Number) row.get("units")),
+                            last == null ? null : last.toInstant(),
+                            ExactNumbers.longValueExact((Number) row.get("pending_payments")));
                 }).one();
     }
 }

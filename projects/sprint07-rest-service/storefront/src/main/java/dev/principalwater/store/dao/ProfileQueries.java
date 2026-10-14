@@ -1,6 +1,7 @@
 package dev.principalwater.store.dao;
 
 import dev.principalwater.store.model.ProfileView;
+import dev.principalwater.store.util.ExactNumbers;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 import org.springframework.r2dbc.core.DatabaseClient;
@@ -27,10 +28,12 @@ public class ProfileQueries {
                 FROM purchase_orders o WHERE o.cart_id = :cartId
                 """).bind("cartId", cartId).map((row, metadata) -> {
                     var last = row.get("last_order", OffsetDateTime.class);
-                    return new ProfileView(((Number) row.get("total_orders")).longValue(),
-                            ((Number) row.get("order_value")).longValue(), ((Number) row.get("units")).longValue(),
-                            last == null ? null : last.toInstant(), ((Number) row.get("paid_value")).longValue(),
-                            ((Number) row.get("paid_orders")).longValue(), ((Number) row.get("pending_payments")).longValue());
+                    return new ProfileView(ExactNumbers.longValueExact((Number) row.get("total_orders")),
+                            ExactNumbers.longValueExact((Number) row.get("order_value")),
+                            ExactNumbers.longValueExact((Number) row.get("units")),
+                            last == null ? null : last.toInstant(), ExactNumbers.longValueExact((Number) row.get("paid_value")),
+                            ExactNumbers.longValueExact((Number) row.get("paid_orders")),
+                            ExactNumbers.longValueExact((Number) row.get("pending_payments")));
                 }).one();
     }
 }

@@ -3,9 +3,17 @@ package dev.principalwater.store.cache;
 import dev.principalwater.store.dao.CatalogQueries;
 import dev.principalwater.store.dao.ProductRepository;
 import dev.principalwater.store.dao.StoreIdentityRepository;
-import dev.principalwater.store.model.*;
-
-import java.util.*;
+import dev.principalwater.store.model.CatalogQuery;
+import dev.principalwater.store.model.Product;
+import dev.principalwater.store.model.StoreError;
+import dev.principalwater.store.model.StoreException;
+import dev.principalwater.store.model.StoreIdentity;
+import dev.principalwater.store.model.StoreLimits;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 

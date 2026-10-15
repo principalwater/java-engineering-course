@@ -2,8 +2,12 @@ package dev.principalwater.payments.service;
 
 import dev.principalwater.payments.config.PaymentProperties;
 import dev.principalwater.payments.dao.PaymentRepository;
-import dev.principalwater.payments.model.*;
-
+import dev.principalwater.payments.model.DebitCommand;
+import dev.principalwater.payments.model.PaymentDecision;
+import dev.principalwater.payments.model.PaymentError;
+import dev.principalwater.payments.model.PaymentException;
+import dev.principalwater.payments.model.PaymentResult;
+import dev.principalwater.payments.model.PaymentStatus;
 import java.time.Duration;
 import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;

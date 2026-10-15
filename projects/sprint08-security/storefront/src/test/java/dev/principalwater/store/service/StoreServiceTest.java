@@ -1,16 +1,25 @@
 package dev.principalwater.store.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.principalwater.store.StoreIntegrationTestBase;
 import dev.principalwater.store.PaymentsStub;
+import dev.principalwater.store.StoreIntegrationTestBase;
 import dev.principalwater.store.dao.CheckoutIntentRepository;
 import dev.principalwater.store.dao.OrderRepository;
 import dev.principalwater.store.dao.OutboxRepository;
 import dev.principalwater.store.dao.ProductRepository;
-import dev.principalwater.store.model.*;
+import dev.principalwater.store.model.CartAction;
+import dev.principalwater.store.model.CartView;
+import dev.principalwater.store.model.CatalogQuery;
+import dev.principalwater.store.model.OrderHistoryPage;
+import dev.principalwater.store.model.OrderLineView;
+import dev.principalwater.store.model.OrderStatus;
+import dev.principalwater.store.model.OrderView;
+import dev.principalwater.store.model.ProductInput;
+import dev.principalwater.store.model.SortMode;
+import dev.principalwater.store.model.StoreError;
+import dev.principalwater.store.model.StoreException;
 import dev.principalwater.store.payment.CheckoutIntent;
 import dev.principalwater.store.payment.PaymentRecovery;
-
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,7 +42,12 @@ import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 
 import static dev.principalwater.store.ProductFixtures.productInput;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class StoreServiceTest extends StoreIntegrationTestBase {
     @Autowired private CatalogImportService importer;

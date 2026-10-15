@@ -1,10 +1,20 @@
 package dev.principalwater.store.service;
 
 import dev.principalwater.store.cache.CatalogReads;
-import dev.principalwater.store.dao.*;
-
-import dev.principalwater.store.model.*;
-
+import dev.principalwater.store.dao.CartLineRepository;
+import dev.principalwater.store.dao.CartQueries;
+import dev.principalwater.store.dao.CartRepository;
+import dev.principalwater.store.dao.CheckoutIntentRepository;
+import dev.principalwater.store.dao.ProductRepository;
+import dev.principalwater.store.model.CartAction;
+import dev.principalwater.store.model.CartChange;
+import dev.principalwater.store.model.CartLine;
+import dev.principalwater.store.model.CartView;
+import dev.principalwater.store.model.ItemView;
+import dev.principalwater.store.model.Product;
+import dev.principalwater.store.model.StoreError;
+import dev.principalwater.store.model.StoreException;
+import dev.principalwater.store.model.StoreLimits;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;

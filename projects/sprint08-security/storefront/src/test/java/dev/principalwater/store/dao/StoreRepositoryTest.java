@@ -1,9 +1,17 @@
 package dev.principalwater.store.dao;
 
 import dev.principalwater.store.DatabaseTestBase;
-import dev.principalwater.store.model.*;
+import dev.principalwater.store.model.AnalyticsOutbox;
+import dev.principalwater.store.model.CartItem;
+import dev.principalwater.store.model.ImageAsset;
+import dev.principalwater.store.model.OrderLine;
+import dev.principalwater.store.model.OrderStatus;
+import dev.principalwater.store.model.OrderView;
+import dev.principalwater.store.model.Product;
+import dev.principalwater.store.model.ProductInput;
+import dev.principalwater.store.model.PurchaseOrder;
+import dev.principalwater.store.model.ShoppingCart;
 import dev.principalwater.store.payment.CheckoutIntent;
-
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -11,8 +19,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.data.r2dbc.DataR2dbcTest;
-import reactor.test.StepVerifier;
 import reactor.core.publisher.Flux;
+import reactor.test.StepVerifier;
 
 import static dev.principalwater.store.ProductFixtures.productInput;
 import static org.junit.jupiter.api.Assertions.assertEquals;

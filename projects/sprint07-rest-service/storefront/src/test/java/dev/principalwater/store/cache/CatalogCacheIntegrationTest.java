@@ -165,7 +165,7 @@ class CatalogCacheIntegrationTest extends DatabaseTestBase {
             assertTrue(ttl.isPositive() && ttl.compareTo(properties.ttl()) <= 0);
             assertTrue(await(redis.expire(key, Duration.ofMillis(1))));
             // Redis использует реальные часы; ускоряем expiry серверной командой и ждём наблюдаемого отсутствия.
-            StepVerifier.create(Flux.interval(Duration.ofMillis(10)).concatMap(tick -> redis.hasKey(key))
+            StepVerifier.create(redis.hasKey(key).repeatWhen(completed -> completed.delayElements(Duration.ofMillis(10)))
                     .filter(present -> !present).next()).expectNext(false).expectComplete().verify(TIMEOUT);
         }
         assertEquals(100, await(reads.product(alpha)).price());

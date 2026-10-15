@@ -122,7 +122,7 @@ jobs:
     timeout-minutes: 20
     services:
       redis:
-        image: public.ecr.aws/docker/library/redis@sha256:fbdbaea47b9ae4ecc2082ecdb4e1cea81e32176ffb1dcf643d422ad07427e5d9
+        image: redis@sha256:fbdbaea47b9ae4ecc2082ecdb4e1cea81e32176ffb1dcf643d422ad07427e5d9
         ports:
           - 6379/tcp
         options: --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 2s --health-retries 20

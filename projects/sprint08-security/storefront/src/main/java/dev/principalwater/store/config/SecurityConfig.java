@@ -2,18 +2,15 @@ package dev.principalwater.store.config;
 
 import dev.principalwater.store.model.AccountRules;
 import dev.principalwater.store.service.AccountService;
+import java.net.URI;
+import java.util.Set;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseCookie;
-import org.springframework.security.web.server.DelegatingServerAuthenticationEntryPoint;
-import org.springframework.security.web.server.authentication.HttpStatusServerEntryPoint;
-import org.springframework.security.web.server.authentication.RedirectServerAuthenticationEntryPoint;
-import org.springframework.security.web.server.util.matcher.MediaTypeServerWebExchangeMatcher;
-import java.util.Set;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.ReactiveAuthenticationManager;
 import org.springframework.security.authentication.UserDetailsRepositoryReactiveAuthenticationManager;
@@ -21,7 +18,10 @@ import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.core.CredentialsContainer;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.server.DelegatingServerAuthenticationEntryPoint;
 import org.springframework.security.web.server.SecurityWebFilterChain;
+import org.springframework.security.web.server.authentication.HttpStatusServerEntryPoint;
+import org.springframework.security.web.server.authentication.RedirectServerAuthenticationEntryPoint;
 import org.springframework.security.web.server.authentication.RedirectServerAuthenticationSuccessHandler;
 import org.springframework.security.web.server.authentication.logout.DelegatingServerLogoutHandler;
 import org.springframework.security.web.server.authentication.logout.RedirectServerLogoutSuccessHandler;
@@ -30,12 +30,11 @@ import org.springframework.security.web.server.authentication.logout.WebSessionS
 import org.springframework.security.web.server.context.WebSessionServerSecurityContextRepository;
 import org.springframework.security.web.server.csrf.XorServerCsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.server.savedrequest.NoOpServerRequestCache;
+import org.springframework.security.web.server.util.matcher.MediaTypeServerWebExchangeMatcher;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
-
-import java.net.URI;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.REACTIVE)
@@ -89,7 +88,13 @@ public class SecurityConfig {
         var entryPoint = new DelegatingServerAuthenticationEntryPoint(
                 new DelegatingServerAuthenticationEntryPoint.DelegateEntry(json,
                         new HttpStatusServerEntryPoint(HttpStatus.UNAUTHORIZED)));
-        entryPoint.setDefaultEntryPoint(new RedirectServerAuthenticationEntryPoint(LOGIN_PAGE));
+        var requestCache = NoOpServerRequestCache.getInstance();
+        var loginEntry = new RedirectServerAuthenticationEntryPoint(LOGIN_PAGE);
+        var signedIn = new RedirectServerAuthenticationSuccessHandler("/profile");
+        // У custom redirect handlers собственный request cache: общий DSL его не перенастраивает.
+        loginEntry.setRequestCache(requestCache);
+        signedIn.setRequestCache(requestCache);
+        entryPoint.setDefaultEntryPoint(loginEntry);
         return http.authorizeExchange(access -> access
                         .pathMatchers("/account/seller", "/account/seller/**", "/catalog", "/catalog/**", "/catalog-demo.json").hasRole("SELLER")
                         .pathMatchers(HttpMethod.GET, "/", "/items", "/items/*", LOGIN_PAGE, "/account/register",
@@ -102,11 +107,11 @@ public class SecurityConfig {
                         .anyExchange().denyAll())
                 .exceptionHandling(errors -> errors.authenticationEntryPoint(entryPoint))
                 .securityContextRepository(context)
-                .requestCache(cache -> cache.requestCache(NoOpServerRequestCache.getInstance()))
+                .requestCache(cache -> cache.requestCache(requestCache))
                 .httpBasic(ServerHttpSecurity.HttpBasicSpec::disable)
                 .formLogin(login -> login.loginPage(LOGIN_PAGE).authenticationManager(authentication)
                         .securityContextRepository(context)
-                        .authenticationSuccessHandler(new RedirectServerAuthenticationSuccessHandler("/profile")))
+                        .authenticationSuccessHandler(signedIn))
                 .logout(logout -> logout.logoutUrl("/account/logout")
                         .logoutHandler(new DelegatingServerLogoutHandler(clearContext, new WebSessionServerLogoutHandler(),
                                 (web, principal) -> {

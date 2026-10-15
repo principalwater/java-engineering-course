@@ -4,8 +4,8 @@ import dev.principalwater.store.PaymentsStub;
 import dev.principalwater.store.StoreIntegrationTestBase;
 import dev.principalwater.store.dao.CartRepository;
 import dev.principalwater.store.dao.StoreUserRepository;
-import dev.principalwater.store.model.StoreUser;
 import dev.principalwater.store.model.AccountRole;
+import dev.principalwater.store.model.StoreUser;
 import dev.principalwater.store.service.CatalogImportService;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
@@ -25,7 +25,11 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.web.reactive.function.BodyInserters;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AccountIntegrationTest extends StoreIntegrationTestBase {
     private static final String PASSWORD = "correct horse account pass";
@@ -86,6 +90,7 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
         forged.cookies.put("storefront-cart", account.cartId().toString());
         forged.get(orderPath, HttpStatus.FOUND);
         var otherAccount = new Browser();
+        otherAccount.get(orderPath, HttpStatus.FOUND);
         otherAccount.get("/account/register", HttpStatus.OK);
         register(otherAccount, "bob.shop", "Борис", HttpStatus.SEE_OTHER);
         otherAccount.get("/account/login", HttpStatus.OK);

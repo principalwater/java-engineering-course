@@ -9,8 +9,8 @@
 <div class="notice" role="status" th:if="${loggedOut}">Вы вышли из аккаунта. Сессия этого браузера завершена.</div>
 <p class="account-error" role="alert" th:if="${loginError}">Не удалось войти. Проверьте логин и пароль.</p>
 <form class="account-form" method="post" th:action="@{/account/login}">
-<div class="account-field"><label for="username">Логин</label><input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required th:pattern="${usernamePattern}" th:maxlength="${usernameMaxLength}" aria-describedby="login-hint"><p id="login-hint">Логин не зависит от регистра букв.</p></div>
-<div class="account-field"><label for="password">Пароль</label><input id="password" name="password" type="password" autocomplete="current-password" required th:minlength="${passwordMinLength}" th:maxlength="${passwordMaxLength}"></div>
+<div class="account-field"><label for="username">Логин</label><input id="username" name="username" inputmode="text" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required th:pattern="${usernamePattern}" th:maxlength="${usernameMaxLength}" aria-describedby="login-hint"><p id="login-hint">Логин не зависит от регистра букв.</p></div>
+<div class="account-field"><label for="password">Пароль</label><div class="password-field"><input id="password" name="password" type="password" autocomplete="current-password" required th:minlength="${passwordMinLength}" th:maxlength="${passwordMaxLength}"><button class="password-toggle" type="button" data-password-toggle aria-controls="password" aria-pressed="false" hidden>Показать пароль</button></div></div>
 <button class="button primary" type="submit">Войти</button>
 </form>
 <p class="account-switch">Первый визит? <a th:href="@{/account/register}">Создать аккаунт</a></p>

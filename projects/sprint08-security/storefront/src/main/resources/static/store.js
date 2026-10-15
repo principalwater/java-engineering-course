@@ -216,8 +216,16 @@
     }
   };
 
+  const signInLink = () => {
+    const link = document.createElement("a");
+    link.href = "/account/login";
+    link.textContent = "Войти в аккаунт";
+    return link;
+  };
+
   const failureMessage = (form, status, code) => {
     switch (status) {
+      case 401: return { text: "Сессия завершена. Войдите, чтобы продолжить покупки.", login: true };
       case 400: return { text: `Не удалось принять количество. Введите число от 0 до ${form.dataset.max}.` };
       case 403: return { text: "Страница устарела. Обновите её и повторите.", reload: true };
       case 404: return { text: "Эта вещь уже недоступна. Обновите страницу.", reload: true };
@@ -238,6 +246,7 @@
     syncInput(form);
     const message = failureMessage(form, error instanceof RequestError ? error.status : 0, error.code);
     const content = [message.text];
+    if (message.login) content.push(" ", signInLink());
     if (message.cart) {
       const link = document.createElement("a");
       link.href = form.dataset.endpoint;
@@ -451,7 +460,7 @@
           const response = await fetch(form.dataset.availability, {
             headers: { Accept: "application/json" }, credentials: "same-origin", cache: "no-store", signal: controller.signal,
           });
-          if (!response.ok) throw new Error(`Payment availability request failed with HTTP ${response.status}`);
+          if (!response.ok) throw new RequestError(response.status);
           const next = await response.json();
           if (!paymentStates.has(next?.status) || typeof next.canBuy !== "boolean" || typeof next.pending !== "boolean"
               || typeof next.message !== "string" || typeof next.balanceLabel !== "string" || typeof next.requiredLabel !== "string"
@@ -492,6 +501,9 @@
           message.textContent = payment.pending
             ? "Платёж пока не подтверждён. Проверьте его ещё раз: повторного списания не будет."
             : "Не удалось проверить баланс. Покупка недоступна. Нажмите «Обновить», чтобы повторить проверку.";
+          if (error instanceof RequestError && error.status === 401) {
+            message.replaceChildren("Сессия завершена. ", signInLink());
+          }
           message.classList.add("is-error");
           balance.textContent = "Не удалось проверить";
           console.warn("Payment availability refresh failed:", error);
@@ -554,6 +566,17 @@
   };
 
   const start = () => {
+    document.querySelectorAll("[data-password-toggle]").forEach(button => {
+      const input = document.getElementById(button.getAttribute("aria-controls"));
+      if (!input) return;
+      button.hidden = false;
+      button.addEventListener("click", () => {
+        const reveal = input.type === "password";
+        input.type = reveal ? "text" : "password";
+        button.setAttribute("aria-pressed", String(reveal));
+        button.textContent = reveal ? "Скрыть пароль" : "Показать пароль";
+      });
+    });
     document.getElementById("theme-switch")?.addEventListener("click", () => {
       storedTheme = isDark() ? "light" : "dark";
       applyTheme();

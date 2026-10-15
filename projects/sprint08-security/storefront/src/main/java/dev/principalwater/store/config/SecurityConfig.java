@@ -91,7 +91,7 @@ public class SecurityConfig {
                         new HttpStatusServerEntryPoint(HttpStatus.UNAUTHORIZED)));
         entryPoint.setDefaultEntryPoint(new RedirectServerAuthenticationEntryPoint(LOGIN_PAGE));
         return http.authorizeExchange(access -> access
-                        .pathMatchers("/account/seller", "/account/seller/**", "/catalog", "/catalog/**").hasRole("SELLER")
+                        .pathMatchers("/account/seller", "/account/seller/**", "/catalog", "/catalog/**", "/catalog-demo.json").hasRole("SELLER")
                         .pathMatchers(HttpMethod.GET, "/", "/items", "/items/*", LOGIN_PAGE, "/account/register",
                                 "/store.css", "/accounts.css", "/store.js", "/images/**",
                                 "/actuator/health", "/actuator/health/**").permitAll()

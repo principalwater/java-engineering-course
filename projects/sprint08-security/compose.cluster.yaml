@@ -1,4 +1,4 @@
-name: sprint07-reactive-cluster
+name: sprint08-reactive-cluster
 services:
   keeper:
     image: clickhouse/clickhouse-keeper:26.8-alpine@sha256:1c2360eb7dca6aa7ca561dd0bc2d72231f664972648d4d0b30aa5d3081a55184
@@ -136,8 +136,7 @@ services:
       STORE_ANALYTICS_URLS: http://ch-a1:8123,http://ch-a2:8123,http://ch-b1:8123,http://ch-b2:8123
       STORE_ANALYTICS_DISTRIBUTED: "true"
       STORE_ANALYTICS_INSERT_QUORUM: "2"
-      STORE_CART_COOKIE_NAME: storefront-sprint07-cluster-cart
-      SERVER_REACTIVE_SESSION_COOKIE_NAME: storefront-sprint07-cluster-session
+      SERVER_REACTIVE_SESSION_COOKIE_NAME: storefront-sprint08-cluster-session
       SPRING_CONFIG_IMPORT: configtree:/run/secrets/
     secrets:
       - source: analytics_writer_password
@@ -152,10 +151,16 @@ volumes:
   ch-b2-data:
 secrets:
   analytics_admin_password:
-    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/analytics_admin_password
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/analytics_admin_password
   analytics_writer_password:
-    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/analytics_writer_password
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/analytics_writer_password
   analytics_reader_password:
-    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/analytics_reader_password
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/analytics_reader_password
   analytics_cluster_secret:
-    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/analytics_cluster_secret
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/analytics_cluster_secret
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${STORE_NETWORK_SUBNET:-10.251.8.128/27}

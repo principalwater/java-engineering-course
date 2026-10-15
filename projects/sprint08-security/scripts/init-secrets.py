@@ -8,7 +8,7 @@ import stat
 import tempfile
 
 
-SECRET_NAMES = ("db_password", "payments_db_password", "payments_runtime_password", "payments_service_token", "redis_password", "seller_password",
+SECRET_NAMES = ("db_password", "payments_db_password", "payments_runtime_password", "oauth_client_secret", "authorization_db_password", "authorization_admin_password", "redis_password", "seller_password",
                 "analytics_admin_password", "analytics_writer_password", "analytics_reader_password", "analytics_cluster_secret")
 
 
@@ -56,6 +56,6 @@ def initialize(directory, repository):
 
 if __name__ == "__main__":
     repository = Path(__file__).resolve().parents[3]
-    directory = os.environ.get("STORE_SECRETS_DIR", Path.home() / ".config/java-engineering-course/sprint07")
+    directory = os.environ.get("STORE_SECRETS_DIR", Path.home() / ".config/java-engineering-course/sprint08")
     initialize(directory, repository)
     print("Local secrets are ready; existing values were preserved")

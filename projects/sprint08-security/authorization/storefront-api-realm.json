@@ -1,0 +1,56 @@
+{
+  "realm": "storefront-api",
+  "enabled": true,
+  "sslRequired": "none",
+  "accessTokenLifespan": 180,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "clientScopes": [
+    {
+      "name": "payments.read",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    },
+    {
+      "name": "payments.write",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "storefront",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${STOREFRONT_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [],
+      "optionalClientScopes": [
+        "payments.read",
+        "payments.write"
+      ],
+      "protocolMappers": [
+        {
+          "name": "payments-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "payments",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ]
+}

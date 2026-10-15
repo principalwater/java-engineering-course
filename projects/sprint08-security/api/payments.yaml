@@ -4,7 +4,7 @@ info:
   version: 1.0.0
   description: Точные суммы в копейках RUB. Списание и журнал атомарны; повтор ключа возвращает прежнее решение.
 servers:
-  - url: http://localhost:18097
+  - url: http://localhost:18098
 tags:
   - name: Payments
 paths:

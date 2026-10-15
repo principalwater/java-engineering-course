@@ -1,4 +1,5 @@
-name: sprint07-rest-service
+name: sprint08-security
+include: [compose.oauth.yaml]
 x-java: &java
   user: "${STORE_UID:-10001}:${STORE_GID:-10001}"
   healthcheck:
@@ -77,17 +78,19 @@ services:
       SPRING_CONFIG_IMPORT: configtree:/run/secrets/
       DB_URL: r2dbc:postgresql://store-db:5432/storefront
       DB_USER: storefront
+      SERVER_REACTIVE_SESSION_COOKIE_NAME: sprint08-postgresql-session
       STORE_PAYMENTS_URL: http://payments:8080
+      PAYMENTS_OAUTH_TOKEN_URI: http://authorization:8080/realms/storefront-api/protocol/openid-connect/token
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: '6379'
       SPRING_DATA_REDIS_USERNAME: storefront
-      STORE_CACHE_NAMESPACE: sprint07-compose-postgresql
+      STORE_CACHE_NAMESPACE: sprint08-compose-postgresql
     secrets:
       - {source: db_password, target: spring.r2dbc.password}
-      - {source: payments_service_token, target: store.payments.service-token}
+      - {source: oauth_client_secret, target: spring.security.oauth2.client.registration.payments.client-secret}
       - {source: redis_password, target: spring.data.redis.password}
       - {source: seller_password, target: store.seller.bootstrap-password}
-    ports: ['127.0.0.1:${WEB_PORT:-8087}:8080']
+    ports: ['127.0.0.1:${WEB_PORT:-8088}:8080']
     depends_on:
       store-db: {condition: service_healthy}
   payments:
@@ -102,10 +105,11 @@ services:
       PAYMENTS_DB_URL: r2dbc:postgresql://payments-db:5432/payments
       PAYMENTS_DB_USER: payments_runtime
       PAYMENTS_SQL_INIT_MODE: never
+      PAYMENTS_OAUTH_ISSUER: ${AUTH_PUBLIC_URL:-http://localhost:18381}/realms/storefront-api
+      PAYMENTS_OAUTH_JWK_SET_URI: http://authorization:8080/realms/storefront-api/protocol/openid-connect/certs
     secrets:
       - {source: payments_runtime_password, target: spring.r2dbc.password}
-      - {source: payments_service_token, target: payments.service-token}
-    ports: ['127.0.0.1:${PAYMENTS_PORT:-8097}:8080']
+    ports: ['127.0.0.1:${PAYMENTS_PORT:-8098}:8080']
     depends_on:
       payments-db: {condition: service_healthy}
 volumes:
@@ -113,16 +117,20 @@ volumes:
   payments-data:
 secrets:
   db_password:
-    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/db_password
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/db_password
   payments_db_password:
-    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/payments_db_password
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/payments_db_password
   payments_runtime_password:
-    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/payments_runtime_password
-  payments_service_token:
-    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/payments_service_token
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/payments_runtime_password
   redis_password:
-    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/redis_password
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/redis_password
   redis_users.acl:
-    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/redis_users.acl
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/redis_users.acl
   seller_password:
-    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/seller_password
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/seller_password
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${STORE_NETWORK_SUBNET:-10.251.8.64/27}

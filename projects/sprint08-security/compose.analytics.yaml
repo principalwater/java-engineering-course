@@ -40,8 +40,8 @@ volumes:
   analytics-data:
 secrets:
   analytics_admin_password:
-    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/analytics_admin_password
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/analytics_admin_password
   analytics_writer_password:
-    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/analytics_writer_password
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/analytics_writer_password
   analytics_reader_password:
-    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/analytics_reader_password
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/analytics_reader_password

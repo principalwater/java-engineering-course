@@ -33,6 +33,10 @@
 <p>Добавьте предметы в корзину и оформите первый заказ.</p>
 <a class="button primary" th:href="@{/items}">В коллекцию</a>
 </section>
+<nav class="pagination" aria-label="История заказов">
+<a class="button secondary" th:if="${param.cursor != null}" th:href="@{/orders(pageSize=${pageSize})}">К новым заказам</a>
+<a class="button secondary" th:if="${nextCursor != null}" th:href="@{/orders(pageSize=${pageSize},cursor=${nextCursor})}">Более ранние заказы</a>
+</nav>
 </main>
 <footer th:replace="~{fragments :: footer}"></footer>
 </body>

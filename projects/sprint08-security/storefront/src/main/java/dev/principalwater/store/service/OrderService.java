@@ -28,17 +28,22 @@ public class OrderService {
         this.intents = intents;
     }
 
-    public Mono<List<OrderView>> list(UUID cartId) {
-        return orders.findByCartIdOrderByCreatedAtDescIdDesc(cartId).collectList().flatMap(selected -> {
-            if (selected.isEmpty()) {
-                return Mono.just(List.of());
-            }
-            // Две выборки собирают снимки всех заказов без N+1 и без ORM-графа.
-            var ids = selected.stream().map(order -> order.id()).toList();
+    public Mono<OrderHistoryPage> history(UUID cartId, int pageSize, String cursor) {
+        if (!StoreLimits.PAGE_SIZES.contains(pageSize)) { throw new StoreException(StoreError.INVALID_PAGING); }
+        var before = OrderCursor.parse(cursor);
+        var window = before == null ? orders.history(cartId, pageSize + 1)
+                : orders.historyBefore(cartId, before.createdAt(), before.id(), pageSize + 1);
+        // Лишняя строка определяет next без COUNT/OFFSET; owner берётся из principal даже с подменённым cursor.
+        return window.collectList().flatMap(selected -> {
+            boolean hasNext = selected.size() > pageSize;
+            var page = List.copyOf(selected.subList(0, Math.min(pageSize, selected.size())));
+            String next = hasNext ? new OrderCursor(page.getLast().createdAt(), page.getLast().id()).encode() : null;
+            if (page.isEmpty()) { return Mono.just(new OrderHistoryPage(List.of(), null)); }
+            var ids = page.stream().map(PurchaseOrder::id).toList();
             return lines.findByOrderIdInOrderByOrderIdAscLineNumberAsc(ids).collectList().map(items -> {
                 var grouped = items.stream().collect(Collectors.groupingBy(OrderLine::orderId));
-                return selected.stream().map(order -> OrderView.from(order,
-                        grouped.getOrDefault(order.id(), List.of()))).toList();
+                return new OrderHistoryPage(page.stream().map(order -> OrderView.from(order,
+                        grouped.getOrDefault(order.id(), List.of()))).toList(), next);
             });
         });
     }

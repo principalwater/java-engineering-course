@@ -2,6 +2,7 @@ package dev.principalwater.store.controller;
 
 import dev.principalwater.store.service.OrderService;
 import dev.principalwater.store.payment.OrderPaymentView;
+import dev.principalwater.store.model.OrderHistoryPage;
 import org.springframework.web.bind.annotation.ResponseBody;
 import jakarta.validation.constraints.Positive;
 import java.util.UUID;
@@ -22,9 +23,13 @@ public class OrderController {
     }
 
     @GetMapping("/orders")
-    public Mono<String> orders(@RequestAttribute(CartIdentityFilter.ATTRIBUTE_NAME) UUID cartId, Model model) {
-        return orders.list(cartId).map(selected -> {
-            model.addAttribute("orders", selected);
+    public Mono<String> orders(@RequestAttribute(CartIdentityFilter.ATTRIBUTE_NAME) UUID cartId,
+                                @RequestParam(defaultValue = OrderHistoryPage.DEFAULT_PAGE_SIZE) int pageSize,
+                                @RequestParam(required = false) String cursor, Model model) {
+        return orders.history(cartId, pageSize, cursor).map(selected -> {
+            model.addAttribute("orders", selected.orders());
+            model.addAttribute("nextCursor", selected.nextCursor());
+            model.addAttribute("pageSize", pageSize);
             return "orders";
         });
     }

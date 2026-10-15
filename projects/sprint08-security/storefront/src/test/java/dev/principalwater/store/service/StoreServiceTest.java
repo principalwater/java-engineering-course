@@ -49,6 +49,30 @@ class StoreServiceTest extends StoreIntegrationTestBase {
     @Autowired private ObjectMapper json;
 
     @Test
+    void orderHistoryUsesStableOwnerScopedKeysetsEvenWhenTimestampsAreEqual() throws Exception {
+        importItems(productInput("history", "History", "Cursor fixture", 100));
+        long product = id("history");
+        UUID owner = createAccountCart();
+        UUID other = createAccountCart();
+        var created = new ArrayList<Long>();
+        for (int index = 0; index < 4; index++) {
+            await(carts.change(index == 1 ? other : owner, product, CartAction.PLUS));
+            created.add(await(buy(index == 1 ? other : owner)));
+        }
+        execute("UPDATE purchase_orders SET created_at = TIMESTAMP WITH TIME ZONE '2026-10-15 12:00:00+00'");
+        var first = await(orderService.history(owner, 2, null));
+        assertEquals(List.of(created.get(3), created.get(2)), first.orders().stream().map(OrderView::id).toList());
+        var last = await(orderService.history(owner, 2, first.nextCursor()));
+        assertEquals(List.of(created.getFirst()), last.orders().stream().map(OrderView::id).toList());
+        assertNull(last.nextCursor());
+        var foreign = await(orderService.history(other, 2, first.nextCursor()));
+        assertEquals(List.of(created.get(1)), foreign.orders().stream().map(OrderView::id).toList());
+        assertEquals(1, foreign.orders().getFirst().items().size());
+        assertThrows(StoreException.class, () -> orderService.history(owner, 3, null));
+        assertThrows(StoreException.class, () -> orderService.history(owner, 2, "malformed-cursor"));
+    }
+
+    @Test
     void catalogSupportsLiteralDescriptionSearchStableSortingAndPagination() throws Exception {
         importItems(productInput("alpha", "Alpha", "First", 20), productInput("beta", "Beta", "Second", 10),
                 productInput("gamma", "Beta", "C++ & blue", 10), productInput("zeta", "Zeta", "Literal 100%_! fragment", 30));
@@ -155,7 +179,7 @@ class StoreServiceTest extends StoreIntegrationTestBase {
             }).verify(TIMEOUT);
             StepVerifier.create(carts.view(cartId)).assertNext(view -> assertEquals(700, view.total()))
                     .expectComplete().verify(TIMEOUT);
-            StepVerifier.create(orderService.list(cartId)).assertNext(selected -> assertTrue(selected.isEmpty()))
+            StepVerifier.create(orderService.history(cartId, 100, null).map(OrderHistoryPage::orders)).assertNext(selected -> assertTrue(selected.isEmpty()))
                     .expectComplete().verify(TIMEOUT);
         } finally {
             execute("ALTER TABLE analytics_outbox DROP CONSTRAINT reject_delivery_test");
@@ -213,7 +237,7 @@ class StoreServiceTest extends StoreIntegrationTestBase {
                 || failure.getError() != StoreError.CHECKOUT_IN_PROGRESS && failure.getError() != StoreError.STALE_CHECKOUT)));
         long rejectedIncrement = results.stream().filter(signal -> signal.isOnError()
                 && ((StoreException) signal.getThrowable()).getError() == StoreError.CHECKOUT_IN_PROGRESS).count();
-        var purchased = await(orderService.list(cartId));
+        var purchased = await(orderService.history(cartId, 100, null).map(OrderHistoryPage::orders));
         int orderedQuantity = purchased.stream().flatMap(order -> order.items().stream()).mapToInt(OrderLineView::count).sum();
         assertEquals(2, orderedQuantity + await(carts.view(cartId)).itemCount() + rejectedIncrement);
     }
@@ -258,7 +282,7 @@ class StoreServiceTest extends StoreIntegrationTestBase {
         PaymentsStub.LOSE_RESPONSE.set(true);
         expectError(buy(cartId), StoreError.PAYMENT_PENDING);
         assertEquals(1, PaymentsStub.DEBITS.get());
-        assertTrue(await(orderService.list(cartId)).isEmpty());
+        assertTrue(await(orderService.history(cartId, 100, null).map(OrderHistoryPage::orders)).isEmpty());
         assertTrue(await(checkout.availability(cartId)).getPending());
         expectError(carts.change(cartId, productId, CartAction.PLUS), StoreError.CHECKOUT_IN_PROGRESS);
         // Импорт меняет текущую цену; повтор оплачивает прежний SQL-снимок, а не Redis или новую цену.
@@ -306,7 +330,7 @@ class StoreServiceTest extends StoreIntegrationTestBase {
         for (var intent : blocked) {
             assertEquals(CheckoutIntent.Status.PREPARED, await(intents.findById(intent.id())).status());
             assertEquals(700, await(carts.view(intent.cartId())).total());
-            assertTrue(await(orderService.list(intent.cartId())).isEmpty());
+            assertTrue(await(orderService.history(intent.cartId(), 100, null).map(OrderHistoryPage::orders)).isEmpty());
         }
     }
 
@@ -320,13 +344,13 @@ class StoreServiceTest extends StoreIntegrationTestBase {
         assertFalse(await(checkout.availability(cartId)).getCanBuy());
         expectError(buy(cartId), StoreError.INSUFFICIENT_FUNDS);
         assertEquals(0, PaymentsStub.DEBITS.get());
-        assertTrue(await(orderService.list(cartId)).isEmpty());
+        assertTrue(await(orderService.history(cartId, 100, null).map(OrderHistoryPage::orders)).isEmpty());
         // Окончательный отказ снимает блокировку корзины; новый checkout получает новый ключ.
         await(carts.change(cartId, productId, CartAction.SET, 2));
         PaymentsStub.UNAVAILABLE.set(true);
         assertFalse(await(checkout.availability(cartId)).getCanBuy());
         expectError(buy(cartId), StoreError.PAYMENT_PENDING);
-        assertTrue(await(orderService.list(cartId)).isEmpty());
+        assertTrue(await(orderService.history(cartId, 100, null).map(OrderHistoryPage::orders)).isEmpty());
         assertEquals(2, await(carts.view(cartId)).itemCount());
     }
 
@@ -349,7 +373,7 @@ class StoreServiceTest extends StoreIntegrationTestBase {
         // Даже свежий key вместе со старой суммой SSR-формы не разрешает невидимое покупателю повышение цены.
         expectError(checkout.buy(cartId, afterImport, 140000), StoreError.STALE_CHECKOUT);
         assertEquals(1, PaymentsStub.DEBITS.get());
-        assertEquals(1, await(orderService.list(cartId)).size());
+        assertEquals(1, await(orderService.history(cartId, 100, null).map(OrderHistoryPage::orders)).size());
     }
 
     static Stream<String> invalidCatalogItems() {

@@ -103,7 +103,7 @@ class StoreWebTest extends TestBase {
         var line = new OrderLineView(7, "test", "Keyboard", "/images/keyboard.svg", 2500, 2);
         var purchasedAt = Instant.parse("2026-10-12T10:00:00Z");
         var order = new OrderView(42, purchasedAt, List.of(line), 5000, OrderStatus.PAID, UUID.randomUUID());
-        when(orders.list(CART_ID)).thenReturn(Mono.just(List.of(order)));
+        when(orders.history(CART_ID, 20, null)).thenReturn(Mono.just(new OrderHistoryPage(List.of(order), null)));
         when(orders.get(42, CART_ID)).thenReturn(Mono.just(order));
         when(orders.profile(CART_ID)).thenReturn(Mono.just(new ProfileView(1, 5000, 2, purchasedAt, 5000, 1, 0)));
 

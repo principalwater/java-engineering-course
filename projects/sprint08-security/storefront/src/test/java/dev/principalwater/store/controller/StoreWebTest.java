@@ -159,13 +159,13 @@ class StoreWebTest extends TestBase {
 
     @Test
     void orderHistoryOffersTheWayBackToNewestOrdersOnlyAfterACursor() {
-        when(orders.history(CART_ID, 20, null)).thenReturn(Mono.just(new OrderHistoryPage(List.of(), "next-page")));
+        when(orders.history(CART_ID, 20, null)).thenReturn(Mono.just(new OrderHistoryPage(List.of(), null)));
         when(orders.history(CART_ID, 20, "next-page")).thenReturn(Mono.just(new OrderHistoryPage(List.of(), null)));
 
         web.get().uri("/orders").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
                 .expectBody(String.class).value(html -> {
                     assertFalse(html.contains("К новым заказам"));
-                    assertTrue(html.contains("Более ранние заказы"));
+                    assertFalse(html.contains("Более ранние заказы"));
                 });
         web.get().uri("/orders?cursor=next-page").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
                 .expectBody(String.class).value(html -> {

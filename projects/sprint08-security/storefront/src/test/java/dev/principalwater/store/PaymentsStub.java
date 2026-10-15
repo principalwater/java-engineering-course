@@ -2,6 +2,9 @@ package dev.principalwater.store;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -11,6 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import reactor.core.publisher.Mono;
 import reactor.netty.DisposableServer;
 import reactor.netty.http.server.HttpServer;
+import reactor.netty.http.server.HttpServerRequest;
 
 /** Реальный HTTP fixture сохраняет списание даже при потере ответа, как независимый сервис. */
 public final class PaymentsStub {
@@ -30,8 +34,8 @@ public final class PaymentsStub {
             .post("/oauth/token", (request, response) -> request.receive().aggregate().asString().flatMap(body -> {
                 TOKEN_REQUESTS.incrementAndGet();
                 if (TOKEN_UNAVAILABLE.get()) { return response.status(503).send().then(); }
-                String expected = "Basic " + java.util.Base64.getEncoder().encodeToString(
-                        "storefront:fixture-client-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                String expected = "Basic " + Base64.getEncoder().encodeToString(
+                        "storefront:fixture-client-secret".getBytes(StandardCharsets.UTF_8));
                 if (!expected.equals(request.requestHeaders().get("Authorization"))
                         || !body.contains("grant_type=client_credentials")) {
                     return response.status(401).send().then();
@@ -67,7 +71,7 @@ public final class PaymentsStub {
         TOKEN_REQUESTS.set(0); API_REQUESTS.set(0); TOKEN_UNAVAILABLE.set(false); REJECT_TOKEN.set(false);
         DEBITS.set(0); UNAVAILABLE.set(false); LOSE_RESPONSE.set(false);
     }
-    private static boolean authorized(reactor.netty.http.server.HttpServerRequest request) {
+    private static boolean authorized(HttpServerRequest request) {
         return ("Bearer " + ACCESS_TOKEN).equals(request.requestHeaders().get("Authorization"));
     }
     private static synchronized String apply(String key, String body) {
@@ -82,7 +86,7 @@ public final class PaymentsStub {
                 return JSON.writeValueAsString(Map.of("paymentId", UUID.randomUUID(), "accountId", account,
                         "referenceId", request.get("referenceId").asText(), "amountMinor", amount,
                         "balanceMinor", balance(account), "currency", "RUB", "status", paid ? "SUCCEEDED" : "DECLINED"));
-            } catch (java.io.IOException failure) { throw new IllegalArgumentException(failure); }
+            } catch (IOException failure) { throw new IllegalArgumentException(failure); }
         });
     }
 }

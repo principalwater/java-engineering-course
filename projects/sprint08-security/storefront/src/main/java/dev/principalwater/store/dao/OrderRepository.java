@@ -1,10 +1,10 @@
 package dev.principalwater.store.dao;
 
 import dev.principalwater.store.model.PurchaseOrder;
-import java.util.Collection;
 import java.time.Instant;
-import org.springframework.data.r2dbc.repository.Query;
+import java.util.Collection;
 import java.util.UUID;
+import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;

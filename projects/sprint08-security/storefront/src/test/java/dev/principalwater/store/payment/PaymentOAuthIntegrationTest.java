@@ -42,7 +42,7 @@ class PaymentOAuthIntegrationTest extends StoreIntegrationTestBase {
     }
 
     @Test
-    void rejectedTokenIsEvictedWithoutAnAutomaticFinancialRetry() {
+    void rejectedTokenIsEvictedWithoutAnAutomaticRetryOfTheBalanceRead() {
         await(payments.balance(UUID.randomUUID()));
         PaymentsStub.REJECT_TOKEN.set(true);
         StepVerifier.create(payments.balance(UUID.randomUUID()))

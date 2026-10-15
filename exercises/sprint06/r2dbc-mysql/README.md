@@ -6,7 +6,7 @@
 
 ## Описание
 
-Java 21, Spring Boot 3.4.13, Maven 3.9.16. Версии из Boot dependency management: io.asyncer:r2dbc-mysql 1.3.2, Testcontainers 1.20.6. MySQL 8.4 зафиксирован digest; публичное зеркало Docker Official Images в Amazon ECR сохраняет тот же образ. Локальный прогон выполнен на ARM64 через OrbStack.
+Java 21, Spring Boot 3.4.13, Maven 3.9.16. Версии из Boot dependency management: io.asyncer:r2dbc-mysql 1.3.2, Testcontainers 1.20.6. MySQL 8.4 загружается из Docker Hub с прежним digest, обходя лимит ECR в CI. Локальный прогон выполнен на ARM64 через OrbStack.
 
 ## Этапы выполнения
 

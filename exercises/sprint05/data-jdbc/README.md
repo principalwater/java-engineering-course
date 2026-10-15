@@ -20,7 +20,7 @@ MySQL создаёт BIGINT AUTO_INCREMENT, VARCHAR(255) и DECIMAL(15,2). CHECK
 
 Nested TestConfiguration предоставляет MySQLContainer как bean с ServiceConnection. Boot получает JDBC connection details и настраивает HikariDataSource. Контейнер запускается/закрывается вместе с Spring-контекстом, поэтому не завершается раньше повторно используемого контекста. H2, Mockito и ручное назначение Docker-портов не используются.
 
-Образ загружается из публичного зеркала Docker Official Images в Amazon ECR с тем же digest, чтобы CI не зависел от лимита анонимных загрузок Docker Hub. Совместимость с MySQL явно объявлена через `asCompatibleSubstituteFor("mysql")`; digest указан без tag.
+Образ Docker Official Images загружается из Docker Hub с прежним digest: прямой источник обходит лимит ECR в CI. Digest указан без tag.
 
 ### 3. Проверка CRUD
 

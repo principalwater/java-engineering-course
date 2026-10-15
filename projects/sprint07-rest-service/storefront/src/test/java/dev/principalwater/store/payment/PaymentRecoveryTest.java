@@ -44,7 +44,7 @@ class PaymentRecoveryTest extends ReactiveTestBase {
         }));
         var recovery = new PaymentRecovery(repository, checkout, clock);
 
-        StepVerifier.create(recovery.recover()).then(() -> {
+        StepVerifier.create(recovery.recover().then(Mono.defer(recovery::recover))).then(() -> {
             assertEquals(2, started.get(), "Recovery must keep two independent payments in flight");
             for (int index = 1; index < responses.size(); index++) {
                 assertEquals(Sinks.EmitResult.OK, responses.get(index).tryEmitValue((long) index));
@@ -55,6 +55,8 @@ class PaymentRecoveryTest extends ReactiveTestBase {
             verify(repository, times(1)).pending(any(), anyInt());
             responses.getFirst().tryEmitValue(1L);
         }).verifyComplete();
+        verify(repository, times(2)).pending(any(), anyInt());
+        assertEquals(16, started.get(), "Completion must release the guard before the next recovery subscribes");
     }
     @Test
     void stuckAttemptTimesOutAndTheNextScheduledRunIsNotBlocked() {
@@ -75,13 +77,14 @@ class PaymentRecoveryTest extends ReactiveTestBase {
     void stalledQueueReadTimesOutAndReleasesTheSchedulerForTheNextRun() {
         var repository = mock(CheckoutIntentRepository.class);
         var checkout = mock(CheckoutService.class);
-        when(repository.pending(any(), anyInt())).thenReturn(Flux.never(), Flux.empty());
+        when(repository.pending(any(), anyInt())).thenReturn(Flux.never(), Flux.never(), Flux.empty());
         var recovery = new PaymentRecovery(repository, checkout, Clock.systemUTC());
 
+        StepVerifier.create(recovery.recover()).thenCancel().verify();
         StepVerifier.withVirtualTime(recovery::recover).thenAwait(java.time.Duration.ofSeconds(15))
                 .expectComplete().verify(java.time.Duration.ofSeconds(1));
         StepVerifier.create(recovery.recover()).verifyComplete();
-        verify(repository, times(2)).pending(any(), anyInt());
+        verify(repository, times(3)).pending(any(), anyInt());
         verifyNoInteractions(checkout);
     }
 

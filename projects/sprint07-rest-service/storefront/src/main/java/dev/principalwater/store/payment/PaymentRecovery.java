@@ -30,15 +30,18 @@ public class PaymentRecovery {
     }
     @Scheduled(fixedDelayString = "${store.payments.recovery-delay:1000}")
     public Mono<Void> recover() {
-        return Mono.defer(() -> {
-            if (!running.compareAndSet(false, true)) { return Mono.empty(); }
+        // Eager cleanup освобождает guard до onComplete, включая немедленную подписку следующего прохода.
+        return Mono.using(() -> running.compareAndSet(false, true), acquired -> {
+            if (!acquired) { return Mono.empty(); }
             // Освобождаем SQL connection до HTTP; два worker оставляют запас пулам SQL(5)/HTTP(8).
             return intents.pending(clock.instant().minus(RETRY_DELAY), BATCH_SIZE).collectList()
                     .timeout(ATTEMPT_TIMEOUT).onErrorResume(failure -> {
                         LOG.warn("Payment recovery queue scan deferred", failure);
                         return Mono.empty();
                     }).flatMapMany(Flux::fromIterable).flatMap(this::attempt, CONCURRENCY, 1)
-                    .then().doFinally(signal -> running.set(false));
+                    .then();
+        }, acquired -> {
+            if (acquired) { running.set(false); }
         });
     }
 

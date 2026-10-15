@@ -42,7 +42,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("stack", choices=deploy.STACKS)
     parser.add_argument("--analytics", action="store_true")
-    parser.add_argument("--build-tool", choices=["gradle", "maven"], default="gradle")
     args = parser.parse_args()
     state = deploy.external_directory(Path(os.environ.get("COURSE_DEPLOY_STATE", Path.home() / ".local/state/java-engineering-course")) / args.stack)
     environment = {**os.environ, "TF_DATA_DIR": str(state / "providers")}
@@ -51,8 +50,6 @@ def main():
     deployed = json.loads(subprocess.check_output(tofu + ["output", "-json", "deployment"], env=environment))
     driver = [sys.executable, str(deploy.INFRA / "deploy.py"), args.stack]
     optional = ["--analytics"] if args.analytics else []
-    if args.stack.startswith("sprint07-"):
-        optional += ["--build-tool", args.build_tool]
 
     def plan(*options):
         with (state / "verification-plan.log").open("w") as log:

@@ -1,0 +1,74 @@
+name: sprint07-rest-service-memory
+x-java: &java
+  user: "${STORE_UID:-10001}:${STORE_GID:-10001}"
+  healthcheck:
+    test: [CMD, curl, -fsS, http://localhost:8080/actuator/health/readiness]
+    interval: 5s
+    timeout: 3s
+    retries: 30
+    start_period: 30s
+  restart: unless-stopped
+  stop_grace_period: 30s
+  mem_limit: 384m
+  memswap_limit: 384m
+  cpus: 1.0
+services:
+  redis:
+    image: redis@sha256:fbdbaea47b9ae4ecc2082ecdb4e1cea81e32176ffb1dcf643d422ad07427e5d9
+    user: "${STORE_UID:-10001}:${STORE_GID:-10001}"
+    entrypoint: [redis-server]
+    command: [--bind, 0.0.0.0, --protected-mode, 'yes', --aclfile, /run/secrets/redis_users.acl, --maxmemory, 32mb, --maxmemory-policy, allkeys-lfu, --save, '', --appendonly, 'no', --dir, /tmp]
+    secrets: [redis_users.acl, redis_password]
+    read_only: true
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=1m,mode=1777']
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$(cat /run/secrets/redis_password)" redis-cli --user storefront --no-auth-warning ping | grep -qx PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 1.0
+  storefront:
+    <<: *java
+    mem_limit: 512m
+    memswap_limit: 512m
+    build:
+      context: .
+      args: {JAR_FILE: build/deployment/storefront.jar}
+    environment:
+      SERVER_PORT: '8080'
+      SPRING_PROFILES_ACTIVE: h2
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+      STORE_PAYMENTS_URL: http://payments:8080
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: '6379'
+      SPRING_DATA_REDIS_USERNAME: storefront
+      STORE_CACHE_NAMESPACE: sprint07-compose-h2
+    secrets:
+      - {source: payments_service_token, target: store.payments.service-token}
+      - {source: redis_password, target: spring.data.redis.password}
+      - {source: seller_password, target: store.seller.bootstrap-password}
+    ports: ['127.0.0.1:${WEB_PORT:-8088}:8080']
+  payments:
+    <<: *java
+    build:
+      context: .
+      args: {JAR_FILE: build/deployment/payments.jar}
+    environment:
+      SERVER_PORT: '8080'
+      SPRING_PROFILES_ACTIVE: h2
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+    secrets:
+      - {source: payments_service_token, target: payments.service-token}
+    ports: ['127.0.0.1:${PAYMENTS_PORT:-8098}:8080']
+secrets:
+  payments_service_token:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/payments_service_token
+  redis_password:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/redis_password
+  redis_users.acl:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/redis_users.acl
+  seller_password:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/seller_password

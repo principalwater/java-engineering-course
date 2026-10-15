@@ -51,10 +51,9 @@ class AccountMySqlIntegrationTest {
         @Bean
         @ServiceConnection(type = R2dbcConnectionDetails.class)
         MySQLContainer<?> database() {
-            // Контейнер живёт вместе с кешируемым Spring-контекстом; digest сохранён в официальном зеркале.
+            // Контейнер живёт вместе с кешируемым Spring-контекстом; прямой источник обходит лимит ECR в CI.
             return new MySQLContainer<>(DockerImageName.parse(
-                    "public.ecr.aws/docker/library/mysql@sha256:6ea90827b1100f8f2ae306a539f86d2c264a26ed435a2a9f75551dd5c3aeb242")
-                    .asCompatibleSubstituteFor("mysql"));
+                    "mysql@sha256:6ea90827b1100f8f2ae306a539f86d2c264a26ed435a2a9f75551dd5c3aeb242"));
         }
     }
 }

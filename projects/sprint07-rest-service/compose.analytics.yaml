@@ -1,0 +1,47 @@
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8-alpine@sha256:58f554637bfe3b77e0335b4ff90611279dbdf8d262dc15225ee93901853dfa13
+    entrypoint: [sh, /setup/start-clickhouse.sh]
+    environment:
+      CLICKHOUSE_USER: storefront_admin
+      CLICKHOUSE_PASSWORD_FILE: /run/secrets/analytics_admin_password
+      CLICKHOUSE_DB: storefront
+      CLICKHOUSE_ALWAYS_RUN_INITDB_SCRIPTS: "1"
+    secrets: [analytics_admin_password, analytics_writer_password, analytics_reader_password]
+    volumes:
+      - analytics-data:/var/lib/clickhouse
+      - ./analytics/users.xml:/etc/clickhouse-server/users.d/storefront.xml:ro
+      - ./analytics/001-order-lines.sql:/docker-entrypoint-initdb.d/001-order-lines.sql:ro
+      - ./analytics/start-clickhouse.sh:/setup/start-clickhouse.sh:ro
+    ports:
+      - "127.0.0.1:${ANALYTICS_PORT:-8127}:8123"
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1:8123/ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    mem_limit: 768m
+    memswap_limit: 768m
+    cpus: 1.0
+  storefront:
+    # Тот же JAR: аналитика подключается настройками и не участвует в транзакции покупки.
+    user: "${STORE_UID:-10001}:${STORE_GID:-10001}"
+    environment:
+      STORE_ANALYTICS_ENABLED: "true"
+      STORE_ANALYTICS_URL: http://clickhouse:8123
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+    secrets:
+      - source: analytics_writer_password
+        target: store.analytics.writer-password
+      - source: analytics_reader_password
+        target: store.analytics.reader-password
+volumes:
+  analytics-data:
+secrets:
+  analytics_admin_password:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/analytics_admin_password
+  analytics_writer_password:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/analytics_writer_password
+  analytics_reader_password:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/analytics_reader_password

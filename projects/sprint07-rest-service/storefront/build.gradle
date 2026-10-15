@@ -1,0 +1,102 @@
+plugins {
+    id 'org.springframework.boot'
+    id 'org.openapi.generator'
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+    implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
+    implementation 'org.springframework.boot:spring-boot-starter-data-r2dbc'
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis-reactive'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'io.swagger.core.v3:swagger-annotations-jakarta:2.2.34'
+    implementation 'jakarta.annotation:jakarta.annotation-api'
+    runtimeOnly 'io.r2dbc:r2dbc-h2'
+    runtimeOnly 'org.postgresql:r2dbc-postgresql'
+    testImplementation 'org.springframework.security:spring-security-test'
+}
+
+openApiGenerate {
+    generatorName = 'java'
+    library = 'webclient'
+    inputSpec = rootProject.file('api/payments.yaml').absolutePath
+    outputDir = layout.buildDirectory.dir('generated/openapi').get().asFile.absolutePath
+    apiPackage = 'dev.principalwater.store.payment.generated.api'
+    modelPackage = 'dev.principalwater.store.payment.generated.model'
+    invokerPackage = 'dev.principalwater.store.payment.generated.client'
+    configOptions = [useJakartaEe: 'true', openApiNullable: 'false', useBeanValidation: 'true',
+                     dateLibrary: 'java8', hideGenerationTimestamp: 'true']
+    globalProperties = [apis: '', models: '', supportingFiles: '', apiTests: 'false', modelTests: 'false', apiDocs: 'false', modelDocs: 'false']
+}
+sourceSets.main.java.srcDir layout.buildDirectory.dir('generated/openapi/src/main/java')
+tasks.named('compileJava') { dependsOn 'openApiGenerate' }
+tasks.named('pmdMain') { exclude '**/generated/**' }
+tasks.named('bootJar') { archiveFileName = 'storefront.jar' }
+tasks.named('test') {
+    exclude '**/AnalyticsIntegrationTest.class', '**/ClickHouseClusterTest.class', '**/CatalogCacheIntegrationTest.class'
+}
+
+tasks.register('postgresTest', Test) {
+    description = 'Verify R2DBC and transactional contracts against isolated PostgreSQL'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform()
+    include '**/StoreRepositoryTest.class', '**/StoreServiceTest.class', '**/AccountIntegrationTest.class'
+    // Отдельный диалект проверяет реальные блокировки и ограничения, без повторения WebFlux/unit-сценариев.
+    outputs.upToDateWhen { false }
+    doFirst {
+        if (!System.getenv('STORE_TEST_DB_URL')?.startsWith('r2dbc:postgresql:')
+                || !System.getenv('STORE_TEST_DB_PASSWORD')) {
+            throw new GradleException('postgresTest requires an isolated PostgreSQL URL and password')
+        }
+    }
+}
+
+tasks.register('analyticsTest', Test) {
+    description = 'Verify durable delivery and idempotent ClickHouse aggregates'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform()
+    include '**/AnalyticsIntegrationTest.class'
+    outputs.upToDateWhen { false }
+    doFirst {
+        if (!System.getenv('STORE_TEST_ANALYTICS_URL') || !System.getenv('STORE_TEST_CLICKHOUSE_CONTAINER')) {
+            throw new GradleException('analyticsTest requires an isolated ClickHouse deployment')
+        }
+    }
+}
+
+tasks.register('clusterTest', Test) {
+    description = 'Verify replicated shards and coordinator failover against isolated ClickHouse'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform()
+    include '**/ClickHouseClusterTest.class'
+    outputs.upToDateWhen { false }
+    doFirst {
+        if (!System.getenv('STORE_TEST_CLUSTER_URLS') || !System.getenv('STORE_TEST_CLUSTER_CONTAINERS')) {
+            throw new GradleException('clusterTest requires an isolated two-shard deployment')
+        }
+    }
+}
+
+
+tasks.register('redisTest', Test) {
+    description = 'Verify real Redis read-through, expiry, invalidation and outage recovery'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform()
+    include '**/CatalogCacheIntegrationTest.class'
+    outputs.upToDateWhen { false }
+    doFirst {
+        if (!System.getenv('STORE_TEST_REDIS_URL')) {
+            throw new GradleException('redisTest requires an isolated Redis URL')
+        }
+    }
+}

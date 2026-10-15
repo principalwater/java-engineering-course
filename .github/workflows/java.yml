@@ -122,7 +122,7 @@ jobs:
     timeout-minutes: 20
     services:
       redis:
-        image: public.ecr.aws/docker/library/redis@sha256:fbdbaea47b9ae4ecc2082ecdb4e1cea81e32176ffb1dcf643d422ad07427e5d9
+        image: redis@sha256:fbdbaea47b9ae4ecc2082ecdb4e1cea81e32176ffb1dcf643d422ad07427e5d9
         ports:
           - 6379/tcp
         options: --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 2s --health-retries 20
@@ -583,20 +583,17 @@ jobs:
       - name: Validate JavaScript and file-secret initialization
         run: |
           for script in storefront/src/main/resources/static/*.js; do node --check "$script"; done
+          node --check scripts/payment-load.js
+          python3 -m compileall -q scripts
           python3 -m unittest discover -s storefront/src/test/python -v
       - name: Verify both executable JARs with native H2 and Redis
-        run: python3 scripts/verify-jar.py --build-tool gradle
+        run: python3 scripts/verify-jar.py
       - name: Verify both native PostgreSQL databases and payment transactions
         run: python3 scripts/verify-postgresql.py
       - name: Verify Redis cache expiry, invalidation and outage recovery
         run: python3 scripts/verify-cache.py
       - name: Verify optional real ClickHouse delivery and recovery
         run: python3 scripts/verify-analytics.py
-      - name: Verify the real Maven reactor and its executable JARs
-        run: |
-          python3 scripts/package.py --build-tool maven
-          python3 scripts/verify-builds.py
-          python3 scripts/verify-jar.py --build-tool maven
       - name: Initialize external runtime secrets
         env:
           STORE_SECRETS_DIR: ${{ runner.temp }}/sprint07-secrets
@@ -617,7 +614,7 @@ jobs:
         run: |
           docker compose -p ci-sprint07 -f compose.yaml -f compose.analytics.yaml ps -a
           docker compose -p ci-sprint07 -f compose.yaml -f compose.analytics.yaml logs --no-color --tail 150
-      - name: Upload both executable JARs and Gradle/Maven reports
+      - name: Upload both executable JARs and Gradle reports
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -626,8 +623,6 @@ jobs:
             projects/sprint07-rest-service/build/deployment/*.jar
             projects/sprint07-rest-service/*/build/test-results/
             projects/sprint07-rest-service/*/build/reports/tests/
-            projects/sprint07-rest-service/*/target/surefire-reports/
-            projects/sprint07-rest-service/*/target/failsafe-reports/
           if-no-files-found: ignore
           retention-days: 14
       - name: Stop owned service containers

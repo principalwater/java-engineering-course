@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('Заказы')}"></head>
+<body>
+<header th:replace="~{fragments :: header('orders')}"></header>
+<main id="main">
+<div class="page-heading">
+<h1>Ваши заказы</h1>
+<p class="lead">Заказы от новых к старым. Откройте заказ, чтобы проверить состав, цены и оплату.</p>
+</div>
+<ul class="orders-grid" th:if="${!orders.isEmpty()}">
+<li th:each="order : ${orders}">
+<article class="order-card" th:attr="data-order-id=${order.id}">
+<div class="order-head">
+<h2><a th:href="@{/orders/{id}(id=${order.id})}" th:text="|Заказ № ${order.id}|"></a></h2>
+<p class="price" th:text="${@display.money(order.totalSum)}"></p>
+</div>
+<span class="order-status" th:classappend="${order.status.name() == 'PAID'} ? 'is-paid'" th:text="${order.status.label}"></span>
+<time class="muted" th:datetime="${order.createdAt}" th:text="${@display.time(order.createdAt)}"></time>
+<div class="order-thumbs" aria-hidden="true">
+<span class="order-thumb" th:each="line, state : ${order.items}" th:if="${state.index < 3}"><img th:src="@{${line.imgPath}}" alt="" width="64" height="48" loading="lazy"></span>
+<span class="order-thumb order-more" th:if="${order.items.size() > 3}" th:text="|+${order.items.size() - 3}|"></span>
+</div>
+<ul class="order-preview">
+<li th:each="item : ${order.items}"><span th:text="${item.title}"></span><span th:text="|${item.count} × ${@display.money(item.price)}|"></span></li>
+</ul>
+<a class="button secondary" th:href="@{/orders/{id}(id=${order.id})}">Открыть заказ</a>
+</article>
+</li>
+</ul>
+<section class="empty-state" th:if="${orders.isEmpty()}">
+<h2>Заказов пока нет</h2>
+<p>Добавьте предметы в корзину и оформите первый заказ.</p>
+<a class="button primary" th:href="@{/items}">В коллекцию</a>
+</section>
+</main>
+<footer th:replace="~{fragments :: footer}"></footer>
+</body>
+</html>

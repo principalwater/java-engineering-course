@@ -8,7 +8,7 @@
 
 `GET /hello` возвращает «Добро пожаловать на борт!». `GET /movies` читает фильмы из PostgreSQL через JDBC. Nginx принимает запросы на `127.0.0.1:18380` и передаёт их приложению; приложение и БД доступны внутри сети Compose. Прямой read-only запрос не требует отдельного сервисного слоя.
 
-Использованы Java 21, Spring Boot 3.4.13, PostgreSQL 17.11 и Nginx 1.29.8. Образы закреплены digest и загружаются из официального зеркала `public.ecr.aws/docker/library`. Скелет создан через Spring Initializr и приведён к версии Boot, используемой в других упражнениях. Java 11 из примера Dockerfile заменена совместимым runtime Java 21.
+Использованы Java 21, Spring Boot 3.4.13, PostgreSQL 17.11 и Nginx 1.29.8. Образы закреплены digest. JDK загружается из Docker Hub: прямой источник обходит лимит ECR в CI, сохраняя тот же digest. PostgreSQL и Nginx загружаются из официального зеркала `public.ecr.aws/docker/library`. Скелет создан через Spring Initializr и приведён к версии Boot, используемой в других упражнениях. Java 11 из примера Dockerfile заменена совместимым runtime Java 21.
 
 ## Выполнение
 

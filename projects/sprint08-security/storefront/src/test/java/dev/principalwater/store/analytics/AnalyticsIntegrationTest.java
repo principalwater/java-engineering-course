@@ -226,7 +226,10 @@ class AnalyticsIntegrationTest extends StoreIntegrationTestBase {
 
     private AnalyticsRow total(UUID userId) {
         var end = LocalDate.now(clock.withZone(ZoneOffset.UTC));
-        return await(queue.sourceId().flatMap(source -> clickhouse.dashboard(source, java.util.Objects.requireNonNullElse(accountId(userId), userId), end.minusDays(6), end)))
+        // Fixture читаем на потоке JUnit до подписки, не блокируем reactive callback вложенным SQL-запросом.
+        UUID account = accountId(userId);
+        UUID scope = account == null ? userId : account;
+        return await(queue.sourceId().flatMap(source -> clickhouse.dashboard(source, scope, end.minusDays(6), end)))
                 .stream().filter(row -> row.bucket() == AnalyticsBucket.TOTAL).findFirst().orElseThrow();
     }
 

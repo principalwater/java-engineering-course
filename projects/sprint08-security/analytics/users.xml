@@ -1,0 +1,62 @@
+<clickhouse>
+    <profiles>
+        <storefront_writer>
+            <allow_ddl>0</allow_ddl>
+            <max_execution_time>5</max_execution_time>
+            <timeout_before_checking_execution_speed>0</timeout_before_checking_execution_speed>
+            <max_memory_usage>268435456</max_memory_usage>
+            <http_wait_end_of_query>1</http_wait_end_of_query>
+            <constraints>
+                <allow_ddl><const/></allow_ddl>
+                <max_execution_time><const/></max_execution_time>
+                <max_memory_usage><const/></max_memory_usage>
+                <http_wait_end_of_query><const/></http_wait_end_of_query>
+            </constraints>
+        </storefront_writer>
+        <storefront_reader>
+            <readonly>1</readonly>
+            <final>1</final>
+            <allow_ddl>0</allow_ddl>
+            <group_by_use_nulls>0</group_by_use_nulls>
+            <max_execution_time>5</max_execution_time>
+            <timeout_before_checking_execution_speed>0</timeout_before_checking_execution_speed>
+            <max_rows_to_read>1000000</max_rows_to_read>
+            <max_bytes_to_read>100000000</max_bytes_to_read>
+            <max_result_rows>256</max_result_rows>
+            <max_result_bytes>131072</max_result_bytes>
+            <result_overflow_mode>throw</result_overflow_mode>
+            <max_memory_usage>268435456</max_memory_usage>
+            <http_wait_end_of_query>1</http_wait_end_of_query>
+            <constraints>
+                <readonly><const/></readonly>
+                <final><const/></final>
+                <allow_ddl><const/></allow_ddl>
+                <group_by_use_nulls><const/></group_by_use_nulls>
+                <max_execution_time><const/></max_execution_time>
+                <max_rows_to_read><const/></max_rows_to_read>
+                <max_bytes_to_read><const/></max_bytes_to_read>
+                <max_result_rows><const/></max_result_rows>
+                <max_result_bytes><const/></max_result_bytes>
+                <result_overflow_mode><const/></result_overflow_mode>
+                <max_memory_usage><const/></max_memory_usage>
+                <http_wait_end_of_query><const/></http_wait_end_of_query>
+            </constraints>
+        </storefront_reader>
+    </profiles>
+    <users>
+        <storefront_writer>
+            <password from_env="STOREFRONT_WRITER_PASSWORD"/>
+            <profile>storefront_writer</profile>
+            <networks><ip>::/0</ip></networks>
+            <quota>default</quota>
+            <grants><query>GRANT INSERT ON storefront.paid_purchase_facts</query></grants>
+        </storefront_writer>
+        <storefront_reader>
+            <password from_env="STOREFRONT_READER_PASSWORD"/>
+            <profile>storefront_reader</profile>
+            <networks><ip>::/0</ip></networks>
+            <quota>default</quota>
+            <grants><query>GRANT SELECT ON storefront.paid_purchase_facts</query></grants>
+        </storefront_reader>
+    </users>
+</clickhouse>

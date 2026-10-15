@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('Не удалось выполнить запрос')}"></head>
+<body>
+<header th:replace="~{fragments :: header('')}"></header>
+<main id="main">
+<section class="empty-state error-state"
+         th:with="pendingPayment=${storeError != null and (storeError.name() == 'PAYMENT_PENDING' or storeError.name() == 'CHECKOUT_IN_PROGRESS')}">
+<h1>Не удалось выполнить запрос</h1>
+<!--/* Русское пояснение зависит от статуса; системное сообщение сервера остаётся на английском как диагностика. */-->
+<th:block th:switch="${storeError == null ? '' : storeError.name()}">
+<p th:case="'PAYMENT_PENDING'">Платёж ещё проверяется. Деньги могли быть списаны. Откройте корзину и проверьте результат: повторная проверка не спишет сумму ещё раз.</p>
+<p th:case="'CHECKOUT_IN_PROGRESS'">Корзина заблокирована на время проверки платежа. Изменение не применено. Откройте корзину и проверьте результат оплаты.</p>
+<p th:case="'INSUFFICIENT_FUNDS'">Для покупки недостаточно средств. Откройте корзину, чтобы проверить баланс и изменить состав заказа.</p>
+<th:block th:case="*">
+<p th:switch="${status}">
+<span th:case="400">Проверьте введённые данные и попробуйте ещё раз.</span>
+<span th:case="403">Страница устарела. Вернитесь назад, обновите её и повторите действие.</span>
+<span th:case="404">Такой страницы, вещи или заказа нет.</span>
+<span th:case="409">Действие не выполнено: данные изменились или достигнут предел.</span>
+<span th:case="413">Файл слишком большой для загрузки.</span>
+<span th:case="*">Магазин не смог обработать запрос. Попробуйте ещё раз чуть позже.</span>
+</p>
+</th:block>
+</th:block>
+<p class="diagnostic" th:if="${message != null or error != null}"><span th:text="|Ответ магазина: ${message ?: error}|"></span><small th:if="${status != null}" th:text="|Код ${status}|"></small></p>
+<div class="error-actions">
+<a class="button primary" th:href="${pendingPayment} ? @{/cart/items} : @{/items}" th:text="${pendingPayment ? 'Проверить платёж' : 'В коллекцию'}">В коллекцию</a>
+<a class="button secondary" th:unless="${pendingPayment}" th:href="@{/cart/items}">Открыть корзину</a>
+</div>
+</section>
+</main>
+<footer th:replace="~{fragments :: footer}"></footer>
+</body>
+</html>

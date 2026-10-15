@@ -1,0 +1,161 @@
+name: sprint07-reactive-cluster
+services:
+  keeper:
+    image: clickhouse/clickhouse-keeper:26.8-alpine@sha256:1c2360eb7dca6aa7ca561dd0bc2d72231f664972648d4d0b30aa5d3081a55184
+    volumes:
+      - keeper-data:/var/lib/clickhouse
+      - ./analytics/cluster/keeper.xml:/etc/clickhouse-keeper/keeper_config.xml:ro
+    healthcheck:
+      test: [CMD, clickhouse-keeper, keeper-client, --host, 127.0.0.1, --port, "9181", --connection-timeout, "2", --session-timeout, "2", --operation-timeout, "2", --query, "exists /"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 2s
+    mem_limit: 192m
+    memswap_limit: 192m
+    cpus: 1.0
+  ch-a1:
+    image: clickhouse/clickhouse-server:26.8-alpine@sha256:58f554637bfe3b77e0335b4ff90611279dbdf8d262dc15225ee93901853dfa13
+    entrypoint: [sh, /setup/start-clickhouse.sh]
+    environment:
+      CLICKHOUSE_USER: storefront_admin
+      CLICKHOUSE_PASSWORD_FILE: /run/secrets/analytics_admin_password
+      CLICKHOUSE_DB: storefront
+      CLICKHOUSE_ALWAYS_RUN_INITDB_SCRIPTS: "1"
+      CLICKHOUSE_SHARD: a
+      CLICKHOUSE_REPLICA: ch-a1
+    secrets: [analytics_admin_password, analytics_writer_password, analytics_reader_password, analytics_cluster_secret]
+    volumes:
+      - ch-a1-data:/var/lib/clickhouse
+      - ./analytics/cluster/cluster.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
+      - ./analytics/cluster/users.xml:/etc/clickhouse-server/users.d/storefront.xml:ro
+      - ./analytics/cluster/001-purchase-facts.sql:/docker-entrypoint-initdb.d/001-purchase-facts.sql:ro
+      - ./analytics/cluster/start-clickhouse.sh:/setup/start-clickhouse.sh:ro
+    ports: ["127.0.0.1:${CLUSTER_A1_PORT:-18131}:8123"]
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1:8123/ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      keeper:
+        condition: service_healthy
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1.0
+  ch-a2:
+    image: clickhouse/clickhouse-server:26.8-alpine@sha256:58f554637bfe3b77e0335b4ff90611279dbdf8d262dc15225ee93901853dfa13
+    entrypoint: [sh, /setup/start-clickhouse.sh]
+    environment:
+      CLICKHOUSE_USER: storefront_admin
+      CLICKHOUSE_PASSWORD_FILE: /run/secrets/analytics_admin_password
+      CLICKHOUSE_DB: storefront
+      CLICKHOUSE_ALWAYS_RUN_INITDB_SCRIPTS: "1"
+      CLICKHOUSE_SHARD: a
+      CLICKHOUSE_REPLICA: ch-a2
+    secrets: [analytics_admin_password, analytics_writer_password, analytics_reader_password, analytics_cluster_secret]
+    volumes:
+      - ch-a2-data:/var/lib/clickhouse
+      - ./analytics/cluster/cluster.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
+      - ./analytics/cluster/users.xml:/etc/clickhouse-server/users.d/storefront.xml:ro
+      - ./analytics/cluster/001-purchase-facts.sql:/docker-entrypoint-initdb.d/001-purchase-facts.sql:ro
+      - ./analytics/cluster/start-clickhouse.sh:/setup/start-clickhouse.sh:ro
+    ports: ["127.0.0.1:${CLUSTER_A2_PORT:-18132}:8123"]
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1:8123/ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      keeper:
+        condition: service_healthy
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1.0
+  ch-b1:
+    image: clickhouse/clickhouse-server:26.8-alpine@sha256:58f554637bfe3b77e0335b4ff90611279dbdf8d262dc15225ee93901853dfa13
+    entrypoint: [sh, /setup/start-clickhouse.sh]
+    environment:
+      CLICKHOUSE_USER: storefront_admin
+      CLICKHOUSE_PASSWORD_FILE: /run/secrets/analytics_admin_password
+      CLICKHOUSE_DB: storefront
+      CLICKHOUSE_ALWAYS_RUN_INITDB_SCRIPTS: "1"
+      CLICKHOUSE_SHARD: b
+      CLICKHOUSE_REPLICA: ch-b1
+    secrets: [analytics_admin_password, analytics_writer_password, analytics_reader_password, analytics_cluster_secret]
+    volumes:
+      - ch-b1-data:/var/lib/clickhouse
+      - ./analytics/cluster/cluster.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
+      - ./analytics/cluster/users.xml:/etc/clickhouse-server/users.d/storefront.xml:ro
+      - ./analytics/cluster/001-purchase-facts.sql:/docker-entrypoint-initdb.d/001-purchase-facts.sql:ro
+      - ./analytics/cluster/start-clickhouse.sh:/setup/start-clickhouse.sh:ro
+    ports: ["127.0.0.1:${CLUSTER_B1_PORT:-18133}:8123"]
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1:8123/ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      keeper:
+        condition: service_healthy
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1.0
+  ch-b2:
+    image: clickhouse/clickhouse-server:26.8-alpine@sha256:58f554637bfe3b77e0335b4ff90611279dbdf8d262dc15225ee93901853dfa13
+    entrypoint: [sh, /setup/start-clickhouse.sh]
+    environment:
+      CLICKHOUSE_USER: storefront_admin
+      CLICKHOUSE_PASSWORD_FILE: /run/secrets/analytics_admin_password
+      CLICKHOUSE_DB: storefront
+      CLICKHOUSE_ALWAYS_RUN_INITDB_SCRIPTS: "1"
+      CLICKHOUSE_SHARD: b
+      CLICKHOUSE_REPLICA: ch-b2
+    secrets: [analytics_admin_password, analytics_writer_password, analytics_reader_password, analytics_cluster_secret]
+    volumes:
+      - ch-b2-data:/var/lib/clickhouse
+      - ./analytics/cluster/cluster.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
+      - ./analytics/cluster/users.xml:/etc/clickhouse-server/users.d/storefront.xml:ro
+      - ./analytics/cluster/001-purchase-facts.sql:/docker-entrypoint-initdb.d/001-purchase-facts.sql:ro
+      - ./analytics/cluster/start-clickhouse.sh:/setup/start-clickhouse.sh:ro
+    ports: ["127.0.0.1:${CLUSTER_B2_PORT:-18134}:8123"]
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1:8123/ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      keeper:
+        condition: service_healthy
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1.0
+  storefront:
+    environment:
+      STORE_ANALYTICS_ENABLED: "true"
+      STORE_ANALYTICS_URLS: http://ch-a1:8123,http://ch-a2:8123,http://ch-b1:8123,http://ch-b2:8123
+      STORE_ANALYTICS_DISTRIBUTED: "true"
+      STORE_ANALYTICS_INSERT_QUORUM: "2"
+      STORE_CART_COOKIE_NAME: storefront-sprint07-cluster-cart
+      SERVER_REACTIVE_SESSION_COOKIE_NAME: storefront-sprint07-cluster-session
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+    secrets:
+      - source: analytics_writer_password
+        target: store.analytics.writer-password
+      - source: analytics_reader_password
+        target: store.analytics.reader-password
+volumes:
+  keeper-data:
+  ch-a1-data:
+  ch-a2-data:
+  ch-b1-data:
+  ch-b2-data:
+secrets:
+  analytics_admin_password:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/analytics_admin_password
+  analytics_writer_password:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/analytics_writer_password
+  analytics_reader_password:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/analytics_reader_password
+  analytics_cluster_secret:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint07}/analytics_cluster_secret

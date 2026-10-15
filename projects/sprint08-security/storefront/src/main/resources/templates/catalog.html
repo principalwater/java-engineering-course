@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('Каталог')}"></head>
+<body>
+<header th:replace="~{fragments :: header('seller')}"></header>
+<main id="main">
+<a class="back-link" th:href="@{/account/seller}">В кабинет продавца</a>
+<div class="page-heading">
+<h1>Управление каталогом</h1>
+<p class="lead">Загрузите товары одним JSON-файлом. SKU сохраняет идентичность товара при повторном импорте.</p>
+</div>
+<div class="import-grid">
+<section class="surface">
+<h2>Коллекция мастерской</h2>
+<p>Восемь предметов для рабочего места: от клавиатуры до растения. Уже существующие SKU обновятся без дублирования.</p>
+<form method="post" th:action="@{/catalog/demo}"><button class="button primary" type="submit">Загрузить коллекцию</button></form>
+</section>
+<section class="surface">
+<h2>Импорт из JSON</h2>
+<form class="import-form" method="post" th:action="@{/catalog/import}" enctype="multipart/form-data">
+<label class="field" for="catalog-file"><span>JSON-файл до 1 МиБ, до 1000 товаров</span><input id="catalog-file" type="file" name="catalog" accept=".json,application/json" required></label>
+<button class="button primary" type="submit">Импортировать</button>
+</form>
+</section>
+</div>
+<details class="surface import-help">
+<summary>Формат файла и доступные иллюстрации</summary>
+<p>Цена указана в целых рублях. SKU состоит из латинских букв, цифр и дефисов. Файл применяется целиком: ошибочная строка отменяет импорт.</p>
+<pre><code>[
+  {
+    "sku": "my-keyboard",
+    "title": "Моя клавиатура",
+    "description": "Описание предмета",
+    "image": "KEYBOARD",
+    "price": 7900
+  }
+]</code></pre>
+<p>Иллюстрации: KEYBOARD, MONITOR, LAMP, NOTEBOOK, PLANT, CUP, HEADPHONES, DOCK.</p>
+<a th:href="@{/catalog-demo.json}" download>Скачать пример каталога</a>
+</details>
+</main>
+<footer th:replace="~{fragments :: footer}"></footer>
+</body>
+</html>

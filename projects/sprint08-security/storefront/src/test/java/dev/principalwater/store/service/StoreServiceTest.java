@@ -7,7 +7,6 @@ import dev.principalwater.store.dao.CheckoutIntentRepository;
 import dev.principalwater.store.dao.OrderRepository;
 import dev.principalwater.store.dao.OutboxRepository;
 import dev.principalwater.store.dao.ProductRepository;
-import dev.principalwater.store.util.VisitorIdentity;
 import dev.principalwater.store.model.*;
 import dev.principalwater.store.payment.CheckoutIntent;
 import dev.principalwater.store.payment.PaymentRecovery;
@@ -80,7 +79,7 @@ class StoreServiceTest extends StoreIntegrationTestBase {
     void skuUpsertKeepsTheProductIdentityAndExistingCartQuantity() throws Exception {
         importItems(productInput("upsert", "Before", "Description", 100));
         long id = id("upsert");
-        UUID cartId = await(carts.identify(null));
+        UUID cartId = createAccountCart();
         await(carts.change(cartId, id, CartAction.PLUS));
         await(carts.change(cartId, id, CartAction.PLUS));
 
@@ -115,7 +114,7 @@ class StoreServiceTest extends StoreIntegrationTestBase {
     @Test
     void checkoutCreatesOwnedOrderAndDeliveryThenClearsTheCart() throws Exception {
         importItems(productInput("checkout", "Keyboard", "Description", 2500));
-        UUID cartId = await(carts.identify(null));
+        UUID cartId = createAccountCart();
         long productId = id("checkout");
         await(carts.change(cartId, productId, CartAction.SET, 2));
 
@@ -145,7 +144,7 @@ class StoreServiceTest extends StoreIntegrationTestBase {
     @Test
     void failedOutboxWriteRollsBackTheOrderAndCartDeletion() throws Exception {
         importItems(productInput("rollback", "Rollback", "Description", 700));
-        UUID cartId = await(carts.identify(null));
+        UUID cartId = createAccountCart();
         await(carts.change(cartId, id("rollback"), CartAction.PLUS));
         // Ошибка последней записи проверяет настоящий rollback сервисной транзакции, а не откат теста.
         execute("ALTER TABLE analytics_outbox ADD CONSTRAINT reject_delivery_test CHECK (order_id < 0)");
@@ -170,7 +169,7 @@ class StoreServiceTest extends StoreIntegrationTestBase {
     @Test
     void simultaneousCheckoutCreatesExactlyOneCommittedOrder() throws Exception {
         importItems(productInput("concurrent", "Concurrent", "Description", 700));
-        UUID cartId = await(carts.identify(null));
+        UUID cartId = createAccountCart();
         await(carts.change(cartId, id("concurrent"), CartAction.PLUS));
 
         UUID key = UUID.fromString(await(checkout.availability(cartId)).checkoutKey());
@@ -186,7 +185,7 @@ class StoreServiceTest extends StoreIntegrationTestBase {
     @Test
     void simultaneousIncrementsCannotExceedTheQuantityLimit() throws Exception {
         importItems(productInput("limit", "Limited", "Description", 700));
-        UUID cartId = await(carts.identify(null));
+        UUID cartId = createAccountCart();
         long productId = id("limit");
         await(carts.change(cartId, productId, CartAction.SET, 98));
 
@@ -202,7 +201,7 @@ class StoreServiceTest extends StoreIntegrationTestBase {
     @Test
     void checkoutRacingIncrementDoesNotLoseAnyProduct() throws Exception {
         importItems(productInput("race", "Race", "Description", 700));
-        UUID cartId = await(carts.identify(null));
+        UUID cartId = createAccountCart();
         long productId = id("race");
         await(carts.change(cartId, productId, CartAction.PLUS));
 
@@ -222,7 +221,7 @@ class StoreServiceTest extends StoreIntegrationTestBase {
     @Test
     void setRequiresAQuantityAndZeroRemovesTheExistingLine() throws Exception {
         importItems(productInput("set", "Set", "Description", 700));
-        UUID cartId = await(carts.identify(null));
+        UUID cartId = createAccountCart();
         long productId = id("set");
         await(carts.change(cartId, productId, CartAction.PLUS));
         expectError(carts.change(cartId, productId, CartAction.SET), StoreError.INVALID_QUANTITY);
@@ -236,7 +235,7 @@ class StoreServiceTest extends StoreIntegrationTestBase {
     @ValueSource(ints = {-1, 100})
     void setRejectsAnOutOfRangeQuantityWithoutChangingTheCart(int quantity) throws Exception {
         importItems(productInput("quantity", "Quantity", "Description", 700));
-        UUID cartId = await(carts.identify(null));
+        UUID cartId = createAccountCart();
         long productId = id("quantity");
         await(carts.change(cartId, productId, CartAction.SET, 2));
         expectError(carts.change(cartId, productId, CartAction.SET, quantity), StoreError.INVALID_QUANTITY);
@@ -253,7 +252,7 @@ class StoreServiceTest extends StoreIntegrationTestBase {
     @Test
     void lostResponseFreezesTheSnapshotAndRecoversWithoutAnotherDebit() throws Exception {
         importItems(productInput("uncertain", "Uncertain", "Description", 700));
-        UUID cartId = await(carts.identify(null));
+        UUID cartId = createAccountCart();
         long productId = id("uncertain");
         await(carts.change(cartId, productId, CartAction.PLUS));
         PaymentsStub.LOSE_RESPONSE.set(true);
@@ -277,7 +276,7 @@ class StoreServiceTest extends StoreIntegrationTestBase {
         var prepared = new ArrayList<CheckoutIntent>();
         PaymentsStub.UNAVAILABLE.set(true);
         for (int index = 0; index < 33; index++) {
-            UUID cartId = await(carts.identify(null));
+            UUID cartId = createAccountCart();
             await(carts.change(cartId, productId, CartAction.PLUS));
             expectError(buy(cartId), StoreError.PAYMENT_PENDING);
             prepared.add(await(intents.findByActiveCartId(cartId)));
@@ -314,10 +313,10 @@ class StoreServiceTest extends StoreIntegrationTestBase {
     @Test
     void unavailableAndInsufficientPaymentsNeverCreateAConfirmedOrder() throws Exception {
         importItems(productInput("unpaid", "Unpaid", "Description", 700));
-        UUID cartId = await(carts.identify(null));
+        UUID cartId = createAccountCart();
         long productId = id("unpaid");
         await(carts.change(cartId, productId, CartAction.PLUS));
-        PaymentsStub.funds(VisitorIdentity.analyticsId(cartId), 100);
+        PaymentsStub.funds(accountId(cartId), 100);
         assertFalse(await(checkout.availability(cartId)).getCanBuy());
         expectError(buy(cartId), StoreError.INSUFFICIENT_FUNDS);
         assertEquals(0, PaymentsStub.DEBITS.get());
@@ -334,7 +333,7 @@ class StoreServiceTest extends StoreIntegrationTestBase {
     @Test
     void oldPurchaseReplayCannotChargeNewCartAndStaleQuotesCannotAuthorizeChangedPrices() throws Exception {
         importItems(productInput("quote", "Quote", "Description", 700));
-        UUID cartId = await(carts.identify(null));
+        UUID cartId = createAccountCart();
         long productId = id("quote");
         await(carts.change(cartId, productId, CartAction.PLUS));
         UUID original = UUID.fromString(await(checkout.availability(cartId)).checkoutKey());

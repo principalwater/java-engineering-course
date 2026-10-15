@@ -11,7 +11,6 @@ import dev.principalwater.store.payment.CheckoutIntent;
 import dev.principalwater.store.payment.PaymentsGateway;
 import dev.principalwater.store.payment.WalletService;
 import dev.principalwater.store.util.Money;
-import dev.principalwater.store.util.VisitorIdentity;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
@@ -61,6 +60,6 @@ public class CheckoutService {
     }
 
     private Mono<UUID> payer(UUID cartId) {
-        return users.findByCartId(cartId).map(StoreUser::id).defaultIfEmpty(VisitorIdentity.analyticsId(cartId));
+        return users.findByCartId(cartId).map(StoreUser::id).switchIfEmpty(Mono.error(new StoreException(StoreError.CART_NOT_FOUND)));
     }
 }

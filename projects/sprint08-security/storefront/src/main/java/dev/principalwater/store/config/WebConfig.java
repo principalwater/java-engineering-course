@@ -13,7 +13,7 @@ import org.springframework.web.server.WebExceptionHandler;
 import reactor.core.publisher.Mono;
 
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties({DisplayProperties.class, CartProperties.class})
+@EnableConfigurationProperties(DisplayProperties.class)
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.REACTIVE)
 public class WebConfig implements WebFluxConfigurer {
     @Bean

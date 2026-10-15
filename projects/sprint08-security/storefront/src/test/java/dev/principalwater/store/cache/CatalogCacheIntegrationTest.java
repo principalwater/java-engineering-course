@@ -75,8 +75,8 @@ class CatalogCacheIntegrationTest extends DatabaseTestBase {
     void listDetailsAndCartReusePublicProductsWithoutSharingQuantities() throws Exception {
         importItems(productInput("cache-alpha", "Яблоко <&> 🍎", "Alpha description", 137));
         long id = id("cache-alpha");
-        UUID first = await(carts.identify(null));
-        UUID second = await(carts.identify(null));
+        UUID first = createAccountCart();
+        UUID second = createAccountCart();
         await(carts.change(first, id, CartAction.SET, 2));
         await(carts.change(second, id, CartAction.SET, 4));
         double productHits = counter("product", "hit");
@@ -111,7 +111,7 @@ class CatalogCacheIntegrationTest extends DatabaseTestBase {
     void committedImportInvalidatesEveryDisplayEvenWhenAnOldFillArrivesLate() throws Exception {
         importItems(productInput("cache-alpha", "Before", "Alpha description", 100));
         long id = id("cache-alpha");
-        UUID cartId = await(carts.identify(null));
+        UUID cartId = createAccountCart();
         await(carts.change(cartId, id, CartAction.SET, 2));
         await(catalog.list(ALL, EMPTY_CART));
         var oldEntries = await(entries());
@@ -127,7 +127,7 @@ class CatalogCacheIntegrationTest extends DatabaseTestBase {
     void failedSqlImportKeepsTheCommittedRevisionAndPreviouslyCachedProducts() throws Exception {
         importItems(productInput("cache-alpha", "Before", "Alpha description", 100));
         long id = id("cache-alpha");
-        UUID cartId = await(carts.identify(null));
+        UUID cartId = createAccountCart();
         await(carts.change(cartId, id, CartAction.SET, 2));
         await(catalog.list(ALL, EMPTY_CART));
         long revision = await(identities.findById(StoreIdentity.SINGLETON_ID)).catalogRevision();
@@ -206,7 +206,7 @@ class CatalogCacheIntegrationTest extends DatabaseTestBase {
     void cacheClientOutageFallsBackAndRecoveryCannotResurrectAnOlderCommittedCatalog() throws Exception {
         importItems(productInput("cache-alpha", "Before", "Description", 100));
         long id = id("cache-alpha");
-        UUID cartId = await(carts.identify(null));
+        UUID cartId = createAccountCart();
         await(carts.change(cartId, id, CartAction.SET, 2));
         await(catalog.list(ALL, EMPTY_CART));
         var oldEntries = await(entries());

@@ -17,32 +17,19 @@ public class CartService {
     private final CartLineRepository lines;
     private final CatalogReads catalog;
     private final ProductRepository products;
-    private final StoreUserRepository users;
     private final TransactionalOperator transactions;
     private final CheckoutIntentRepository intents;
     private final CartQueries queries;
 
     public CartService(CartRepository carts, CartLineRepository lines, CatalogReads catalog,
-                       ProductRepository products, StoreUserRepository users, TransactionalOperator transactions, CheckoutIntentRepository intents, CartQueries queries) {
+                       ProductRepository products, TransactionalOperator transactions, CheckoutIntentRepository intents, CartQueries queries) {
         this.carts = carts;
         this.lines = lines;
         this.catalog = catalog;
         this.products = products;
-        this.users = users;
         this.transactions = transactions;
         this.intents = intents;
         this.queries = queries;
-    }
-
-    public Mono<UUID> identify(UUID cookieId) {
-        return Mono.defer(() -> cookieId == null ? create() : users.existsByCartId(cookieId)
-                // Cookie даёт доступ только к гостевой корзине; корзина аккаунта требует authentication.
-                .flatMap(accountCart -> accountCart ? create() : carts.existsById(cookieId)
-                        .flatMap(exists -> exists ? Mono.just(cookieId) : create())));
-    }
-
-    private Mono<UUID> create() {
-        return carts.save(new ShoppingCart(UUID.randomUUID())).map(ShoppingCart::id);
     }
 
     public Mono<CartView> view(UUID cartId) {

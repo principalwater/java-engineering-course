@@ -1,9 +1,7 @@
 package dev.principalwater.store.analytics;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.principalwater.store.util.VisitorIdentity;
 import dev.principalwater.store.StoreIntegrationTestBase;
-import dev.principalwater.store.config.CartProperties;
 import dev.principalwater.store.dao.ProductRepository;
 import dev.principalwater.store.dao.StoreUserRepository;
 import dev.principalwater.store.model.*;
@@ -56,7 +54,6 @@ class AnalyticsIntegrationTest extends StoreIntegrationTestBase {
     @Autowired private ObjectMapper json;
     @Autowired private Clock clock;
     @Autowired private WebTestClient web;
-    @Autowired private CartProperties cartProperties;
     @Autowired private AccountService accounts;
     @Autowired private StoreUserRepository users;
 
@@ -67,8 +64,10 @@ class AnalyticsIntegrationTest extends StoreIntegrationTestBase {
 
     @Test
     void realCheckoutRetriesUnknownOutcomeAndRecoversAfterWarehouseOutage() throws Exception {
-        UUID firstCart = await(carts.identify(null));
-        web = web.mutate().defaultCookie(cartProperties.cookieName(), firstCart.toString()).build();
+        UUID firstCart = createAccountCart();
+        var firstPrincipal = new StoreUserDetails(await(users.findByCartId(firstCart)));
+        web = web.mutateWith(mockAuthentication(UsernamePasswordAuthenticationToken.authenticated(
+                firstPrincipal, null, firstPrincipal.getAuthorities())));
         var buyer = accountClient(AccountRole.BUYER);
         var seller = accountClient(AccountRole.SELLER);
         // Пустое окно доступно, но среднего без заказов нет: wire-контракт сохраняет явный null.
@@ -92,7 +91,7 @@ class AnalyticsIntegrationTest extends StoreIntegrationTestBase {
         StepVerifier.create(clickhouse.insert(batch.facts())).expectComplete().verify(TIMEOUT);
         StepVerifier.create(clickhouse.insert(batch.facts())).expectComplete().verify(TIMEOUT);
         var fact = batch.facts().getFirst();
-        assertEquals(VisitorIdentity.analyticsId(firstCart), fact.userId());
+        assertEquals(accountId(firstCart), fact.userId());
         var foreign = new AnalyticsFact(UUID.randomUUID(), UUID.randomUUID(), fact.orderUuid(), fact.orderId(),
                 fact.createdAt(), fact.lineNumber(), fact.productId(), fact.sku(), fact.title(), 1_000_000, 99);
         var otherUser = new AnalyticsFact(fact.sourceId(), UUID.randomUUID(), UUID.randomUUID(), fact.orderId(),
@@ -215,7 +214,7 @@ class AnalyticsIntegrationTest extends StoreIntegrationTestBase {
 
     private AnalyticsRow total(UUID userId) {
         var end = LocalDate.now(clock.withZone(ZoneOffset.UTC));
-        return await(queue.sourceId().flatMap(source -> clickhouse.dashboard(source, VisitorIdentity.analyticsId(userId), end.minusDays(6), end)))
+        return await(queue.sourceId().flatMap(source -> clickhouse.dashboard(source, java.util.Objects.requireNonNullElse(accountId(userId), userId), end.minusDays(6), end)))
                 .stream().filter(row -> row.bucket() == AnalyticsBucket.TOTAL).findFirst().orElseThrow();
     }
 

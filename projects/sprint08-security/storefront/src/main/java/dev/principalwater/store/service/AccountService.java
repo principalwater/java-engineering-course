@@ -49,7 +49,7 @@ public class AccountService implements ReactiveUserDetailsService {
                     .flatMap(hash -> carts.save(new ShoppingCart(UUID.randomUUID())).flatMap(cart ->
                             users.save(new StoreUser(UUID.randomUUID(), cart.id(), username, hash,
                                     registration.displayName().strip()))).as(transactions::transactional))
-                    .onErrorMap(DuplicateKeyException.class, failure -> new StoreException(StoreError.ACCOUNT_EXISTS));
+                    .onErrorMap(DuplicateKeyException.class, failure -> new StoreException(StoreError.ACCOUNT_EXISTS, failure));
         });
     }
 

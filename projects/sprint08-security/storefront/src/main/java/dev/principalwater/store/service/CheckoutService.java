@@ -55,7 +55,7 @@ public class CheckoutService {
         if (intent.status() == CheckoutIntent.Status.DECLINED) { return Mono.error(new StoreException(StoreError.INSUFFICIENT_FUNDS)); }
         return payments.debit(intent)
                 // Неизвестный исход не равен отказу: intent и снимок остаются для того же ключа повтора.
-                .onErrorMap(failure -> new StoreException(StoreError.PAYMENT_PENDING))
+                .onErrorMap(failure -> new StoreException(StoreError.PAYMENT_PENDING, failure))
                 .flatMap(receipt -> settlement.settle(intent, receipt));
     }
 

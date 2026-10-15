@@ -63,21 +63,27 @@ class StoreServiceTest extends StoreIntegrationTestBase {
     @Autowired private ObjectMapper json;
 
     @Test
-    void orderHistoryUsesStableOwnerScopedKeysetsEvenWhenTimestampsAreEqual() throws Exception {
+    void orderHistoryUsesStableOwnerScopedKeysetsAcrossEqualAndDifferentTimestamps() throws Exception {
         importItems(productInput("history", "History", "Cursor fixture", 100));
         long product = id("history");
         UUID owner = createAccountCart();
         UUID other = createAccountCart();
         var created = new ArrayList<Long>();
-        for (int index = 0; index < 4; index++) {
+        for (int index = 0; index < 5; index++) {
             await(carts.change(index == 1 ? other : owner, product, CartAction.PLUS));
             created.add(await(buy(index == 1 ? other : owner)));
         }
-        execute("UPDATE purchase_orders SET created_at = TIMESTAMP WITH TIME ZONE '2026-10-15 12:00:00+00'");
+        // Первый заказ владельца новее остальных при наименьшем id, последний старее при наибольшем: порядок
+        // id не совпадает с порядком времени, а второй и третий делят время и проверяют ветку равенства.
+        createdAt(created.get(0), "2026-10-15 12:00:02+00");
+        createdAt(created.get(1), "2026-10-15 12:00:01+00");
+        createdAt(created.get(2), "2026-10-15 12:00:01+00");
+        createdAt(created.get(3), "2026-10-15 12:00:01+00");
+        createdAt(created.get(4), "2026-10-15 12:00:00+00");
         var first = await(orderService.history(owner, 2, null));
-        assertEquals(List.of(created.get(3), created.get(2)), first.orders().stream().map(OrderView::id).toList());
+        assertEquals(List.of(created.get(0), created.get(3)), first.orders().stream().map(OrderView::id).toList());
         var last = await(orderService.history(owner, 2, first.nextCursor()));
-        assertEquals(List.of(created.getFirst()), last.orders().stream().map(OrderView::id).toList());
+        assertEquals(List.of(created.get(2), created.get(4)), last.orders().stream().map(OrderView::id).toList());
         assertNull(last.nextCursor());
         assertThrows(StoreException.class, () -> orderService.history(other, 2, first.nextCursor()));
         var foreign = await(orderService.history(other, 2, null));
@@ -215,8 +221,8 @@ class StoreServiceTest extends StoreIntegrationTestBase {
         var results = race(checkout.buy(cartId, key, 70000).thenReturn(true), checkout.buy(cartId, key, 70000).thenReturn(true));
         assertEquals(2, results.stream().filter(Signal::isOnNext).count());
         assertEquals(1, PaymentsStub.DEBITS.get());
-        StepVerifier.create(orders.findByCartIdOrderByCreatedAtDescIdDesc(cartId).count())
-                .expectNext(1L).expectComplete().verify(TIMEOUT);
+        // База очищается перед тестом, а корзина здесь одна: общий счётчик равен числу её заказов.
+        StepVerifier.create(orders.count()).expectNext(1L).expectComplete().verify(TIMEOUT);
         StepVerifier.create(carts.view(cartId)).assertNext(view -> assertTrue(view.items().isEmpty()))
                 .expectComplete().verify(TIMEOUT);
     }
@@ -438,5 +444,9 @@ class StoreServiceTest extends StoreIntegrationTestBase {
 
     private long id(String sku) {
         return await(products.findAllBySkuIn(List.of(sku)).single()).id();
+    }
+
+    private void createdAt(long orderId, String timestamp) {
+        execute("UPDATE purchase_orders SET created_at = TIMESTAMP WITH TIME ZONE '" + timestamp + "' WHERE id = " + orderId);
     }
 }

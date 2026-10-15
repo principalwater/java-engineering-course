@@ -10,13 +10,13 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 public interface OrderRepository extends ReactiveCrudRepository<PurchaseOrder, Long> {
-    Flux<PurchaseOrder> findByCartIdOrderByCreatedAtDescIdDesc(UUID cartId);
     @Query("SELECT * FROM purchase_orders WHERE cart_id = :cartId ORDER BY created_at DESC, id DESC LIMIT :limit")
     Flux<PurchaseOrder> history(UUID cartId, int limit);
 
+    // Кортеж повторяет порядок индекса orders_cart_time_idx (cart_id, created_at DESC, id DESC).
     @Query("""
             SELECT * FROM purchase_orders WHERE cart_id = :cartId
-              AND (created_at < :createdAt OR (created_at = :createdAt AND id < :id))
+              AND (created_at, id) < (:createdAt, :id)
             ORDER BY created_at DESC, id DESC LIMIT :limit
             """)
     Flux<PurchaseOrder> historyBefore(UUID cartId, Instant createdAt, long id, int limit);

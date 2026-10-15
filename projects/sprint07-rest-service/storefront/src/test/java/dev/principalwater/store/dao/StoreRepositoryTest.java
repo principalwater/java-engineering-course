@@ -2,6 +2,7 @@ package dev.principalwater.store.dao;
 
 import dev.principalwater.store.DatabaseTestBase;
 import dev.principalwater.store.model.*;
+import dev.principalwater.store.payment.CheckoutIntent;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.data.r2dbc.DataR2dbcTest;
 import reactor.test.StepVerifier;
+import reactor.core.publisher.Flux;
 
 import static dev.principalwater.store.ProductFixtures.productInput;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -24,6 +26,7 @@ class StoreRepositoryTest extends DatabaseTestBase {
     @Autowired private OrderRepository orders;
     @Autowired private OrderLineRepository lines;
     @Autowired private OutboxRepository outbox;
+    @Autowired private CheckoutIntentRepository intents;
 
     @Test
     void persistedOrderRetainsItsPriceAndTitleAfterACatalogUpdate() {
@@ -72,4 +75,28 @@ class StoreRepositoryTest extends DatabaseTestBase {
         StepVerifier.create(outbox.countByDeliveredAtIsNull()).expectNext(0L).expectComplete().verify(TIMEOUT);
         StepVerifier.create(outbox.latestDelivery().map(OffsetDateTime::toInstant)).expectNext(delivered).expectComplete().verify(TIMEOUT);
     }
+    @Test
+    void recoveryClaimsHaveOneWinnerAndBecomeRetryableAfterTheLeaseWithoutChangingThePayment() {
+        var cart = await(carts.save(new ShoppingCart(UUID.randomUUID())));
+        var intent = await(intents.save(new CheckoutIntent(UUID.randomUUID(), cart.id(), UUID.randomUUID(), 70000, PURCHASE_TIME)));
+        StepVerifier.create(intents.pending(PURCHASE_TIME.minusMillis(1), 32)).verifyComplete();
+        assertEquals(0, await(intents.markAttempt(intent.id(), PURCHASE_TIME.plusSeconds(29), PURCHASE_TIME.minusMillis(1))),
+                "The buyer's original debit owns the initial grace period");
+        StepVerifier.create(intents.pending(PURCHASE_TIME, 32).map(CheckoutIntent::id)).expectNext(intent.id()).verifyComplete();
+
+        // Две реплики прочитали одну очередь: только один условный UPDATE разрешает HTTP-попытку.
+        var attemptedAt = PURCHASE_TIME.plusSeconds(30);
+        assertEquals(1, await(Flux.merge(intents.markAttempt(intent.id(), attemptedAt, PURCHASE_TIME),
+                intents.markAttempt(intent.id(), attemptedAt, PURCHASE_TIME)).reduce(0, Integer::sum)));
+        StepVerifier.create(intents.pending(attemptedAt.minusMillis(1), 32)).verifyComplete();
+        assertEquals(0, await(intents.markAttempt(intent.id(), attemptedAt.plusSeconds(15), attemptedAt.minusSeconds(15))));
+        // Падение worker не теряет intent: после 30 с retry не требует другого ключа или снимка.
+        StepVerifier.create(intents.pending(attemptedAt, 32).map(CheckoutIntent::id)).expectNext(intent.id()).verifyComplete();
+        assertEquals(1, await(intents.markAttempt(intent.id(), attemptedAt.plusSeconds(30), attemptedAt)));
+        assertEquals(intent, await(intents.findById(intent.id())));
+        assertEquals(1, await(intents.decline(intent.id())));
+        assertEquals(0, await(intents.markAttempt(intent.id(), attemptedAt.plusSeconds(60), attemptedAt.plusSeconds(30))));
+        StepVerifier.create(intents.pending(attemptedAt.plusSeconds(30), 32)).verifyComplete();
+    }
+
 }

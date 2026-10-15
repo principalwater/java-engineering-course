@@ -276,20 +276,22 @@ class StoreServiceTest extends StoreIntegrationTestBase {
         long productId = id("recovery");
         var prepared = new ArrayList<CheckoutIntent>();
         PaymentsStub.UNAVAILABLE.set(true);
-        for (int index = 0; index < 17; index++) {
+        for (int index = 0; index < 33; index++) {
             UUID cartId = await(carts.identify(null));
             await(carts.change(cartId, productId, CartAction.PLUS));
             expectError(buy(cartId), StoreError.PAYMENT_PENDING);
             prepared.add(await(intents.findByActiveCartId(cartId)));
         }
-        var blocked = await(intents.pending().collectList());
-        assertEquals(16, blocked.size());
+        // Старше начального grace period: recovery не должен перехватывать исходный debit покупателя.
+        execute("UPDATE checkout_intents SET created_at = created_at - INTERVAL '1' MINUTE");
+        var blocked = await(intents.pending(java.time.Instant.now(), 32).collectList());
+        assertEquals(32, blocked.size());
         blocked.forEach(intent -> PaymentsStub.UNAVAILABLE_KEYS.add(intent.id().toString()));
         var available = prepared.stream().filter(intent -> !PaymentsStub.UNAVAILABLE_KEYS.contains(intent.id().toString()))
                 .findFirst().orElseThrow();
         PaymentsStub.UNAVAILABLE.set(false);
 
-        // Старые 16 ошибок не должны навсегда удерживать уже доступную следующую операцию вне очереди.
+        // Старые 32 ошибки не должны навсегда удерживать уже доступную следующую операцию вне очереди.
         recovery.recover().block(TIMEOUT);
         assertEquals(0, PaymentsStub.DEBITS.get());
         recovery.recover().block(TIMEOUT);

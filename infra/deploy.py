@@ -95,14 +95,14 @@ def check_plan(plan, stack):
                     raise ValueError("Secret mounts must be read-only files outside the repository")
 
 
-def prepare(stack, secrets_directory, environment, build_tool="gradle"):
+def prepare(stack, secrets_directory, environment):
     project = REPOSITORY / STACKS[stack]
     if stack.startswith("sprint"):
         secret_variable = "STORE_SECRETS_DIR" if stack.startswith(("sprint05", "sprint06", "sprint07")) else "BLOG_SECRETS_DIR"
         subprocess.run([sys.executable, "scripts/init-secrets.py"], cwd=project,
                        env={**environment, secret_variable: str(secrets_directory)}, check=True)
         if stack.startswith("sprint07-"):
-            subprocess.run([sys.executable, "scripts/package.py", "--build-tool", build_tool],
+            subprocess.run([sys.executable, "scripts/package.py"],
                            cwd=project, env=environment, check=True)
     elif stack == "docker-exercise":
         destination = secrets_directory / "db_password"
@@ -129,15 +129,11 @@ def main():
     parser.add_argument("action", choices=["plan", "apply", "status"])
     parser.add_argument("--analytics", action="store_true", help="Enable the selected project's optional analytics")
     parser.add_argument("--replace", action="append", default=[], help="Plan replacement of an exact resource address")
-    parser.add_argument("--build-tool", choices=["gradle", "maven"], default="gradle",
-                        help="Sprint 7 executable-JAR builder; apply must match the saved plan")
     args = parser.parse_args()
     if args.analytics and args.stack not in {"sprint03", "sprint04", "sprint05-postgresql", "sprint05-h2", "sprint06-postgresql", "sprint06-h2", "sprint07-postgresql", "sprint07-h2"}:
         parser.error("Analytics is available only for project deployments")
     if args.replace and args.action != "plan":
         parser.error("--replace is valid only when preparing a plan")
-    if args.build_tool != "gradle" and not args.stack.startswith("sprint07-"):
-        parser.error("--build-tool is available only for Sprint 7")
 
     state = external_directory(Path(os.environ.get("COURSE_DEPLOY_STATE", Path.home() / ".local/state/java-engineering-course")) / args.stack)
     secrets_directory = external_directory(Path(os.environ.get("COURSE_DEPLOY_SECRETS", Path.home() / ".config/java-engineering-course/tofu")) / args.stack)
@@ -157,7 +153,7 @@ def main():
     plan = state / "reviewed.tfplan"
     receipt = state / "plan-inputs.json"
     if args.action == "plan":
-        prepare(args.stack, secrets_directory, environment, args.build_tool)
+        prepare(args.stack, secrets_directory, environment)
     if args.stack.startswith("sprint07-") and args.action != "status":
         variables["TF_VAR_deployment_artifact_hashes"] = json.dumps(artifact_hashes(args.stack), sort_keys=True)
         environment.update(variables)
@@ -167,19 +163,16 @@ def main():
         receipt.unlink(missing_ok=True)
         subprocess.run(command + ["plan", "-input=false", f"-out={plan}"] + [f"-replace={address}" for address in args.replace], env=environment, check=True)
         check_plan(json.loads(subprocess.check_output(command + ["show", "-json", str(plan)], env=environment)), args.stack)
-        receipt.write_text(json.dumps({"fingerprint": fingerprint(args.stack, variables), "variables": variables,
-                                       "build_tool": args.build_tool}))
+        receipt.write_text(json.dumps({"fingerprint": fingerprint(args.stack, variables), "variables": variables}))
         plan.chmod(0o600)
         receipt.chmod(0o600)
         print(f"Review the plan above, then run: python3 infra/deploy.py {args.stack} apply" +
-              (" --analytics" if args.analytics else "") +
-              (" --build-tool maven" if args.build_tool == "maven" else ""))
+              (" --analytics" if args.analytics else ""))
     elif args.action == "apply":
         if not receipt.exists() or not plan.exists():
             raise ValueError("Prepare and review a plan before applying")
         approved = json.loads(receipt.read_text())
-        if approved != {"fingerprint": fingerprint(args.stack, variables), "variables": variables,
-                        "build_tool": args.build_tool}:
+        if approved != {"fingerprint": fingerprint(args.stack, variables), "variables": variables}:
             raise ValueError("Deployment inputs changed after planning; prepare a new plan")
         check_plan(json.loads(subprocess.check_output(command + ["show", "-json", str(plan)], env=environment)), args.stack)
         subprocess.run(command + ["apply", "-input=false", str(plan)], env=environment, check=True)

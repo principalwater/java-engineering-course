@@ -15,8 +15,8 @@ specification.loader.exec_module(deploy)
 
 
 class DeploymentPlanTest(unittest.TestCase):
-    def test_saved_plan_requires_the_same_two_artifacts_sources_and_builder(self):
-        cases = ["unchanged", "storefront artifact", "payments artifact", "source", "builder",
+    def test_saved_plan_requires_the_same_two_artifacts_and_sources(self):
+        cases = ["unchanged", "storefront artifact", "payments artifact", "source",
                  "documentation", "packaged Markdown", "infrastructure runtime config"]
         for case in cases:
             with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
@@ -71,8 +71,6 @@ class DeploymentPlanTest(unittest.TestCase):
                     elif case == "infrastructure runtime config":
                         (infrastructure / "redis.conf").write_text("maxmemory 64mb")
                     arguments = ["deploy.py", "sprint07-h2", "apply"]
-                    if case == "builder":
-                        arguments += ["--build-tool", "maven"]
                     with patch.object(sys, "argv", arguments):
                         if case in {"unchanged", "documentation"}:
                             deploy.main()

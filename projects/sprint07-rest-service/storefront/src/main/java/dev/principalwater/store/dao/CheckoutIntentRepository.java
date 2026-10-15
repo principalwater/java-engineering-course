@@ -13,11 +13,13 @@ public interface CheckoutIntentRepository extends ReactiveCrudRepository<Checkou
     Mono<CheckoutIntent> findByActiveCartId(UUID cartId);
     Mono<CheckoutIntent> findFirstByCartIdOrderByCreatedAtDesc(UUID cartId);
     @Query("SELECT * FROM checkout_intents WHERE status = 'PREPARED' "
-            + "ORDER BY last_attempt_at NULLS FIRST, created_at, id LIMIT 16")
-    Flux<CheckoutIntent> pending();
+            + "AND COALESCE(last_attempt_at, created_at) <= :retryBefore "
+            + "ORDER BY last_attempt_at NULLS FIRST, created_at, id LIMIT :batchSize")
+    Flux<CheckoutIntent> pending(Instant retryBefore, int batchSize);
     @Modifying
-    @Query("UPDATE checkout_intents SET last_attempt_at = :attemptedAt WHERE id = :id AND status = 'PREPARED'")
-    Mono<Integer> markAttempt(UUID id, Instant attemptedAt);
+    @Query("UPDATE checkout_intents SET last_attempt_at = :attemptedAt WHERE id = :id AND status = 'PREPARED' "
+            + "AND COALESCE(last_attempt_at, created_at) <= :retryBefore")
+    Mono<Integer> markAttempt(UUID id, Instant attemptedAt, Instant retryBefore);
     @Modifying
     @Query("UPDATE checkout_intents SET status = 'CONFIRMED', active_cart_id = NULL, order_id = :orderId, "
             + "version = version + 1 WHERE id = :id AND status = 'PREPARED'")

@@ -11,12 +11,11 @@ from smoke import MarketProbe
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--build-tool", choices=["gradle", "maven"], default="gradle")
-    args = parser.parse_args()
-    with run_directory("jar-" + args.build_tool) as directory:
+    parser = argparse.ArgumentParser(description="Verify both executable JARs with native H2 and Redis.")
+    parser.parse_args()
+    with run_directory("jar") as directory:
         secrets_directory = initialize(directory / "secrets")
-        with redis(secrets_directory, administrative=True) as cache, applications(secrets_directory, cache, args.build_tool) as endpoints:
+        with redis(secrets_directory, administrative=True) as cache, applications(secrets_directory, cache) as endpoints:
             balance = endpoints["payments"] + "/api/v1/accounts/" + str(uuid.uuid4()) + "/balance"
             for headers in ({}, {"Authorization": "Bearer invalid-service-token"}):
                 try:

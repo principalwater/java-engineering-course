@@ -222,7 +222,7 @@ def application(service, jar, directory, secrets_directory, environment):
 
 
 @contextmanager
-def applications(secrets_directory, redis_endpoint, build_tool="gradle", databases=None):
+def applications(secrets_directory, redis_endpoint, databases=None):
     with ExitStack() as stack:
         directory = secrets_directory.parent / "jvm"
         directory.mkdir(mode=0o700)
@@ -231,9 +231,9 @@ def applications(secrets_directory, redis_endpoint, build_tool="gradle", databas
         for service, port in [("payments", 18097), ("storefront", 18087)]:
             database = None if databases is None else databases[service]
             tree = configtree(service, secrets_directory, directory / (service + "-config"), database)
-            artifact = PROJECT / service / ("target" if build_tool == "maven" else "build/libs") / (service + ".jar")
+            artifact = PROJECT / service / "build/libs" / (service + ".jar")
             if not artifact.is_file():
-                raise FileNotFoundError("Package the " + build_tool + " executable JAR before verification: " + service)
+                raise FileNotFoundError("Package the Gradle executable JAR before verification: " + service)
             environment = {"SERVER_PORT": str(port), "SPRING_PROFILES_ACTIVE": "h2" if database is None else "postgresql",
                            "SPRING_CONFIG_IMPORT": "configtree:" + str(tree) + "/", "STORE_ANALYTICS_ENABLED": "false"}
             if database:

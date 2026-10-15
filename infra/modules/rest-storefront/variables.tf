@@ -1,5 +1,5 @@
 variable "project_directory" {
-  description = "Root of the existing two-service Gradle/Maven project."
+  description = "Root of the existing two-service Gradle project."
   type        = string
 }
 variable "stack_name" {

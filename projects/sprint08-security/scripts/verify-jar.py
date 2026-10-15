@@ -24,10 +24,10 @@ def main():
                     assert error.code == 401
                 else:
                     raise AssertionError("Payments must reject missing or incorrect service credentials")
-            MarketProbe(endpoints["storefront"], endpoints["payments"], secrets_directory).run()
+            MarketProbe(endpoints["storefront"], endpoints["payments"], secrets_directory, endpoints["token_uri"]).run()
             # Дополнительная fixture-роль наблюдает keyspace; приложение использует неизменённый production ACL.
             scan = ('REDISCLI_AUTH="$(cat /run/secrets/redis_password)" '
-                    "redis-cli --user cache_test --no-auth-warning --scan --pattern 'sprint07-jar-test:v1:*'")
+                    "redis-cli --user cache_test --no-auth-warning --scan --pattern 'sprint08-jar-test:v1:*'")
             keys = subprocess.check_output(["docker", "exec", cache["container"], "sh", "-c", scan], text=True).splitlines()
             assert any(":product:" in key for key in keys) and any(":page:" in key for key in keys), \
                 "The actual storefront ACL must populate both product and page caches"

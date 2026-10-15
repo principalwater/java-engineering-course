@@ -2,6 +2,7 @@
 """Проверяет настоящий HTTP-сеанс магазина; создаёт собственные товары и заказ в тестовом стенде."""
 
 import argparse
+import base64
 from html.parser import HTMLParser
 from http.cookiejar import CookieJar
 import json
@@ -10,7 +11,7 @@ from pathlib import Path
 import re
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlencode, urlparse
-from urllib.request import build_opener, HTTPCookieProcessor, HTTPRedirectHandler, Request
+from urllib.request import urlopen, build_opener, HTTPCookieProcessor, HTTPRedirectHandler, Request
 import uuid
 
 CSRF_FIELD = "_csrf"
@@ -71,10 +72,12 @@ class Redirects(HTTPRedirectHandler):
 
 
 class MarketProbe:
-    def __init__(self, base, payments_url=None, secrets_dir=None):
+    def __init__(self, base, payments_url=None, secrets_dir=None, token_uri=None):
+        self.token_uri = token_uri or os.environ.get("PAYMENTS_OAUTH_TOKEN_URI",
+                "http://localhost:18381/realms/storefront-api/protocol/openid-connect/token")
         self.base = base.rstrip("/")
         self.payments_url = payments_url.rstrip("/") if payments_url else None
-        self.secrets_dir = Path(secrets_dir or os.environ.get("STORE_SECRETS_DIR", os.environ.get("SECRETS_DIR", Path.home() / ".config/java-engineering-course/sprint07")))
+        self.secrets_dir = Path(secrets_dir or os.environ.get("STORE_SECRETS_DIR", os.environ.get("SECRETS_DIR", Path.home() / ".config/java-engineering-course/sprint08")))
         self.cookies = CookieJar()
         self.redirects = Redirects()
         self.http = build_opener(HTTPCookieProcessor(self.cookies), self.redirects)
@@ -86,7 +89,6 @@ class MarketProbe:
         with self.http.open(Request(self.base + path, data=data, headers=headers), timeout=15) as response:
             assert response.status == 200
             page = Page(response.url, response.read().decode())
-        assert "/orders" in page.links and "/cart/items" in page.links, "Every page must retain orders and cart navigation"
         return page
 
     def post(self, path, page, **values):
@@ -106,19 +108,93 @@ class MarketProbe:
         assert urlparse(result.url).path == "/profile", "Account login failed"
         return result
 
+    def register_account(self, display_name="HTTP probe"):
+        username = "probe-" + uuid.uuid4().hex[:16]
+        password = "Probe-" + uuid.uuid4().hex
+        page = self.read("/account/register")
+        self.read("/account/register", urlencode({CSRF_FIELD: page.token, "username": username,
+                  "displayName": display_name, "password": password}).encode(), "application/x-www-form-urlencoded")
+        self.login(username, password)
+        return username, password
+
+    def verify_user_isolation(self, proof, product, credentials):
+        other = MarketProbe(self.base, self.payments_url, self.secrets_dir, self.token_uri)
+        public = other.read("/items")
+        assert "/orders" not in public.links and "/cart/items" not in public.links
+        assert urlparse(other.read(proof["order_path"]).url).path == "/account/login"
+        other.register_account("Другой покупатель")
+        assert other.read("/cart/items").cart_total == 0
+        try:
+            other.read(proof["order_path"])
+        except HTTPError as error:
+            assert error.code == 404
+            error.read()
+        else:
+            raise AssertionError("Another buyer must not read the order")
+        added = other.post("/cart/items", other.read("/cart/items"), id=product, action="PLUS")
+        second_order = other.post("/buy", added)
+        second_path = urlparse(second_order.url).path
+        second_proof = other.json(second_path + "/payment")
+        assert second_proof["accountId"] != proof["account_id"]
+        assert second_proof["referenceId"] != proof["payment_key"]
+        try:
+            self.read(second_path)
+        except HTTPError as error:
+            assert error.code == 404
+            error.read()
+        else:
+            raise AssertionError("The original buyer must not read the other order")
+        # Списание второго покупателя не меняет исходный кошелёк и квитанцию первого.
+        self.verify_payment(proof)
+        same = MarketProbe(self.base, self.payments_url, self.secrets_dir, self.token_uri)
+        same.login(*credentials)
+        assert same.read(proof["order_path"]).order_total == 400
+        stolen = MarketProbe(self.base, self.payments_url, self.secrets_dir, self.token_uri)
+        import copy
+        for cookie in same.cookies:
+            stolen.cookies.set_cookie(copy.copy(cookie))
+        confirmation = same.read("/account/logout")
+        signed_out = same.read("/account/logout", urlencode({CSRF_FIELD: confirmation.token}).encode(),
+                               "application/x-www-form-urlencoded")
+        assert urlparse(signed_out.url).path == "/account/login"
+        assert urlparse(stolen.read(proof["order_path"]).url).path == "/account/login"
+        assert self.read(proof["order_path"]).order_total == 400
+        assert other.read(second_path).order_total == second_order.order_total
+        print("Security: two buyers, separate wallets/carts/orders, shared account across browsers and logout replay passed")
+
     def json(self, path):
         with self.http.open(Request(self.base + path, headers={"Accept": "application/json"}), timeout=15) as response:
             return json.load(response)
 
+    def service_token(self, scope="payments.read payments.write"):
+        secret = (self.secrets_dir / "oauth_client_secret").read_text().strip()
+        basic = base64.b64encode(("storefront:" + secret).encode()).decode()
+        request = Request(self.token_uri, data=urlencode({"grant_type": "client_credentials", "scope": scope}).encode(),
+                          headers={"Authorization": "Basic " + basic, "Content-Type": "application/x-www-form-urlencoded"})
+        # Сервисный запрос не использует cookie jar браузера: cookie не изолированы по порту.
+        with urlopen(request, timeout=10) as response:
+            return json.load(response)["access_token"]
+
     def verify_payment(self, proof):
         assert self.payments_url, "A payment service origin is required"
-        token = (self.secrets_dir / "payments_service_token").read_text().strip()
+        token = self.service_token()
         headers = {"Accept": "application/json", "Authorization": "Bearer " + token}
         balance_url = self.payments_url + "/api/v1/accounts/" + proof["account_id"] + "/balance"
         with self.http.open(Request(balance_url, headers=headers), timeout=10) as response:
             before = json.load(response)
         payload = json.dumps({"accountId": proof["account_id"], "referenceId": proof["payment_key"],
                               "amountMinor": proof["payment_amount_minor"], "currency": proof["currency"]}).encode()
+        for scope, endpoint, body in [("payments.write", balance_url, None),
+                                      ("payments.read", self.payments_url + "/api/v1/payments", payload)]:
+            forbidden = Request(endpoint, data=body, headers={"Authorization": "Bearer " + self.service_token(scope),
+                                "Content-Type": "application/json", "Idempotency-Key": proof["payment_key"]})
+            try:
+                urlopen(forbidden, timeout=10).close()
+            except HTTPError as error:
+                assert error.code == 403, "A valid token must not authorize an unrelated scope"
+                error.read()
+            else:
+                raise AssertionError("Payments must enforce the endpoint scope")
         request = Request(self.payments_url + "/api/v1/payments", data=payload,
                           headers={**headers, "Content-Type": "application/json", "Idempotency-Key": proof["payment_key"]})
         with self.http.open(request, timeout=10) as response:
@@ -137,7 +213,7 @@ class MarketProbe:
     def run(self):
         marker = "C++ & " + uuid.uuid4().hex
         # Импорт принадлежит продавцу; покупки проверяются отдельным аккаунтом и cookie jar.
-        seller = MarketProbe(self.base, self.payments_url, self.secrets_dir)
+        seller = MarketProbe(self.base, self.payments_url, self.secrets_dir, self.token_uri)
         seller.login("seller", (self.secrets_dir / "seller_password").read_text().strip())
         catalog = seller.read("/catalog")
         boundary = "storefront-" + uuid.uuid4().hex
@@ -149,12 +225,7 @@ class MarketProbe:
                    f'--{boundary}\r\nContent-Disposition: form-data; name="catalog"; filename="catalog.json"\r\n'
                    'Content-Type: application/json\r\n\r\n').encode() + json.dumps(products).encode() + f"\r\n--{boundary}--\r\n".encode()
         seller.read("/catalog/import", payload, "multipart/form-data; boundary=" + boundary)
-        username = "probe-" + uuid.uuid4().hex[:16]
-        password = "Probe-" + uuid.uuid4().hex
-        page = self.read("/account/register")
-        self.read("/account/register", urlencode({CSRF_FIELD: page.token, "username": username,
-                  "displayName": "HTTP probe", "password": password}).encode(), "application/x-www-form-urlencoded")
-        self.login(username, password)
+        credentials = self.register_account()
         query = urlencode({"search": marker, "sort": "PRICE", "pageNumber": 1, "pageSize": 2})
         listing = self.read("/items?" + query)
         assert len(listing.products) == 2
@@ -180,8 +251,7 @@ class MarketProbe:
             self.read("/buy", b"", "application/x-www-form-urlencoded")
         except HTTPError as error:
             assert error.code == 403
-            denied = Page(error.url, error.read().decode())
-            assert "/orders" in denied.links and "/cart/items" in denied.links
+            error.read()
         else:
             raise AssertionError("A purchase without CSRF must be rejected")
         order = self.post("/buy", cart)
@@ -203,12 +273,13 @@ class MarketProbe:
         if self.payments_url:
             receipt = self.verify_payment(result)
             result["balance_minor"] = receipt["balanceMinor"]
+            self.verify_user_isolation(result, first, credentials)
         return result
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default="http://localhost:8087")
+    parser.add_argument("--base-url", default="http://localhost:8088")
     parser.add_argument("--payments-url")
     parser.add_argument("--secrets-dir", type=Path)
     arguments = parser.parse_args()

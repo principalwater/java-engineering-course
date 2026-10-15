@@ -23,7 +23,7 @@ public abstract class DatabaseTestBase extends ReactiveTestBase {
     @AfterEach
     protected final void cleanDatabase() {
         String url = context.getEnvironment().getRequiredProperty("spring.r2dbc.url");
-        assertTrue(Set.of("store-tests7", "store_tests")
+        assertTrue(Set.of("store-tests8", "store_tests")
                         .contains(ConnectionFactoryOptions.parse(url).getRequiredValue(DATABASE)),
                 "Database cleanup requires its isolated test database");
         // R2DBC не участвует в test-managed JDBC rollback: очищаем отдельную БД в порядке FK.

@@ -21,7 +21,7 @@ def main():
             subprocess.run([str(PROJECT / "gradlew"), "--no-daemon", "--console=plain", "postgresTest"],
                            cwd=PROJECT, env=environment, check=True)
             with applications(secrets_directory, cache, databases=databases) as endpoints:
-                MarketProbe(endpoints["storefront"], endpoints["payments"], secrets_directory).run()
+                MarketProbe(endpoints["storefront"], endpoints["payments"], secrets_directory, endpoints["token_uri"]).run()
     print("Independent PostgreSQL: R2DBC, rollback, concurrent checkout and real payment HTTP passed")
 
 

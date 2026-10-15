@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import uuid
-from runtime import run_directory
+from runtime import available_subnet, run_directory
 
 PROJECT = Path(__file__).resolve().parents[1]
 SERVICES = ["keeper", "ch-a1", "ch-a2", "ch-b1", "ch-b2"]
@@ -20,7 +20,7 @@ def main():
         secrets = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(secrets)
         secrets.initialize(directory, PROJECT)
-        environment = {**os.environ, "STORE_SECRETS_DIR": str(directory),
+        environment = {**os.environ, "STORE_SECRETS_DIR": str(directory), "STORE_NETWORK_SUBNET": available_subnet(),
                        "STORE_TEST_CLUSTER_URLS": ",".join(f"http://127.0.0.1:{port}" for port in PORTS),
                        "STORE_TEST_CLUSTER_CONTAINERS": ",".join(f"{name}-{node}-1" for node in SERVICES[1:])}
         for role in ("admin", "writer", "reader"):

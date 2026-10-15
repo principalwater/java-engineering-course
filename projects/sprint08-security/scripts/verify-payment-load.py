@@ -14,7 +14,7 @@ import time
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from runtime import PROJECT, application, configtree, initialize, postgres, redis, run_directory, wait_for
+from runtime import PROJECT, application, authorization, configtree, initialize, postgres, redis, run_directory, wait_for
 from smoke import MarketProbe
 
 BACKLOG = 80
@@ -101,10 +101,12 @@ def payment_proxy(origin):
         worker.join(timeout=10)
 
 
-def environment(service, port, directory, secrets, database):
+def environment(service, port, directory, secrets, database, oauth):
     tree = configtree(service, secrets, directory / (service + "-config"), database)
     result = {"SERVER_PORT": port, "SPRING_PROFILES_ACTIVE": "postgresql",
-              "SPRING_CONFIG_IMPORT": "configtree:" + str(tree) + "/", "STORE_ANALYTICS_ENABLED": "false"}
+              "SPRING_CONFIG_IMPORT": "configtree:" + str(tree) + "/", "STORE_ANALYTICS_ENABLED": "false",
+              "PAYMENTS_OAUTH_ISSUER": oauth["issuer"], "PAYMENTS_OAUTH_JWK_SET_URI": oauth["jwk_uri"],
+              "PAYMENTS_OAUTH_TOKEN_URI": oauth["token_uri"]}
     if service == "payments":
         result.update(PAYMENTS_DB_URL=database["url"], PAYMENTS_DB_USER=database["runtime_user"], PAYMENTS_SQL_INIT_MODE="never")
     else:
@@ -118,19 +120,23 @@ def prepare_carts(base, secrets):
     products = seller.post("/catalog/demo", seller.read("/catalog"))
     product = min(products.products)
     fixtures = []
-    for _ in range(BACKLOG):
-        buyer = MarketProbe(base)
-        cart = buyer.post("/cart/items", buyer.read("/items"), id=product, action="PLUS")
-        assert cart.checkout_key and cart.amount_minor
-        fixtures.append({"cookie": "; ".join(cookie.name + "=" + cookie.value for cookie in buyer.cookies),
-                         "form": {"_csrf": cart.token, "checkoutKey": cart.checkout_key, "amountMinor": cart.amount_minor}})
+    for index in range(BACKLOG + FOREGROUND):
+        buyer = MarketProbe(base, secrets_dir=secrets)
+        buyer.register_account("Load buyer")
+        page = buyer.read("/items")
+        form = {}
+        if index < BACKLOG:
+            cart = buyer.post("/cart/items", page, id=product, action="PLUS")
+            assert cart.checkout_key and cart.amount_minor
+            form = {"_csrf": cart.token, "checkoutKey": cart.checkout_key, "amountMinor": cart.amount_minor}
+        fixtures.append({"cookies": {cookie.name: cookie.value for cookie in buyer.cookies}, "form": form})
     return product, fixtures
 
 
 def k6(directory, base, product, phase):
     destination = directory / (phase + "-summary.json")
     environment = {**os.environ, "BASE_URL": base, "PRODUCT_ID": str(product), "PHASE": phase,
-                   "FIXTURES": str(directory / "fixtures.json"), "K6_NO_USAGE_REPORT": "true"}
+                   "FIXTURES": str(directory / "fixtures.json"), "BACKLOG": str(BACKLOG), "K6_NO_USAGE_REPORT": "true"}
     with (directory / (phase + "-k6.log")).open("w") as log:
         subprocess.run(["k6", "run", "--quiet", "--summary-export", str(destination),
                         str(PROJECT / "scripts/payment-load.js")], env=environment, check=True,
@@ -138,7 +144,7 @@ def k6(directory, base, product, phase):
     return json.loads(destination.read_text())["metrics"]
 
 
-def reconcile(databases, payments, secrets):
+def reconcile(databases, payments, secrets, token_uri):
     store = sql(databases["storefront"], "SELECT i.id, i.payer_id, i.amount_minor, o.payment_id FROM checkout_intents i "
                 "JOIN purchase_orders o ON o.id=i.order_id WHERE i.status='CONFIRMED' AND o.status='PAID'")
     assert len(store) == BACKLOG + FOREGROUND and len({row["payment_id"] for row in store}) == len(store)
@@ -154,9 +160,9 @@ def reconcile(databases, payments, secrets):
     wallets = "SELECT account_id, opening_balance_minor, balance_minor FROM payment_wallets ORDER BY account_id"
     before = sql(databases["payments"], wallets)
     charged = {row["payer_id"]: row["amount_minor"] for row in store}
-    assert len(charged) == len(store), "Each isolated guest must retain its own payment account"
+    assert len(charged) == len(store), "Each registered buyer must retain a separate payment account"
     assert all(row["opening_balance_minor"] - row["balance_minor"] == charged[row["account_id"]] for row in before)
-    token = (secrets / "payments_service_token").read_text().strip()
+    token = MarketProbe("http://127.0.0.1", secrets_dir=secrets, token_uri=token_uri).service_token()
 
     def replay(row):
         request = Request(payments + "/api/v1/payments", data=json.dumps({"accountId": row["payer_id"],
@@ -178,15 +184,15 @@ def main():
         raise SystemExit("Install k6 before running this verification")
     with run_directory("payment-load") as directory:
         secrets = initialize(directory / "secrets")
-        with postgres(secrets) as databases, redis(secrets) as cache:
+        with postgres(secrets) as databases, redis(secrets) as cache, authorization(secrets) as oauth:
             jar = lambda service: PROJECT / service / "build/libs" / (service + ".jar")
             with application("payments", jar("payments"), directory, secrets,
-                             environment("payments", free_port(), directory, secrets, databases["payments"])) as payments:
+                             environment("payments", free_port(), directory, secrets, databases["payments"], oauth)) as payments:
                 with payment_proxy(payments) as (proxy, state, lock):
-                    settings = environment("storefront", free_port(), directory, secrets, databases["storefront"])
+                    settings = environment("storefront", free_port(), directory, secrets, databases["storefront"], oauth)
                     settings.update(STORE_PAYMENTS_URL=proxy, SPRING_DATA_REDIS_HOST=cache["host"],
                                     SPRING_DATA_REDIS_PORT=cache["port"], SPRING_DATA_REDIS_USERNAME="storefront",
-                                    STORE_CACHE_NAMESPACE="sprint07-load", STORE_SECRETS_LOCATION=str(directory / "storefront-config") + "/")
+                                    STORE_CACHE_NAMESPACE="sprint08-load", STORE_SECRETS_LOCATION=str(directory / "storefront-config") + "/")
                     with application("storefront", jar("storefront"), directory, secrets, settings) as base:
                         product, fixtures = prepare_carts(base, secrets)
                         fixtures_path = directory / "fixtures.json"
@@ -228,7 +234,7 @@ def main():
                                   "recovery_forwarded": recovery_forwarded, "foreground_payment_requests": sum(foreground_dispatches.values()),
                                   "jvm_heap_limit_mib": 192, "jvm_direct_limit_mib": 48,
                                   "catalog_ms": metrics["catalog_ms"], "purchase_ms": metrics["purchase_ms"],
-                                  **reconcile(databases, payments, secrets)}
+                                  **reconcile(databases, payments, secrets, oauth["token_uri"])}
                         (directory / "report.json").write_text(json.dumps(report, indent=2))
                         print(json.dumps(report, indent=2))
                         print("Finite local load only: 200 ms injected payment latency, native JAR heap/direct limits; not a production SLO")

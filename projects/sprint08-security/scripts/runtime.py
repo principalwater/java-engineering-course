@@ -3,6 +3,7 @@
 from contextlib import contextmanager, ExitStack
 import hashlib
 import importlib.util
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -24,7 +25,7 @@ REDIS_COMMAND = ["--bind", "0.0.0.0", "--protected-mode", "yes", "--aclfile", "/
 
 @contextmanager
 def run_directory(purpose):
-    root = Path.home() / ".local/state/java-engineering-course/sprint07-tests"
+    root = Path.home() / ".local/state/java-engineering-course/sprint08-tests"
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     root.chmod(0o700)
     directory = root / (purpose + "-" + uuid.uuid4().hex)
@@ -87,12 +88,12 @@ def wait_for(read, description, timeout=60):
 @contextmanager
 def redis(secrets_directory, administrative=False):
     image = configuration()["services"]["redis"]["image"]
-    name = "sprint07-redis-test-" + uuid.uuid4().hex
+    name = "sprint08-redis-test-" + uuid.uuid4().hex
     if administrative:
         password = (secrets_directory / "redis_password").read_bytes().strip()
         digest = hashlib.sha256(password).hexdigest()
         with (secrets_directory / "redis_users.acl").open("a") as acl:
-            acl.write("user cache_test on #" + digest + " ~sprint07-cache-test:* -@all"
+            acl.write("user cache_test on #" + digest + " ~sprint08-cache-test:* -@all"
                       " +get +mget +set +del +unlink +exists +pttl +ping +hello +scan +pexpire +expire"
                       " +client|setname +client|setinfo\n")
     command = ["docker", "run", "-d", "--name", name, "--user", f"{os.getuid()}:{os.getgid()}",
@@ -126,7 +127,7 @@ def postgres(secrets_directory):
     databases = {}
     try:
         for service in SERVICES:
-            name = "sprint07-pg-test-" + service + "-" + uuid.uuid4().hex
+            name = "sprint08-pg-test-" + service + "-" + uuid.uuid4().hex
             database = "store_tests" if service == "storefront" else "payments_tests"
             filename = "db_password" if service == "storefront" else "payments_db_password"
             subprocess.run(["docker", "run", "-d", "--name", name, "--memory", "256m", "--memory-swap", "256m",
@@ -159,8 +160,8 @@ def postgres(secrets_directory):
 
 def configtree(service, secrets_directory, destination, database):
     destination.mkdir(mode=0o700)
-    mapping = ({"payments.service-token": "payments_service_token"} if service == "payments" else {
-        "store.payments.service-token": "payments_service_token", "spring.data.redis.password": "redis_password",
+    mapping = ({} if service == "payments" else {
+        "spring.security.oauth2.client.registration.payments.client-secret": "oauth_client_secret", "spring.data.redis.password": "redis_password",
         "store.seller.bootstrap-password": "seller_password",
     })
     for target, source in mapping.items():
@@ -189,14 +190,10 @@ def application(service, jar, directory, secrets_directory, environment):
                     return json.load(response)["status"] == "UP"
 
             wait_for(ready, service)
-            if service == "storefront":
-                with urlopen(base + "/actuator/info", timeout=2) as response:
-                    assert json.load(response)["build"]["name"] == service
-            else:
-                # Платежи намеренно публикуют только API и health; info не открывается ради проверки упаковки.
-                with zipfile.ZipFile(jar) as archive:
-                    build = archive.read("META-INF/build-info.properties").decode()
-                    assert "build.name=payments" in build
+            # Build info проверяется в JAR: ради диагностики не публикуем лишний HTTP endpoint.
+            with zipfile.ZipFile(jar) as archive:
+                build = archive.read("META-INF/build-info.properties").decode()
+                assert "build.name=" + service in build
             yield base
         except Exception:
             log.flush()
@@ -221,21 +218,92 @@ def application(service, jar, directory, secrets_directory, environment):
                 raise RuntimeError(service + " exited with status " + str(process.returncode))
 
 
+def available_subnet():
+    identifiers = subprocess.check_output(["docker", "network", "ls", "-q"], text=True).split()
+    networks = json.loads(subprocess.check_output(["docker", "network", "inspect", *identifiers], text=True))
+    used = [ipaddress.ip_network(config["Subnet"]) for network in networks
+            for config in network["IPAM"].get("Config") or [] if config.get("Subnet")]
+    # Сохранённые тестовые сети исчерпывают стандартный пул Docker; /27 хватает всем сервисам проверки.
+    for candidate in ipaddress.ip_network("10.250.0.0/16").subnets(new_prefix=27):
+        if not any(candidate.version == subnet.version and candidate.overlaps(subnet) for subnet in used):
+            return str(candidate)
+    raise RuntimeError("No isolated verification subnet is available in 10.250.0.0/16")
+
+
+@contextmanager
+def authorization(secrets_directory):
+    name = "sprint08-authorization-test-" + uuid.uuid4().hex
+    database_name = name + "-db"
+    names = []
+    network_created = False
+    try:
+        subprocess.run(["docker", "compose", "-f", "compose.oauth.yaml", "build", "authorization"],
+                       cwd=PROJECT, check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(["docker", "network", "create", "--subnet", available_subnet(), "--label", "dev.principalwater.deployment=" + name, name],
+                       check=True, stdout=subprocess.DEVNULL)
+        network_created = True
+        image = configuration()["services"]["authorization-db"]["image"]
+        subprocess.run(["docker", "run", "-d", "--name", database_name, "--network", name,
+                        "--memory", "256m", "--memory-swap", "256m", "--cpus", "1",
+                        "--label", "dev.principalwater.deployment=" + database_name,
+                        "--mount", f"type=volume,source={database_name}-data,target=/var/lib/postgresql/data",
+                        "-e", "POSTGRES_DB=authorization", "-e", "POSTGRES_USER=authorization",
+                        "-e", "POSTGRES_PASSWORD_FILE=/run/secrets/authorization_db_password",
+                        "--mount", f"type=bind,source={secrets_directory / 'authorization_db_password'},target=/run/secrets/authorization_db_password,readonly",
+                        image], check=True, stdout=subprocess.DEVNULL)
+        names.append(database_name)
+        wait_for(lambda: subprocess.run(["docker", "exec", database_name, "pg_isready", "-h", "127.0.0.1",
+                                        "-U", "authorization", "-d", "authorization"], capture_output=True).returncode == 0,
+                 "Authorization PostgreSQL")
+        issuer = "http://localhost:18381/realms/storefront-api"
+        command = ["docker", "run", "-d", "--name", name, "--network", name, "--user", f"{os.getuid()}:{os.getgid()}",
+                   "--memory", "768m", "--memory-swap", "768m", "--cpus", "2", "--read-only",
+                   "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m,mode=1777",
+                   "--tmpfs", "/opt/keycloak/data:rw,noexec,nosuid,size=32m,mode=1777",
+                   "--label", "dev.principalwater.deployment=" + name, "-p", "127.0.0.1::8080",
+                   "-e", "KC_BOOTSTRAP_ADMIN_USERNAME=admin", "-e", "KC_HOSTNAME=http://localhost:18381",
+                   "-e", "KC_HTTP_ENABLED=true", "-e", "KC_DB=postgres", "-e", "KC_DB_USERNAME=authorization",
+                   "-e", "KC_DB_URL=jdbc:postgresql://" + database_name + ":5432/authorization", "-e", "KC_CACHE=local",
+                   "-e", "JAVA_OPTS_APPEND=-XX:ActiveProcessorCount=2"]
+        for filename in ("authorization_db_password", "authorization_admin_password", "oauth_client_secret"):
+            command += ["--mount", f"type=bind,source={secrets_directory / filename},target=/run/secrets/{filename},readonly"]
+        command += ["--mount", f"type=bind,source={PROJECT / 'authorization/start-authorization.sh'},target=/setup/start-authorization.sh,readonly",
+                    "--mount", f"type=bind,source={PROJECT / 'authorization/storefront-api-realm.json'},target=/opt/keycloak/data/import/storefront-api-realm.json,readonly",
+                    "java-sprint08-authorization:local"]
+        subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
+        names.append(name)
+        base = "http://127.0.0.1:" + published_port(name, 8080) + "/realms/storefront-api"
+        def ready():
+            with urlopen(base + "/.well-known/openid-configuration", timeout=2) as response:
+                return json.load(response)["issuer"] == issuer
+        wait_for(ready, "Authorization realm", timeout=120)
+        yield {"issuer": issuer, "token_uri": base + "/protocol/openid-connect/token",
+               "jwk_uri": base + "/protocol/openid-connect/certs", "container": name}
+    finally:
+        stop_containers(reversed(names))
+        if network_created:
+            print("Retained authorization network and database: " + name)
+
+
 @contextmanager
 def applications(secrets_directory, redis_endpoint, databases=None):
     with ExitStack() as stack:
         directory = secrets_directory.parent / "jvm"
         directory.mkdir(mode=0o700)
-        endpoints = {}
+        authorization_endpoints = stack.enter_context(authorization(secrets_directory))
+        endpoints = {"token_uri": authorization_endpoints["token_uri"]}
         # Раздельные JVM используют реальные сгенерированные HTTP-клиент и сервер.
-        for service, port in [("payments", 18097), ("storefront", 18087)]:
+        for service, port in [("payments", 18098), ("storefront", 18088)]:
             database = None if databases is None else databases[service]
             tree = configtree(service, secrets_directory, directory / (service + "-config"), database)
             artifact = PROJECT / service / "build/libs" / (service + ".jar")
             if not artifact.is_file():
                 raise FileNotFoundError("Package the Gradle executable JAR before verification: " + service)
             environment = {"SERVER_PORT": str(port), "SPRING_PROFILES_ACTIVE": "h2" if database is None else "postgresql",
-                           "SPRING_CONFIG_IMPORT": "configtree:" + str(tree) + "/", "STORE_ANALYTICS_ENABLED": "false"}
+                           "SPRING_CONFIG_IMPORT": "configtree:" + str(tree) + "/", "STORE_ANALYTICS_ENABLED": "false",
+                           "PAYMENTS_OAUTH_ISSUER": authorization_endpoints["issuer"],
+                           "PAYMENTS_OAUTH_JWK_SET_URI": authorization_endpoints["jwk_uri"],
+                           "PAYMENTS_OAUTH_TOKEN_URI": authorization_endpoints["token_uri"]}
             if database:
                 if service == "payments":
                     environment.update(PAYMENTS_DB_URL=database["url"], PAYMENTS_DB_USER=database["runtime_user"],
@@ -245,6 +313,6 @@ def applications(secrets_directory, redis_endpoint, databases=None):
             if service == "storefront":
                 environment.update(STORE_PAYMENTS_URL=endpoints["payments"], SPRING_DATA_REDIS_HOST=redis_endpoint["host"],
                                    SPRING_DATA_REDIS_PORT=redis_endpoint["port"], SPRING_DATA_REDIS_USERNAME="storefront",
-                                   STORE_CACHE_NAMESPACE="sprint07-jar-test", STORE_SECRETS_LOCATION=str(tree) + "/")
+                                   STORE_CACHE_NAMESPACE="sprint08-jar-test", STORE_SECRETS_LOCATION=str(tree) + "/")
             endpoints[service] = stack.enter_context(application(service, artifact, directory, secrets_directory, environment))
         yield endpoints

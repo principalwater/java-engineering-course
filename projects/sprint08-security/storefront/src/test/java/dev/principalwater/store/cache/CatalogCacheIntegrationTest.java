@@ -43,7 +43,7 @@ import static dev.principalwater.store.ProductFixtures.productInput;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@SpringBootTest(properties = {"store.cache.enabled=true", "store.cache.namespace=sprint07-cache-test",
+@SpringBootTest(properties = {"store.cache.enabled=true", "store.cache.namespace=sprint08-cache-test",
         "store.cache.page-slots=1", "store.cache.operation-timeout=1s"})
 class CatalogCacheIntegrationTest extends DatabaseTestBase {
     private static final CatalogQuery ALL = new CatalogQuery("", SortMode.NO, 1, 5);

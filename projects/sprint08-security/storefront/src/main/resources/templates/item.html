@@ -12,6 +12,7 @@
 <p class="lead" th:text="${item.description}"></p>
 <p class="detail-price" th:text="${@display.money(item.price)}"></p>
 <div th:replace="~{fragments :: quantity(${item}, @{/items/{id}(id=${item.id})}, ${null})}"></div>
+<a class="button secondary" th:if="${account == null}" th:href="@{/account/login}">Войти для покупки</a>
 <p class="quiet-note">Цена указана за один предмет. Проверьте состав и доступный баланс в корзине перед покупкой.</p>
 </div>
 </article>

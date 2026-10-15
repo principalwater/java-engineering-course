@@ -6,6 +6,7 @@
 <main id="main" class="account-page">
 <div class="page-heading"><h1>Войти в мастерскую</h1><p class="lead">Корзина и заказы вашего аккаунта доступны в любом браузере.</p></div>
 <div class="notice" role="status" th:if="${registered}">Аккаунт создан. Войдите с вашим логином и паролем.</div>
+<div class="notice" role="status" th:if="${loggedOut}">Вы вышли из аккаунта. Сессия этого браузера завершена.</div>
 <p class="account-error" role="alert" th:if="${loginError}">Не удалось войти. Проверьте логин и пароль.</p>
 <form class="account-form" method="post" th:action="@{/account/login}">
 <div class="account-field"><label for="username">Логин</label><input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required th:pattern="${usernamePattern}" th:maxlength="${usernameMaxLength}" aria-describedby="login-hint"><p id="login-hint">Логин не зависит от регистра букв.</p></div>
@@ -13,7 +14,7 @@
 <button class="button primary" type="submit">Войти</button>
 </form>
 <p class="account-switch">Первый визит? <a th:href="@{/account/register}">Создать аккаунт</a></p>
-<p class="account-explanation">Гостевая корзина останется в этом браузере. После выхода вы снова увидите её; гостевые заказы не переносятся в аккаунт.</p>
+<p class="account-explanation">Покупки доступны после входа. Корзина и заказы принадлежат аккаунту; выход завершает только сессию этого браузера.</p>
 </main>
 <footer th:replace="~{fragments :: footer}"></footer>
 </body></html>

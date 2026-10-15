@@ -57,7 +57,8 @@ class StoreWebTest extends TestBase {
     private static final UUID CART_ID = UUID.fromString("652b77b8-9b3f-498c-9b99-321bd2fd3949");
     private static final UUID CHECKOUT_KEY = UUID.fromString("644ddf44-8edf-3cf9-9af1-43d26e0bf5b5");
     private static final CartView EMPTY_CART = new CartView(List.of());
-    @Autowired private WebTestClient web;
+    @Autowired private WebTestClient anonymous;
+    private WebTestClient web;
     @MockitoBean private CartService carts;
     @MockitoBean private CatalogService catalog;
     @MockitoBean private CheckoutService checkout;
@@ -67,7 +68,7 @@ class StoreWebTest extends TestBase {
 
     @BeforeEach
     void cartOwner() {
-        when(carts.identify(any())).thenReturn(Mono.just(CART_ID));
+        web = client(AccountRole.BUYER);
         when(carts.view(any())).thenReturn(Mono.just(EMPTY_CART));
         when(carts.change(any(), anyLong(), any(), any())).thenReturn(Mono.just(EMPTY_CART));
         when(carts.changeWithReceipt(any(), anyLong(), any(), any())).thenReturn(Mono.just(new CartChange(EMPTY_CART, CHECKOUT_KEY)));
@@ -83,7 +84,7 @@ class StoreWebTest extends TestBase {
         when(catalog.list(any(), any())).thenReturn(Mono.just(new CatalogPage(List.of(item), new Paging(5, 1, false, false), 1)));
 
         web.get().uri("/").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
-                .expectCookie().httpOnly("storefront-cart", true).expectBody(String.class).value(html -> {
+                .expectCookie().doesNotExist("storefront-cart").expectBody(String.class).value(html -> {
                     assertTrue(html.contains("&lt;script&gt;"));
                     assertTrue(html.contains("&lt;img"));
                     assertFalse(html.contains("<script>alert(1)</script>"));
@@ -268,7 +269,7 @@ class StoreWebTest extends TestBase {
     private WebTestClient client(AccountRole role) {
         var principal = new StoreUserDetails(new StoreUser(UUID.randomUUID(), CART_ID,
                 "role.user", "unused", "Role user", role, null));
-        return web.mutateWith(mockAuthentication(UsernamePasswordAuthenticationToken.authenticated(
+        return anonymous.mutateWith(mockAuthentication(UsernamePasswordAuthenticationToken.authenticated(
                 principal, null, principal.getAuthorities())));
     }
 }

@@ -40,7 +40,13 @@ public class AccountController {
         // Thymeleaf param — lazy wrapper; наличие флага читаем из настоящей карты параметров WebFlux.
         model.addAttribute("loginError", exchange.getRequest().getQueryParams().containsKey("error"));
         model.addAttribute("registered", exchange.getRequest().getQueryParams().containsKey("registered"));
+        model.addAttribute("loggedOut", exchange.getRequest().getQueryParams().containsKey("loggedOut"));
         return "account/login";
+    }
+
+    @GetMapping("/account/logout")
+    public String logout() {
+        return "account/logout";
     }
 
     @GetMapping("/account/register")

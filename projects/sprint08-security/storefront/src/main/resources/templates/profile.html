@@ -9,9 +9,7 @@
 <p class="scope-tag">Кабинет покупателя</p>
 <h1>Мои покупки</h1>
 <p class="lead" th:if="${account != null}" th:text="|${account.displayName}, здесь ваши расходы, заказы и доступный баланс. История сохранится во всех браузерах, где вы вошли.|"></p>
-<p class="lead" th:if="${account == null}">Сейчас вы гость: корзина и заказы привязаны к cookie этого браузера на 30 дней с первого визита. Войдите в аккаунт, чтобы пользоваться одной корзиной и историей в разных браузерах.</p>
-<div class="account-actions" th:if="${account == null}"><a class="button primary" th:href="@{/account/login}">Войти</a><a class="button secondary" th:href="@{/account/register}">Создать аккаунт</a></div>
-<form class="account-actions" th:if="${account != null}" method="post" th:action="@{/account/logout}"><span th:text="|Логин: ${account.username}|"></span><button class="button secondary" type="submit">Выйти</button></form>
+<div class="account-actions"><span th:text="|Логин: ${account.username}|"></span><a class="button secondary" th:href="@{/account/logout}">Выйти</a></div>
 </div>
 <div th:replace="~{fragments :: notice}"></div>
 <section class="wallet-card" aria-labelledby="wallet-title">
@@ -20,7 +18,7 @@
 </section>
 <!--/* Покупатель видит только свою историю; неоплаченные старые заказы не становятся расходами. */-->
 <section class="profile-section" aria-labelledby="history-title">
-<div class="section-heading"><h2 id="history-title">Ваша история</h2><p th:text="${account != null ? 'Во всех ваших браузерах' : 'Только из этого браузера'}"></p></div>
+<div class="section-heading"><h2 id="history-title">Ваша история</h2><p th:text="${'Во всех ваших браузерах'}"></p></div>
 <dl class="stat-grid">
 <div class="stat-card"><dt>Потрачено</dt><dd><strong data-metric="paid-value" th:text="${@display.money(profile.paidValue)}">0 ₽</strong><small th:text="|Оплаченных заказов: ${profile.paidOrders}|"></small></dd></div>
 <div class="stat-card"><dt>Заказов в истории</dt><dd><strong data-metric="orders" th:text="${profile.totalOrders}">0</strong></dd></div>

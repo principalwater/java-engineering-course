@@ -10,7 +10,6 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.web.server.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ModelAttribute;
-import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
@@ -23,8 +22,9 @@ public class CommonViewModel {
     }
 
     @ModelAttribute("cart")
-    public Mono<CartView> cart(@RequestAttribute(CartIdentityFilter.ATTRIBUTE_NAME) UUID cartId) {
-        return carts.view(cartId);
+    public Mono<CartView> cart(ServerWebExchange exchange) {
+        UUID cartId = exchange.getAttribute(CartIdentityFilter.ATTRIBUTE_NAME);
+        return cartId == null ? Mono.just(new CartView(List.of())) : carts.view(cartId);
     }
 
     @ModelAttribute("account")
@@ -36,6 +36,10 @@ public class CommonViewModel {
 
     @ModelAttribute("_csrf")
     public Mono<CsrfToken> csrf(ServerWebExchange exchange) {
+        if (exchange.getAttribute(CartIdentityFilter.ACCOUNT_ATTRIBUTE_NAME) == null
+                && !exchange.getRequest().getPath().value().startsWith("/account/")) {
+            return Mono.empty();
+        }
         Mono<CsrfToken> token = exchange.getAttribute(CsrfToken.class.getName());
         return token == null ? Mono.empty() : token;
     }

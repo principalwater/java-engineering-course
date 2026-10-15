@@ -28,6 +28,7 @@
 <div class="product-buy">
 <p class="price" th:text="${@display.money(item.price)}"></p>
 <div th:replace="~{fragments :: quantity(${item}, @{/items}, ${query})}"></div>
+<a class="button secondary" th:if="${account == null}" th:href="@{/account/login}">Войти для покупки</a>
 </div>
 </article>
 </li>

@@ -7,8 +7,10 @@ import dev.principalwater.payments.generated.model.PaymentReceipt;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.*;
-
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -16,7 +18,6 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.EntityExchangeResult;
@@ -24,7 +25,8 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.test.StepVerifier;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PaymentsIntegrationTest extends PaymentTestBase {
     private static final String PAYMENTS_PATH = "/api/v1/payments";
@@ -186,27 +188,11 @@ class PaymentsIntegrationTest extends PaymentTestBase {
     void malformedAmountsCurrenciesAndUnknownFieldsCannotReachFinancialState(String amount, String extra, String currency) {
         String body = "{\"accountId\":\"" + UUID.randomUUID() + "\",\"referenceId\":\"" + UUID.randomUUID()
                 + "\",\"amountMinor\":" + amount + ",\"currency\":\"" + currency + "\"" + extra + "}";
-        web.post().uri(PAYMENTS_PATH).headers(headers -> headers.setBearerAuth(TOKEN))
+        web.post().uri(PAYMENTS_PATH).headers(headers -> headers.setBearerAuth(accessToken()))
                 .header(IDEMPOTENCY_HEADER, UUID.randomUUID().toString()).contentType(MediaType.APPLICATION_JSON).bodyValue(body)
                 .exchange().expectStatus().isBadRequest().expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON);
         assertEquals(0, count("payment_wallets"));
         assertEquals(0, count("payment_decisions"));
-    }
-
-    @Test
-    void missingWrongOrAmbiguousCredentialsCannotReadOrDebitAnAccount() {
-        String path = "/api/v1/accounts/" + UUID.randomUUID() + "/balance";
-        for (String credential : List.of("", "Basic ignored", "Bearer wrong-service-credential-1234567890")) {
-            web.get().uri(path).header(HttpHeaders.AUTHORIZATION, credential).exchange().expectStatus().isUnauthorized()
-                    .expectHeader().valueEquals(HttpHeaders.WWW_AUTHENTICATE, "Bearer")
-                    .expectBody().jsonPath("$.status").isEqualTo(401);
-        }
-        web.post().uri(PAYMENTS_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN, "Bearer " + TOKEN)
-                .header(IDEMPOTENCY_HEADER, UUID.randomUUID().toString()).contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(request(UUID.randomUUID(), 100)).exchange().expectStatus().isUnauthorized();
-        web.post().uri(PAYMENTS_PATH).headers(headers -> headers.setBearerAuth(TOKEN)).contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(request(UUID.randomUUID(), 100)).exchange().expectStatus().isBadRequest();
-        assertEquals(0, count("payment_wallets"));
     }
 
     static Stream<String> conflictingRequests() {
@@ -227,7 +213,7 @@ class PaymentsIntegrationTest extends PaymentTestBase {
     }
 
     private WebTestClient.ResponseSpec post(UUID key, DebitRequest request) {
-        return web.post().uri(PAYMENTS_PATH).headers(headers -> headers.setBearerAuth(TOKEN))
+        return web.post().uri(PAYMENTS_PATH).headers(headers -> headers.setBearerAuth(accessToken()))
                 .header(IDEMPOTENCY_HEADER, key.toString()).contentType(MediaType.APPLICATION_JSON).bodyValue(request).exchange();
     }
 
@@ -240,7 +226,7 @@ class PaymentsIntegrationTest extends PaymentTestBase {
     }
 
     private BalanceResponse balance(UUID account) {
-        return web.get().uri("/api/v1/accounts/" + account + "/balance").headers(headers -> headers.setBearerAuth(TOKEN))
+        return web.get().uri("/api/v1/accounts/" + account + "/balance").headers(headers -> headers.setBearerAuth(accessToken()))
                 .exchange().expectStatus().isOk().expectBody(BalanceResponse.class).returnResult().getResponseBody();
     }
 

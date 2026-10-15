@@ -5,8 +5,6 @@ info:
   description: Точные суммы в копейках RUB. Списание и журнал атомарны; повтор ключа возвращает прежнее решение.
 servers:
   - url: http://localhost:18097
-security:
-  - serviceToken: []
 tags:
   - name: Payments
 paths:
@@ -20,6 +18,8 @@ paths:
           in: path
           required: true
           schema: {type: string, format: uuid}
+      security:
+        - storefrontClient: [payments.read]
       responses:
         '200':
           description: Доступный баланс
@@ -27,6 +27,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/BalanceResponse'}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
         '503': {$ref: '#/components/responses/Unavailable'}
   /api/v1/payments:
     post:
@@ -34,6 +35,8 @@ paths:
       operationId: debit
       summary: Атомарно списать сумму с защитой от повторной оплаты
       description: Один ключ связан с одним неизменяемым запросом. Неопределённый HTTP-результат разрешается повтором того же запроса и ключа.
+      security:
+        - storefrontClient: [payments.write]
       parameters:
         - name: Idempotency-Key
           in: header
@@ -62,6 +65,7 @@ paths:
               schema: {$ref: '#/components/schemas/PaymentReceipt'}
         '400': {$ref: '#/components/responses/InvalidRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
         '409':
           description: Ключ уже связан с другой суммой, валютой, счётом или основанием
           content:
@@ -70,7 +74,15 @@ paths:
         '503': {$ref: '#/components/responses/Unavailable'}
 components:
   securitySchemes:
-    serviceToken: {type: http, scheme: bearer}
+    storefrontClient:
+      type: oauth2
+      description: Access token клиента storefront; сервис проверяет RS256-подпись, issuer, audience payments и срок действия.
+      flows:
+        clientCredentials:
+          tokenUrl: http://localhost:18381/realms/storefront-api/protocol/openid-connect/token
+          scopes:
+            payments.read: Чтение баланса счёта
+            payments.write: Списание с идемпотентным ключом
   schemas:
     MinorAmount:
       type: integer
@@ -123,7 +135,20 @@ components:
         application/problem+json:
           schema: {$ref: '#/components/schemas/Problem'}
     Unauthorized:
-      description: Не подтверждена сервисная идентичность
+      description: Access token отсутствует, повреждён или не прошёл проверку подписи, issuer, audience либо срока
+      headers:
+        WWW-Authenticate:
+          description: Bearer-challenge по RFC 6750
+          schema: {type: string}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Forbidden:
+      description: Токен действителен, но не содержит scope, требуемый операцией
+      headers:
+        WWW-Authenticate:
+          description: Bearer-challenge с error="insufficient_scope"
+          schema: {type: string}
       content:
         application/problem+json:
           schema: {$ref: '#/components/schemas/Problem'}

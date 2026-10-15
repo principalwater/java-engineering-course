@@ -13,6 +13,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.env.Environment;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -26,16 +28,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Timeout(30)
 public abstract class PaymentTestBase {
     protected static final Duration TIMEOUT = Duration.ofSeconds(15);
-    protected static final String TOKEN = "payments-integration-service-token-1234567890";
     @Autowired protected WebTestClient web;
     @Autowired protected DatabaseClient database;
     @Autowired private Environment environment;
+
+    @DynamicPropertySource
+    static void identityProvider(DynamicPropertyRegistry registry) {
+        PaymentTokens.registerIssuer(registry);
+    }
+
+    /** Access token витрины со scope обеих операций; негативные сценарии собирают токен через {@link PaymentTokens}. */
+    protected static String accessToken() {
+        return PaymentTokens.token(PaymentTokens.READ, PaymentTokens.WRITE);
+    }
 
     @BeforeEach
     @AfterEach
     protected final void cleanDatabase() {
         String url = environment.getRequiredProperty("spring.r2dbc.url");
-        assertTrue(Set.of("payments-tests7", "payments_tests")
+        assertTrue(Set.of("payments-tests8", "payments_tests")
                         .contains(ConnectionFactoryOptions.parse(url).getRequiredValue(DATABASE)),
                 "Cleanup requires an isolated payments test database");
         Flux.just("payment_journal", "payment_decisions", "payment_wallets")

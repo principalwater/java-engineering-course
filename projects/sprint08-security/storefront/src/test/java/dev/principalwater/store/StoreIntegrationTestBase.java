@@ -10,7 +10,8 @@ public abstract class StoreIntegrationTestBase extends DatabaseTestBase {
     @DynamicPropertySource
     static void payments(DynamicPropertyRegistry properties) {
         properties.add("store.payments.url", () -> "http://127.0.0.1:" + PaymentsStub.SERVER.port());
-        properties.add("store.payments.service-token", () -> "test-service-token-never-used-outside-fixture");
+        properties.add("spring.security.oauth2.client.provider.payments.token-uri",
+                () -> "http://127.0.0.1:" + PaymentsStub.SERVER.port() + "/oauth/token");
     }
     protected final reactor.core.publisher.Mono<Long> buy(java.util.UUID cartId) {
         var checkout = context.getBean(dev.principalwater.store.service.CheckoutService.class);

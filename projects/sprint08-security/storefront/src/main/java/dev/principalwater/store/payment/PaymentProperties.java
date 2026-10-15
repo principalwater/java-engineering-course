@@ -6,8 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 @ConfigurationProperties("store.payments")
-public record PaymentProperties(@DefaultValue("http://localhost:18097") URI url,
-                                @DefaultValue("") String serviceToken,
+public record PaymentProperties(@DefaultValue("http://localhost:18098") URI url,
                                 @DefaultValue("1s") Duration balanceTimeout,
                                 @DefaultValue("5s") Duration debitTimeout) {
     public PaymentProperties {

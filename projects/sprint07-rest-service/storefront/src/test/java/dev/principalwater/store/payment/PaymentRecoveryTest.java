@@ -51,7 +51,8 @@ class PaymentRecoveryTest extends ReactiveTestBase {
             }
             assertEquals(8, started.get(), "An unfinished oldest payment must not hold back later intents");
             assertEquals(2, peak.get(), "Recovery must reserve HTTP and SQL capacity for foreground traffic");
-            StepVerifier.create(recovery.recover()).verifyComplete();
+            var overlapping = recovery.recover();
+            StepVerifier.create(overlapping.then(overlapping)).expectComplete().verify(java.time.Duration.ofSeconds(1));
             verify(repository, times(1)).pending(any(), anyInt());
             responses.getFirst().tryEmitValue(1L);
         }).verifyComplete();

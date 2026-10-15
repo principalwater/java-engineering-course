@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -138,6 +139,22 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
     }
 
     @Test
+    void loginReplacesTheCsrfTokenOfTheAnonymousSession() {
+        var browser = new Browser();
+        browser.get("/account/register", HttpStatus.OK);
+        register(browser, "token.shop", "Токен", HttpStatus.SEE_OTHER);
+        browser.get("/account/login", HttpStatus.OK);
+        String anonymousToken = browser.csrf;
+        login(browser, "token.shop", PASSWORD);
+
+        // Токен со страницы входа выдан гостевой сессии: после входа он отклоняется, новый берётся со страницы с формой.
+        browser.csrf = anonymousToken;
+        browser.post("/account/logout", Map.of(), true, HttpStatus.FORBIDDEN);
+        browser.csrf = null;
+        browser.post("/account/logout", Map.of(), true, HttpStatus.FOUND);
+    }
+
+    @Test
     void anonymousVisitorsSeeOnlyPublicProductsAndCannotReadOrChangePrivateData() {
         var guest = new Browser();
         String catalog = guest.get("/items", HttpStatus.OK);
@@ -151,7 +168,7 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
         }
         for (String path : List.of("/items", "/items/1", "/cart/items", "/buy")) {
             // Валидный CSRF из публичной формы: отказ обязан исходить от authentication, а не другого guard.
-            guest.post(path, Map.of("id", "1", "action", "PLUS", "checkoutKey", java.util.UUID.randomUUID().toString(),
+            guest.post(path, Map.of("id", "1", "action", "PLUS", "checkoutKey", UUID.randomUUID().toString(),
                     "amountMinor", "100"), true, HttpStatus.FOUND);
         }
         assertEquals(0L, await(carts.count()));
@@ -323,6 +340,8 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
     private void login(Browser browser, String username, String password) {
         var result = browser.post("/account/login", Map.of("username", username, "password", password), true, HttpStatus.FOUND);
         assertEquals("/profile", result.getResponseHeaders().getFirst(HttpHeaders.LOCATION));
+        // Вход заменил токен гостевой сессии, а профиль форм не содержит: новый токен берём со страницы с формой.
+        browser.csrf = null;
     }
 
     private final class Browser {
@@ -367,8 +386,7 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
                 form.set("amountMinor", amountMinor);
             }
             if (withCsrf) {
-                assertNotNull(csrf, "A rendered form must supply the CSRF token");
-                form.set("_csrf", csrf);
+                form.set("_csrf", token());
             }
             var result = web.post().uri(path).accept(MediaType.TEXT_HTML).cookies(request -> cookies.forEach(request::set))
                     .body(BodyInserters.fromFormData(form)).exchange().expectStatus().isEqualTo(status)
@@ -384,15 +402,23 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
         }
 
         private void upload(String catalog, HttpStatus status) {
-            assertNotNull(csrf, "A rendered form must supply the CSRF token");
             var form = new MultipartBodyBuilder();
             form.part("catalog", catalog.getBytes(StandardCharsets.UTF_8)).filename("catalog.json")
                     .contentType(MediaType.APPLICATION_JSON);
-            form.part("_csrf", csrf);
+            form.part("_csrf", token());
             var result = web.post().uri("/catalog/import").accept(MediaType.TEXT_HTML)
                     .cookies(request -> cookies.forEach(request::set)).body(BodyInserters.fromMultipartData(form.build()))
                     .exchange().expectStatus().isEqualTo(status).expectBody(String.class).returnResult();
             saveCookies(result);
+        }
+
+        private String token() {
+            if (csrf == null) {
+                // Подтверждение выхода содержит форму для любой роли.
+                get("/account/logout", HttpStatus.OK);
+            }
+            assertNotNull(csrf, "A rendered form must supply the CSRF token");
+            return csrf;
         }
 
         private void saveCookies(EntityExchangeResult<?> result) {

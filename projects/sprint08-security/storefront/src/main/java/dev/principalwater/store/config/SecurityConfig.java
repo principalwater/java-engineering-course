@@ -10,7 +10,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseCookie;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.ReactiveAuthenticationManager;
 import org.springframework.security.authentication.UserDetailsRepositoryReactiveAuthenticationManager;
@@ -20,6 +19,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.server.DelegatingServerAuthenticationEntryPoint;
 import org.springframework.security.web.server.SecurityWebFilterChain;
+import org.springframework.security.web.server.authentication.DelegatingServerAuthenticationSuccessHandler;
 import org.springframework.security.web.server.authentication.HttpStatusServerEntryPoint;
 import org.springframework.security.web.server.authentication.RedirectServerAuthenticationEntryPoint;
 import org.springframework.security.web.server.authentication.RedirectServerAuthenticationSuccessHandler;
@@ -28,6 +28,7 @@ import org.springframework.security.web.server.authentication.logout.RedirectSer
 import org.springframework.security.web.server.authentication.logout.SecurityContextServerLogoutHandler;
 import org.springframework.security.web.server.authentication.logout.WebSessionServerLogoutHandler;
 import org.springframework.security.web.server.context.WebSessionServerSecurityContextRepository;
+import org.springframework.security.web.server.csrf.WebSessionServerCsrfTokenRepository;
 import org.springframework.security.web.server.csrf.XorServerCsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.server.savedrequest.NoOpServerRequestCache;
 import org.springframework.security.web.server.util.matcher.MediaTypeServerWebExchangeMatcher;
@@ -90,11 +91,16 @@ public class SecurityConfig {
                         new HttpStatusServerEntryPoint(HttpStatus.UNAUTHORIZED)));
         var requestCache = NoOpServerRequestCache.getInstance();
         var loginEntry = new RedirectServerAuthenticationEntryPoint(LOGIN_PAGE);
-        var signedIn = new RedirectServerAuthenticationSuccessHandler("/profile");
+        var toProfile = new RedirectServerAuthenticationSuccessHandler("/profile");
         // У custom redirect handlers собственный request cache: общий DSL его не перенастраивает.
         loginEntry.setRequestCache(requestCache);
-        signedIn.setRequestCache(requestCache);
+        toProfile.setRequestCache(requestCache);
         entryPoint.setDefaultEntryPoint(loginEntry);
+        // Вход меняет id сессии, но WebFlux оставляет гостевой CSRF token: заменяем его в самом ответе входа,
+        // чтобы следующая страница не генерировала токен и не меняла id сессии повторно.
+        var csrfTokens = new WebSessionServerCsrfTokenRepository();
+        var signedIn = new DelegatingServerAuthenticationSuccessHandler((web, principal) -> csrfTokens
+                .generateToken(web.getExchange()).flatMap(token -> csrfTokens.saveToken(web.getExchange(), token)), toProfile);
         return http.authorizeExchange(access -> access
                         .pathMatchers("/account/seller", "/account/seller/**", "/catalog", "/catalog/**", "/catalog-demo.json").hasRole("SELLER")
                         .pathMatchers(HttpMethod.GET, "/", "/items", "/items/*", LOGIN_PAGE, "/account/register",
@@ -113,16 +119,11 @@ public class SecurityConfig {
                         .securityContextRepository(context)
                         .authenticationSuccessHandler(signedIn))
                 .logout(logout -> logout.logoutUrl("/account/logout")
-                        .logoutHandler(new DelegatingServerLogoutHandler(clearContext, new WebSessionServerLogoutHandler(),
-                                (web, principal) -> {
-                                    // Удаляем также cookie гостевой корзины из предыдущей версии; она больше не даёт доступ.
-                                    web.getExchange().getResponse().addCookie(ResponseCookie.from("storefront-cart", "")
-                                            .path("/").httpOnly(true).sameSite("Lax").maxAge(0).build());
-                                    return Mono.empty();
-                                }))
+                        .logoutHandler(new DelegatingServerLogoutHandler(clearContext, new WebSessionServerLogoutHandler()))
                         .logoutSuccessHandler(signedOut))
-                .csrf(config -> config.csrfTokenRequestHandler(csrf).accessDeniedHandler((exchange, failure) ->
-                        Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied", failure))))
+                .csrf(config -> config.csrfTokenRepository(csrfTokens).csrfTokenRequestHandler(csrf)
+                        .accessDeniedHandler((exchange, failure) ->
+                                Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied", failure))))
                 .build();
     }
 }

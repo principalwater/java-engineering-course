@@ -2,6 +2,7 @@
 
 import copy
 import importlib.util
+import itertools
 import os
 from pathlib import Path
 import tempfile
@@ -17,9 +18,9 @@ specification.loader.exec_module(deploy)
 class DeploymentPlanTest(unittest.TestCase):
     def test_saved_plan_requires_the_same_two_artifacts_and_sources(self):
         cases = ["unchanged", "storefront artifact", "payments artifact", "source",
-                 "documentation", "packaged Markdown", "infrastructure runtime config"]
-        for case in cases:
-            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                 "documentation", "packaged Markdown", "infrastructure runtime config", "authorization mount"]
+        for stack, case in itertools.product(["sprint07-h2", "sprint08-h2"], cases):
+            with self.subTest(stack=stack, case=case), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 repository = root / "repository"
                 infrastructure = repository / "infra"
@@ -31,6 +32,9 @@ class DeploymentPlanTest(unittest.TestCase):
                 artifacts = project / "build/deployment"
                 artifacts.mkdir(parents=True)
                 (project / "build.gradle").write_text("project")
+                realm = project / "authorization/storefront-api-realm.json"
+                realm.parent.mkdir()
+                realm.write_text("realm")
                 markdown = project / "storefront/src/main/resources/README.md"
                 markdown.parent.mkdir(parents=True)
                 markdown.write_text("packaged")
@@ -52,14 +56,14 @@ class DeploymentPlanTest(unittest.TestCase):
                 environment = {"COURSE_DEPLOY_STATE": str(root / "state"),
                                "COURSE_DEPLOY_SECRETS": str(root / "secrets")}
                 with patch.object(deploy, "REPOSITORY", repository), patch.object(deploy, "INFRA", infrastructure), \
-                     patch.object(deploy, "STACKS", {"sprint07-h2": "project"}), \
+                     patch.object(deploy, "STACKS", {stack: "project"}), \
                      patch.dict(os.environ, environment), patch.object(deploy, "prepare") as prepare, \
                      patch.object(deploy.subprocess, "run", side_effect=execute), \
                      patch.object(deploy.subprocess, "check_output", side_effect=output):
-                    with patch.object(sys, "argv", ["deploy.py", "sprint07-h2", "plan"]):
+                    with patch.object(sys, "argv", ["deploy.py", stack, "plan"]):
                         deploy.main()
                     prepare.assert_called_once()
-                    receipt = root / "state/sprint07-h2/plan-inputs.json"
+                    receipt = root / "state" / stack / "plan-inputs.json"
                     if case.endswith("artifact"):
                         (artifacts / (case.split()[0] + ".jar")).write_bytes(b"changed executable")
                     elif case == "source":
@@ -70,7 +74,9 @@ class DeploymentPlanTest(unittest.TestCase):
                         markdown.write_text("changed executable resource")
                     elif case == "infrastructure runtime config":
                         (infrastructure / "redis.conf").write_text("maxmemory 64mb")
-                    arguments = ["deploy.py", "sprint07-h2", "apply"]
+                    elif case == "authorization mount":
+                        realm.write_text("changed realm")
+                    arguments = ["deploy.py", stack, "apply"]
                     with patch.object(sys, "argv", arguments):
                         if case in {"unchanged", "documentation"}:
                             deploy.main()
@@ -113,6 +119,47 @@ class DeploymentPlanTest(unittest.TestCase):
             deploy.check_plan({"resource_changes": [{"type": "docker_container", "change": {
                 "actions": ["delete"], "before": {"name": "foreign-db"}, "after": None,
             }}]}, "sprint04")
+
+    def test_plan_rejects_secret_values_in_any_attribute_and_secret_named_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "oauth_client_secret").write_text("0123456789abcdef0123456789abcdef\n")
+            (root / "short").write_text("x\n")
+            (root / "link").symlink_to(root / "oauth_client_secret")
+            known = deploy.secret_values(root)
+            self.assertEqual({"0123456789abcdef0123456789abcdef"}, known)
+
+            def plan(**attributes):
+                return {"resource_changes": [{"type": "docker_container", "change": {
+                    "actions": ["create"], "after": {"name": "java-tofu-sprint08-h2-authorization", **attributes}}}]}
+
+            deploy.check_plan(plan(env=["KC_DB_USERNAME=authorization", "PAYMENTS_OAUTH_TOKEN_URI=http://authorization:8080/token"]),
+                              "sprint08-h2", known)
+            for name, unsafe in [
+                ("secret copied into a label", plan(labels=[{"label": "note", "value": "0123456789abcdef0123456789abcdef"}])),
+                ("secret copied into a command", plan(command=["--client-secret=0123456789abcdef0123456789abcdef"])),
+                ("client secret variable", plan(env=["STOREFRONT_CLIENT_SECRET=from-a-file"])),
+                ("database password variable", plan(env=["KC_DB_PASSWORD=from-a-file"])),
+            ]:
+                with self.subTest(name=name), self.assertRaisesRegex(ValueError, "[Ss]ecret"):
+                    deploy.check_plan(unsafe, "sprint08-h2", known)
+
+    def test_oauth_stack_is_prepared_with_store_secrets_and_gradle_jars(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            secrets_directory = repository.parent / "external-secrets"
+            with patch.object(deploy, "REPOSITORY", repository):
+                with self.assertRaisesRegex(ValueError, "unavailable in this checkout"):
+                    deploy.prepare("sprint08-h2", secrets_directory, {})
+                project = repository / "projects/sprint08-security"
+                project.mkdir(parents=True)
+                with patch.object(deploy.subprocess, "run") as run:
+                    deploy.prepare("sprint08-postgresql", secrets_directory, {"PATH": "/usr/bin"})
+            initialize, package = run.call_args_list
+            self.assertEqual("scripts/init-secrets.py", initialize.args[0][1])
+            self.assertEqual(str(secrets_directory), initialize.kwargs["env"]["STORE_SECRETS_DIR"])
+            self.assertEqual(project, initialize.kwargs["cwd"])
+            self.assertEqual("scripts/package.py", package.args[0][1])
 
     def test_volume_deletion_cannot_pass_the_plan_gate(self):
         with self.assertRaisesRegex(ValueError, "persistent volumes"):

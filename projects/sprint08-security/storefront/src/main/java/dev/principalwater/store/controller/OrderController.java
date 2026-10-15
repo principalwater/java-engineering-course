@@ -30,6 +30,8 @@ public class OrderController {
             model.addAttribute("orders", selected.orders());
             model.addAttribute("nextCursor", selected.nextCursor());
             model.addAttribute("pageSize", pageSize);
+            // Thymeleaf param в WebFlux не бывает null: наличие курсора передаём явным флагом.
+            model.addAttribute("hasCursor", cursor != null && !cursor.isEmpty());
             return "orders";
         });
     }

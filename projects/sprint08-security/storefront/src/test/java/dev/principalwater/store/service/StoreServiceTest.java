@@ -65,7 +65,8 @@ class StoreServiceTest extends StoreIntegrationTestBase {
         var last = await(orderService.history(owner, 2, first.nextCursor()));
         assertEquals(List.of(created.getFirst()), last.orders().stream().map(OrderView::id).toList());
         assertNull(last.nextCursor());
-        var foreign = await(orderService.history(other, 2, first.nextCursor()));
+        assertThrows(StoreException.class, () -> orderService.history(other, 2, first.nextCursor()));
+        var foreign = await(orderService.history(other, 2, null));
         assertEquals(List.of(created.get(1)), foreign.orders().stream().map(OrderView::id).toList());
         assertEquals(1, foreign.orders().getFirst().items().size());
         assertThrows(StoreException.class, () -> orderService.history(owner, 3, null));

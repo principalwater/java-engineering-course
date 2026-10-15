@@ -98,6 +98,19 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
         assertTrue(otherAccount.get("/cart/items", HttpStatus.OK).contains("data-cart-total=\"0\""));
         assertNotEquals(account.cartId(), await(users.findByUsername("bob.shop")).cartId());
         assertEquals(1, PaymentsStub.DEBITS.get());
+        otherAccount.post("/cart/items", Map.of("id", Long.toString(productId), "action", "PLUS"), true, HttpStatus.SEE_OTHER);
+        var secondPurchase = otherAccount.post("/buy", Map.of(), true, HttpStatus.SEE_OTHER);
+        String secondOrderPath = Objects.requireNonNull(secondPurchase.getResponseHeaders().getFirst(HttpHeaders.LOCATION))
+                .split("\\?", 2)[0];
+        first.get(secondOrderPath, HttpStatus.NOT_FOUND);
+        otherAccount.get(secondOrderPath, HttpStatus.OK);
+        StoreUser bob = await(users.findByUsername("bob.shop"));
+        assertEquals(1_000_000_000L - 250_000, PaymentsStub.balance(account.id()));
+        assertEquals(1_000_000_000L - 125_000, PaymentsStub.balance(bob.id()));
+        assertEquals(2, PaymentsStub.DEBITS.get());
+        web.get().uri(secondOrderPath + "/payment").accept(MediaType.APPLICATION_JSON)
+                .cookies(values -> otherAccount.cookies.forEach(values::set)).exchange().expectStatus().isOk()
+                .expectBody().jsonPath("$.accountId").isEqualTo(bob.id().toString());
 
         first.get("/profile", HttpStatus.OK);
         first.post("/account/logout", Map.of(), false, HttpStatus.FORBIDDEN);

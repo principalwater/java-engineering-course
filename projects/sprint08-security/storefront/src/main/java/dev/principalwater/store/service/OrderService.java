@@ -30,14 +30,14 @@ public class OrderService {
 
     public Mono<OrderHistoryPage> history(UUID cartId, int pageSize, String cursor) {
         if (!StoreLimits.PAGE_SIZES.contains(pageSize)) { throw new StoreException(StoreError.INVALID_PAGING); }
-        var before = OrderCursor.parse(cursor);
+        var before = OrderCursor.parse(cursor, cartId);
         var window = before == null ? orders.history(cartId, pageSize + 1)
                 : orders.historyBefore(cartId, before.createdAt(), before.id(), pageSize + 1);
         // Лишняя строка определяет next без COUNT/OFFSET; owner берётся из principal даже с подменённым cursor.
         return window.collectList().flatMap(selected -> {
             boolean hasNext = selected.size() > pageSize;
             var page = List.copyOf(selected.subList(0, Math.min(pageSize, selected.size())));
-            String next = hasNext ? new OrderCursor(page.getLast().createdAt(), page.getLast().id()).encode() : null;
+            String next = hasNext ? new OrderCursor(cartId, page.getLast().createdAt(), page.getLast().id()).encode() : null;
             if (page.isEmpty()) { return Mono.just(new OrderHistoryPage(List.of(), null)); }
             var ids = page.stream().map(PurchaseOrder::id).toList();
             return lines.findByOrderIdInOrderByOrderIdAscLineNumberAsc(ids).collectList().map(items -> {

@@ -29,8 +29,12 @@ public class CheckoutPreparationService {
 
     public CheckoutPreparationService(CartRepository carts, CartQueries queries, CheckoutIntentRepository intents,
                                       CheckoutIntentLineRepository snapshots, Clock clock, TransactionalOperator transactions) {
-        this.carts = carts; this.queries = queries; this.intents = intents;
-        this.snapshots = snapshots; this.clock = clock; this.transactions = transactions;
+        this.carts = carts;
+        this.queries = queries;
+        this.intents = intents;
+        this.snapshots = snapshots;
+        this.clock = clock;
+        this.transactions = transactions;
     }
 
     public Mono<CheckoutIntent> prepare(UUID cartId, UUID payerId, UUID key, long amountMinor) {

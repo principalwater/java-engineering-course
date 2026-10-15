@@ -2,7 +2,10 @@ package dev.principalwater.store.config;
 
 import dev.principalwater.store.dao.CartRepository;
 import dev.principalwater.store.dao.StoreUserRepository;
-import dev.principalwater.store.model.*;
+import dev.principalwater.store.model.AccountRole;
+import dev.principalwater.store.model.AccountRules;
+import dev.principalwater.store.model.ShoppingCart;
+import dev.principalwater.store.model.StoreUser;
 import java.time.Duration;
 import java.util.UUID;
 import org.springframework.boot.ApplicationArguments;
@@ -25,8 +28,12 @@ public class SellerBootstrap implements ApplicationRunner {
     private final TransactionalOperator transactions;
     public SellerBootstrap(SellerProperties properties, StoreUserRepository users, CartRepository carts,
                            PasswordEncoder passwords, Scheduler passwordScheduler, TransactionalOperator transactions) {
-        this.properties = properties; this.users = users; this.carts = carts;
-        this.passwords = passwords; this.passwordScheduler = passwordScheduler; this.transactions = transactions;
+        this.properties = properties;
+        this.users = users;
+        this.carts = carts;
+        this.passwords = passwords;
+        this.passwordScheduler = passwordScheduler;
+        this.transactions = transactions;
     }
     @Override
     public void run(ApplicationArguments arguments) {

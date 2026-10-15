@@ -7,14 +7,16 @@ import dev.principalwater.store.dao.StoreIdentityRepository;
 import dev.principalwater.store.model.PurchaseOrder;
 import dev.principalwater.store.model.StoreIdentity;
 import dev.principalwater.store.util.VisitorIdentity;
+import io.r2dbc.spi.Row;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
-import org.springframework.stereotype.Service;
 import org.springframework.r2dbc.core.DatabaseClient;
-import io.r2dbc.spi.Row;
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Mono;
 
@@ -42,20 +44,34 @@ public class AnalyticsQueue {
             if (ids.isEmpty()) {
                 return Mono.just(new DeliveryBatch(List.of(), List.of()));
             }
-            return sourceId().flatMap(source -> orders.findByIdIn(ids)
-                    .collectMap(PurchaseOrder::getId, Function.identity()).flatMap(selected ->
-                            database.sql("SELECT cart_id, id FROM store_users WHERE cart_id IN (:carts)")
-                                    .bind("carts", selected.values().stream().map(PurchaseOrder::cartId).distinct().toList())
-                                    .map(row -> java.util.Map.entry(row.get("cart_id", UUID.class), row.get("id", UUID.class)))
-                                    .all().collectMap(java.util.Map.Entry::getKey, java.util.Map.Entry::getValue)
-                                    .flatMap(users -> lines.findByOrderIdInOrderByOrderIdAscLineNumberAsc(ids)
-                                            .collectList().map(items -> {
-                                var facts = items.stream().map(line -> AnalyticsFact.from(source,
-                                        users.getOrDefault(selected.get(line.orderId()).cartId(), VisitorIdentity.analyticsId(selected.get(line.orderId()).cartId())),
-                                        selected.get(line.orderId()), line)).toList();
-                                return new DeliveryBatch(List.copyOf(selected.keySet()), facts);
-                            }))));
+            return sourceId().flatMap(source -> loadOrders(source, ids));
         });
+    }
+
+    private Mono<DeliveryBatch> loadOrders(UUID source, List<Long> ids) {
+        return orders.findByIdIn(ids).collectMap(PurchaseOrder::getId, Function.identity())
+                .flatMap(selected -> resolveOwners(selected.values())
+                        .flatMap(owners -> loadFacts(source, selected, owners)));
+    }
+
+    private Mono<Map<UUID, UUID>> resolveOwners(Collection<PurchaseOrder> selected) {
+        var cartIds = selected.stream().map(PurchaseOrder::cartId).distinct().toList();
+        return database.sql("SELECT cart_id, id FROM store_users WHERE cart_id IN (:carts)")
+                .bind("carts", cartIds)
+                .map(row -> Map.entry(row.get("cart_id", UUID.class), row.get("id", UUID.class)))
+                .all().collectMap(Map.Entry::getKey, Map.Entry::getValue)
+                .map(owners -> {
+                    cartIds.forEach(cartId -> owners.computeIfAbsent(cartId, VisitorIdentity::analyticsId));
+                    return owners;
+                });
+    }
+
+    private Mono<DeliveryBatch> loadFacts(UUID source, Map<Long, PurchaseOrder> selected, Map<UUID, UUID> owners) {
+        return lines.findByOrderIdInOrderByOrderIdAscLineNumberAsc(selected.keySet())
+                .map(line -> {
+                    var order = selected.get(line.orderId());
+                    return AnalyticsFact.from(source, owners.get(order.cartId()), order, line);
+                }).collectList().map(facts -> new DeliveryBatch(List.copyOf(selected.keySet()), facts));
     }
 
     public Mono<UUID> sourceId() {

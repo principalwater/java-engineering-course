@@ -16,7 +16,9 @@ public class PaymentsGateway {
     private final PaymentProperties properties;
     private final ObjectMapper json;
     public PaymentsGateway(PaymentsApi api, PaymentProperties properties, ObjectMapper json) {
-        this.api = api; this.properties = properties; this.json = json;
+        this.api = api;
+        this.properties = properties;
+        this.json = json;
     }
     public Mono<Long> balance(UUID payerId) {
         return api.getBalance(payerId).timeout(properties.balanceTimeout()).map(value -> {

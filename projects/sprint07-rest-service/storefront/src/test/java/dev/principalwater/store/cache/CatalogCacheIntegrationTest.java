@@ -38,13 +38,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest(properties = {"store.cache.enabled=true", "store.cache.namespace=sprint07-cache-test",
-        "store.cache.product-slots=1", "store.cache.page-slots=1", "store.cache.operation-timeout=1s"})
+        "store.cache.page-slots=1", "store.cache.operation-timeout=1s"})
 class CatalogCacheIntegrationTest extends DatabaseTestBase {
     private static final CatalogQuery ALL = new CatalogQuery("", SortMode.NO, 1, 5);
     private static final CartView EMPTY_CART = new CartView(List.of());
     @Autowired private CatalogImportService importer;
     @Autowired private CatalogService catalog;
     @Autowired private CatalogReads reads;
+    @Autowired private RedisProductCache productCache;
     @Autowired private CartService carts;
     @Autowired private ProductRepository products;
     @Autowired private StoreIdentityRepository identities;
@@ -96,6 +97,17 @@ class CatalogCacheIntegrationTest extends DatabaseTestBase {
     }
 
     @Test
+    void productIdsWithTheSameFormerSlotRemainCachedTogether() {
+        var identity = await(identities.findById(StoreIdentity.SINGLETON_ID));
+        // ID 100 и 342 делили слот 1521 из 2048: запись второго вытесняла первый без нехватки памяти.
+        var first = new Product(100L, 0L, "cache-first", "First", "Description", ImageAsset.KEYBOARD, 100);
+        var second = new Product(342L, 0L, "cache-second", "Second", "Description", ImageAsset.KEYBOARD, 200);
+        var expected = Map.of(first.id().toString(), first, second.id().toString(), second);
+        productCache.putAll(identity, expected).block(TIMEOUT);
+        assertEquals(expected, await(productCache.getAll(identity, List.of("100", "342"))));
+    }
+
+    @Test
     void committedImportInvalidatesEveryDisplayEvenWhenAnOldFillArrivesLate() throws Exception {
         importItems(productInput("cache-alpha", "Before", "Alpha description", 100));
         long id = id("cache-alpha");
@@ -133,7 +145,7 @@ class CatalogCacheIntegrationTest extends DatabaseTestBase {
     }
 
     @Test
-    void collisionsExpiryAndMalformedValuesRemainMissesRatherThanWrongProducts() throws Exception {
+    void pageCollisionsExpiryAndMalformedValuesRemainMissesRatherThanWrongProducts() throws Exception {
         importItems(productInput("cache-alpha", "Alpha", "Description", 100),
                 productInput("cache-beta", "Beta", "Description", 200));
         long alpha = id("cache-alpha");
@@ -146,7 +158,8 @@ class CatalogCacheIntegrationTest extends DatabaseTestBase {
             assertEquals(search, await(catalog.list(query, EMPTY_CART)).items().getFirst().title());
         }
         var keys = await(ownKeys());
-        assertTrue(keys.size() <= properties.productSlots() + properties.pageSlots(), "Cache keyspace must remain bounded");
+        assertTrue(keys.stream().filter(key -> key.contains(":page:")).count() <= properties.pageSlots(),
+                "Search page keyspace must remain bounded");
         for (String key : keys) {
             Duration ttl = await(redis.getExpire(key));
             assertTrue(ttl.isPositive() && ttl.compareTo(properties.ttl()) <= 0);
@@ -162,7 +175,9 @@ class CatalogCacheIntegrationTest extends DatabaseTestBase {
             malformed.put(key, new byte[]{'{'});
         }
         restore(malformed);
-        assertEquals(200, await(reads.product(beta)).price());
+        double failures = counter("product", "failure");
+        assertEquals(100, await(reads.product(alpha)).price());
+        assertTrue(counter("product", "failure") > failures, "The existing product value must be decoded and rejected");
         assertEquals(2, await(catalog.list(ALL, EMPTY_CART)).totalItems());
     }
 
@@ -172,7 +187,7 @@ class CatalogCacheIntegrationTest extends DatabaseTestBase {
         var product = await(products.findById(id("cache-alpha")));
         var identity = await(identities.findById(StoreIdentity.SINGLETON_ID));
         var small = new CatalogCacheProperties(true, properties.namespace(), properties.ttl(), properties.operationTimeout(),
-                1, properties.productSlots(), properties.pageSlots());
+                1, properties.pageSlots());
         var cache = new RedisProductCache(redis, json, small, codecScheduler, metrics);
         double skipped = counter("product", "skipped");
         cache.put(identity, product.id().toString(), product).block(TIMEOUT);

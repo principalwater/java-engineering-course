@@ -29,9 +29,13 @@ public class CheckoutService {
     public CheckoutService(CartQueries queries, StoreUserRepository users, CheckoutIntentRepository intents,
                            PaymentsGateway payments, WalletService wallets, CheckoutPreparationService preparation,
                            CheckoutSettlementService settlement) {
-        this.queries = queries; this.users = users; this.intents = intents;
-        this.payments = payments; this.wallets = wallets;
-        this.preparation = preparation; this.settlement = settlement;
+        this.queries = queries;
+        this.users = users;
+        this.intents = intents;
+        this.payments = payments;
+        this.wallets = wallets;
+        this.preparation = preparation;
+        this.settlement = settlement;
     }
 
     public Mono<CheckoutAvailability> availability(UUID cartId) {

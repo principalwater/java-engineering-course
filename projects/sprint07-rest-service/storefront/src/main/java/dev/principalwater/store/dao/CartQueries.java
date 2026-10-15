@@ -1,6 +1,10 @@
 package dev.principalwater.store.dao;
 
-import dev.principalwater.store.model.*;
+import dev.principalwater.store.model.CartItem;
+import dev.principalwater.store.model.ImageAsset;
+import dev.principalwater.store.model.Product;
+import dev.principalwater.store.model.StoreError;
+import dev.principalwater.store.model.StoreException;
 import dev.principalwater.store.payment.CheckoutSnapshot;
 import io.r2dbc.spi.Row;
 import java.nio.ByteBuffer;
@@ -13,7 +17,9 @@ import reactor.core.publisher.Mono;
 @Repository
 public class CartQueries {
     private final DatabaseClient database;
-    public CartQueries(DatabaseClient database) { this.database = database; }
+    public CartQueries(DatabaseClient database) {
+        this.database = database;
+    }
     public Flux<CartItem> items(UUID cartId) { return snapshot(cartId).flatMapMany(view -> Flux.fromIterable(view.items())); }
     public Mono<CheckoutSnapshot> snapshot(UUID cartId) {
         // Одна SQL-выборка связывает цены с обеими revision без глобальной блокировки каталога.

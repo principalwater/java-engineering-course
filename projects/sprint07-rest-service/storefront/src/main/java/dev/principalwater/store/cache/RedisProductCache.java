@@ -16,7 +16,13 @@ public class RedisProductCache extends AbstractJsonRedisCache<Product> {
     public RedisProductCache(ReactiveRedisOperations<String, byte[]> redis, ObjectMapper json,
                              CatalogCacheProperties properties, @Qualifier("cacheCodecScheduler") Scheduler scheduler,
                              MeterRegistry metrics) {
-        super(redis, json, properties, scheduler, metrics, "product", properties.productSlots(), MAX_PRODUCT_BYTES, Product.class);
+        super(redis, json, properties, scheduler, metrics, "product", MAX_PRODUCT_BYTES, Product.class);
+    }
+
+    @Override
+    protected String keySuffix(String logicalKey) {
+        // Полный ID исключает взаимное вытеснение товаров; объём ограничивают TTL и Redis maxmemory.
+        return logicalKey;
     }
 
     @Override

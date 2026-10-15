@@ -1,7 +1,17 @@
 package dev.principalwater.store.service;
 
-import dev.principalwater.store.dao.*;
-import dev.principalwater.store.model.*;
+import dev.principalwater.store.dao.CartLineRepository;
+import dev.principalwater.store.dao.CartRepository;
+import dev.principalwater.store.dao.CheckoutIntentLineRepository;
+import dev.principalwater.store.dao.CheckoutIntentRepository;
+import dev.principalwater.store.dao.OrderLineRepository;
+import dev.principalwater.store.dao.OrderRepository;
+import dev.principalwater.store.dao.OutboxRepository;
+import dev.principalwater.store.model.AnalyticsOutbox;
+import dev.principalwater.store.model.OrderStatus;
+import dev.principalwater.store.model.PurchaseOrder;
+import dev.principalwater.store.model.StoreError;
+import dev.principalwater.store.model.StoreException;
 import dev.principalwater.store.payment.CheckoutIntent;
 import dev.principalwater.store.payment.generated.model.PaymentReceipt;
 import dev.principalwater.store.util.Money;
@@ -29,9 +39,15 @@ public class CheckoutSettlementService {
     public CheckoutSettlementService(CartRepository carts, CartLineRepository cartLines, OrderRepository orders,
                                      OrderLineRepository orderLines, OutboxRepository outbox, CheckoutIntentRepository intents,
                                      CheckoutIntentLineRepository snapshots, Clock clock, TransactionalOperator transactions) {
-        this.carts = carts; this.cartLines = cartLines; this.orders = orders;
-        this.orderLines = orderLines; this.outbox = outbox; this.intents = intents;
-        this.snapshots = snapshots; this.clock = clock; this.transactions = transactions;
+        this.carts = carts;
+        this.cartLines = cartLines;
+        this.orders = orders;
+        this.orderLines = orderLines;
+        this.outbox = outbox;
+        this.intents = intents;
+        this.snapshots = snapshots;
+        this.clock = clock;
+        this.transactions = transactions;
     }
 
     public Mono<Long> settle(CheckoutIntent intent, PaymentReceipt receipt) {

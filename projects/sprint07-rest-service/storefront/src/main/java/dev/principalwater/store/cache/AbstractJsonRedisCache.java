@@ -23,7 +23,6 @@ public abstract class AbstractJsonRedisCache<T> {
     private final CatalogCacheProperties properties;
     private final Scheduler codecScheduler;
     private final String kind;
-    private final int slots;
     private final int maxEntryBytes;
     private final ObjectReader reader;
     private final ObjectWriter writer;
@@ -34,12 +33,11 @@ public abstract class AbstractJsonRedisCache<T> {
 
     protected AbstractJsonRedisCache(ReactiveRedisOperations<String, byte[]> redis, ObjectMapper json,
                                      CatalogCacheProperties properties, Scheduler codecScheduler,
-                                     MeterRegistry metrics, String kind, int slots, int maxEntryBytes, Class<T> type) {
+                                     MeterRegistry metrics, String kind, int maxEntryBytes, Class<T> type) {
         this.redis = redis;
         this.properties = properties;
         this.codecScheduler = codecScheduler;
         this.kind = kind;
-        this.slots = slots;
         this.maxEntryBytes = Math.min(properties.maxEntryBytes(), maxEntryBytes);
         var entryType = json.getTypeFactory().constructParametricType(Entry.class, type);
         reader = json.readerFor(entryType).with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES,
@@ -103,6 +101,8 @@ public abstract class AbstractJsonRedisCache<T> {
                 });
     }
 
+    protected abstract String keySuffix(String logicalKey);
+
     protected abstract boolean valid(String logicalKey, T value);
 
     private Map<String, T> decode(StoreIdentity identity, List<String> keys, List<byte[]> values) {
@@ -131,9 +131,8 @@ public abstract class AbstractJsonRedisCache<T> {
     }
 
     private String key(StoreIdentity identity, String logicalKey) {
-        // Фиксированное число слотов ограничивает keyspace; полная identity отличает безопасный miss при коллизии.
         return properties.namespace() + ":" + FORMAT_VERSION + ":" + identity.sourceId() + ":" + kind
-                + ":" + Math.floorMod(logicalKey.hashCode(), slots);
+                + ":" + keySuffix(logicalKey);
     }
 
     private Counter counter(MeterRegistry metrics, String outcome) {

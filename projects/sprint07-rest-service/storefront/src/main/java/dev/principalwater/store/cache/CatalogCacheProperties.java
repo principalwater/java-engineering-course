@@ -10,7 +10,6 @@ public record CatalogCacheProperties(@DefaultValue("true") boolean enabled,
                                      @DefaultValue("60s") Duration ttl,
                                      @DefaultValue("150ms") Duration operationTimeout,
                                      @DefaultValue("" + CatalogCacheProperties.MAX_ENTRY_BYTES) int maxEntryBytes,
-                                     @DefaultValue("2048") int productSlots,
                                      @DefaultValue("128") int pageSlots) {
     private static final int MAX_ENTRY_BYTES = 2 * 1024 * 1024;
     private static final int MAX_SLOTS = 16384;
@@ -32,8 +31,8 @@ public record CatalogCacheProperties(@DefaultValue("true") boolean enabled,
         if (maxEntryBytes <= 0 || maxEntryBytes > MAX_ENTRY_BYTES) {
             throw new IllegalArgumentException("Cache entry limit must be between 1 and " + MAX_ENTRY_BYTES + " bytes");
         }
-        if (productSlots <= 0 || productSlots > MAX_SLOTS || pageSlots <= 0 || pageSlots > MAX_SLOTS) {
-            throw new IllegalArgumentException("Cache slot count must be between 1 and " + MAX_SLOTS);
+        if (pageSlots <= 0 || pageSlots > MAX_SLOTS) {
+            throw new IllegalArgumentException("Cache page slot count must be between 1 and " + MAX_SLOTS);
         }
     }
 }

@@ -10,11 +10,20 @@ import reactor.core.scheduler.Scheduler;
 
 @Component
 public class RedisCatalogPageCache extends AbstractJsonRedisCache<CatalogSnapshot> {
+    private final int slots;
+
     public RedisCatalogPageCache(ReactiveRedisOperations<String, byte[]> redis, ObjectMapper json,
                                  CatalogCacheProperties properties, @Qualifier("cacheCodecScheduler") Scheduler scheduler,
                                  MeterRegistry metrics) {
-        super(redis, json, properties, scheduler, metrics, "page", properties.pageSlots(), properties.maxEntryBytes(),
+        super(redis, json, properties, scheduler, metrics, "page", properties.maxEntryBytes(),
                 CatalogSnapshot.class);
+        slots = properties.pageSlots();
+    }
+
+    @Override
+    protected String keySuffix(String logicalKey) {
+        // Число поисковых запросов не ограничено каталогом; identity в JSON защищает от коллизий слотов.
+        return Integer.toString(Math.floorMod(logicalKey.hashCode(), slots));
     }
 
     @Override

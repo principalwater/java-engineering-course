@@ -183,6 +183,19 @@ class AnalyticsIntegrationTest extends StoreIntegrationTestBase {
                 .jsonPath("$.daily.length()").isEqualTo(30);
         web.get().uri("/profile/analytics?days=365").accept(MediaType.TEXT_HTML)
                 .exchange().expectStatus().isBadRequest();
+
+        var registered = await(users.findByUsername("warehouse.buyer"));
+        await(carts.change(registered.cartId(), productId, CartAction.PLUS));
+        long accountOrder = await(buy(registered.cartId()));
+        var accountBatch = await(queue.capture());
+        assertEquals(List.of(accountOrder), accountBatch.orderIds());
+        assertEquals(registered.id(), accountBatch.facts().getFirst().userId());
+        StepVerifier.create(delivery.flush()).expectNext(DeliveryResult.delivered(1))
+                .expectComplete().verify(TIMEOUT);
+        buyer.get().uri("/profile/analytics/data?days=30").accept(MediaType.APPLICATION_JSON)
+                .exchange().expectStatus().isOk().expectBody()
+                .jsonPath("$.summary.orders").isEqualTo("1")
+                .jsonPath("$.summary.orderValue").isEqualTo("7900");
     }
 
     private WebTestClient accountClient(AccountRole role) {

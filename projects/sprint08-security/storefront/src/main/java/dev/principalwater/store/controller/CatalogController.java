@@ -34,7 +34,7 @@ public class CatalogController {
     }
 
     // defaultValue аннотации требует compile-time String: enum/getter здесь не компилируется.
-    @GetMapping({"/", "/items"})
+    @GetMapping({"/", StorePaths.ITEMS})
     public Mono<String> items(@RequestParam(defaultValue = CatalogQuery.DEFAULT_SEARCH) String search,
                               @RequestParam(defaultValue = CatalogQuery.DEFAULT_SORT) SortMode sort,
                               @RequestParam(defaultValue = CatalogQuery.DEFAULT_PAGE_NUMBER) int pageNumber,
@@ -50,7 +50,7 @@ public class CatalogController {
         });
     }
 
-    @GetMapping("/items/{id}")
+    @GetMapping(StorePaths.ITEMS + "/{id}")
     public Mono<String> item(@PathVariable @Positive long id, @ModelAttribute("cart") CartView cart, Model model) {
         return catalog.item(id, cart).map(item -> {
             model.addAttribute("item", item);
@@ -58,7 +58,7 @@ public class CatalogController {
         });
     }
 
-    @PostMapping("/items")
+    @PostMapping(StorePaths.ITEMS)
     public Mono<RedirectView> changeFromFeed(@Valid @ModelAttribute CartMutationInput input,
                                             @ModelAttribute CatalogNavigation navigation,
                                             @RequestAttribute(CartIdentityFilter.ATTRIBUTE_NAME) UUID cartId) {
@@ -70,7 +70,7 @@ public class CatalogController {
         return carts.change(cartId, input.id(), input.action(), input.quantity()).thenReturn(StoreRedirects.to(target));
     }
 
-    @PostMapping("/items/{id}")
+    @PostMapping(StorePaths.ITEMS + "/{id}")
     public Mono<RedirectView> changeFromItem(@PathVariable @Positive long id,
                                             @Valid @ModelAttribute CartMutationInput input,
                                             @RequestAttribute(CartIdentityFilter.ATTRIBUTE_NAME) UUID cartId) {

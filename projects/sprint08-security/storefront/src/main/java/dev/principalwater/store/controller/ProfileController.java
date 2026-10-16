@@ -19,7 +19,7 @@ public class ProfileController {
         this.wallets = wallets;
     }
 
-    @GetMapping("/profile")
+    @GetMapping(StorePaths.CABINET)
     public Mono<String> profile(@RequestAttribute(CartIdentityFilter.ATTRIBUTE_NAME) UUID cartId,
                                 @RequestAttribute(CartIdentityFilter.USER_ATTRIBUTE_NAME) UUID userId, Model model) {
         return Mono.zip(orders.profile(cartId), wallets.balance(userId)).map(view -> {

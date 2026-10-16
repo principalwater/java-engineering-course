@@ -1,5 +1,6 @@
 package dev.principalwater.store.controller;
 
+import dev.principalwater.store.Browser;
 import dev.principalwater.store.PaymentsStub;
 import dev.principalwater.store.StoreIntegrationTestBase;
 import dev.principalwater.store.dao.CartRepository;
@@ -8,8 +9,8 @@ import dev.principalwater.store.model.AccountRole;
 import dev.principalwater.store.model.StoreUser;
 import dev.principalwater.store.service.CatalogImportService;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -20,11 +21,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.MultipartBodyBuilder;
-import org.springframework.test.web.reactive.server.EntityExchangeResult;
+import org.springframework.session.ReactiveSessionRepository;
 import org.springframework.test.web.reactive.server.WebTestClient;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.web.reactive.function.BodyInserters;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -34,8 +32,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AccountIntegrationTest extends StoreIntegrationTestBase {
     private static final String PASSWORD = "correct horse account pass";
-    private static final Pattern CSRF = Pattern.compile(
-            "<input\\b(?=[^>]*\\bname=\"_csrf\")[^>]*\\bvalue=\"([^\"]+)\"");
     @Autowired private CatalogImportService importer;
     @Autowired private StoreUserRepository users;
     @Autowired private CartRepository carts;
@@ -56,7 +52,7 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
                 """.getBytes(StandardCharsets.UTF_8)));
         long productId = await(database.sql("SELECT id FROM products WHERE sku = 'account-item'")
                 .map(row -> row.get("id", Long.class)).one());
-        var first = new Browser();
+        var first = new Browser(web);
         first.get("/account/register", HttpStatus.OK);
         assertFalse(first.cookies.containsKey("storefront-cart"));
         assertEquals(0L, await(carts.count()), "Anonymous pages must not allocate a cart");
@@ -69,28 +65,28 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
         login(first, "ALICE.SHOP", PASSWORD);
         assertNotEquals(anonymousSession, first.cookies.get(sessionCookie), "Login must rotate the session ID");
         assertFalse(first.cookies.containsKey("storefront-cart"));
-        assertTrue(first.get("/profile", HttpStatus.OK).contains("Алиса"));
+        assertTrue(first.get("/cabinet", HttpStatus.OK).contains("Алиса"));
         first.post("/cart/items", Map.of("id", Long.toString(productId), "action", "SET", "quantity", "2"),
                 true, HttpStatus.SEE_OTHER);
 
-        var second = new Browser();
+        var second = new Browser(web);
         second.get("/account/login", HttpStatus.OK);
         login(second, "alice.shop", PASSWORD);
         assertTrue(second.get("/cart/items", HttpStatus.OK).contains("data-cart-total=\"2500\""));
-        second.get("/profile", HttpStatus.OK);
+        second.get("/cabinet", HttpStatus.OK);
         var purchased = second.post("/buy", Map.of(), true, HttpStatus.SEE_OTHER);
         String orderPath = Objects.requireNonNull(purchased.getResponseHeaders().getFirst(HttpHeaders.LOCATION))
                 .split("\\?", 2)[0];
         first.get(orderPath, HttpStatus.OK);
-        String profile = first.get("/profile", HttpStatus.OK);
+        String profile = first.get("/cabinet", HttpStatus.OK);
         assertTrue(profile.contains("data-metric=\"orders\">1</strong>"));
         assertTrue(profile.contains("data-metric=\"units\">2</strong>"));
         assertTrue(first.get("/orders", HttpStatus.OK).contains(orderPath));
 
-        var forged = new Browser();
+        var forged = new Browser(web);
         forged.cookies.put("storefront-cart", account.cartId().toString());
         forged.get(orderPath, HttpStatus.FOUND);
-        var otherAccount = new Browser();
+        var otherAccount = new Browser(web);
         otherAccount.get(orderPath, HttpStatus.FOUND);
         otherAccount.get("/account/register", HttpStatus.OK);
         register(otherAccount, "bob.shop", "Борис", HttpStatus.SEE_OTHER);
@@ -118,10 +114,10 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
                 .cookies(values -> otherAccount.cookies.forEach(values::set)).exchange().expectStatus().isOk()
                 .expectBody().jsonPath("$.accountId").isEqualTo(bob.id().toString());
 
-        first.get("/profile", HttpStatus.OK);
+        first.get("/cabinet", HttpStatus.OK);
         first.post("/account/logout", Map.of(), false, HttpStatus.FORBIDDEN);
         first.get(orderPath, HttpStatus.OK);
-        first.get("/profile", HttpStatus.OK);
+        first.get("/cabinet", HttpStatus.OK);
         String loggedInSession = first.cookies.get(sessionCookie);
         assertTrue(first.get("/account/logout", HttpStatus.OK).contains("Выйти из аккаунта?"));
         first.get(orderPath, HttpStatus.OK);
@@ -130,17 +126,23 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
         assertFalse(first.cookies.containsKey(sessionCookie));
         first.get("/cart/items", HttpStatus.FOUND);
         first.get(orderPath, HttpStatus.FOUND);
-        var expired = new Browser();
+        var expired = new Browser(web);
         expired.cookies.put(sessionCookie, loggedInSession);
-        expired.get("/profile", HttpStatus.FOUND);
+        expired.get("/cabinet", HttpStatus.FOUND);
         expired.get(orderPath, HttpStatus.FOUND);
         assertTrue(first.get("/account/login?loggedOut", HttpStatus.OK).contains("Сессия этого браузера завершена"));
         second.get(orderPath, HttpStatus.OK);
     }
 
     @Test
+    void regularProfilesKeepTheLocalWebSessionBecauseSharedSessionsAreOptIn() {
+        // Boot привязал бы автонастроенные сессии к кэшевому Redis, где записи вытесняются; профиль shared-sessions явный.
+        assertTrue(context.getBeansOfType(ReactiveSessionRepository.class).isEmpty());
+    }
+
+    @Test
     void loginReplacesTheCsrfTokenOfTheAnonymousSession() {
-        var browser = new Browser();
+        var browser = new Browser(web);
         browser.get("/account/register", HttpStatus.OK);
         register(browser, "token.shop", "Токен", HttpStatus.SEE_OTHER);
         browser.get("/account/login", HttpStatus.OK);
@@ -156,13 +158,13 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
 
     @Test
     void anonymousVisitorsSeeOnlyPublicProductsAndCannotReadOrChangePrivateData() {
-        var guest = new Browser();
+        var guest = new Browser(web);
         String catalog = guest.get("/items", HttpStatus.OK);
         assertFalse(catalog.contains("class=\"quantity-form\""));
         assertFalse(catalog.contains("href=\"/orders\""));
         assertFalse(catalog.contains("href=\"/cart/items\""));
         guest.get("/account/login", HttpStatus.OK);
-        for (String path : List.of("/profile", "/cart/items", "/orders", "/orders/1", "/profile/analytics/data")) {
+        for (String path : List.of("/cabinet", "/cart/items", "/orders", "/orders/1", "/cabinet/analytics/data")) {
             guest.get(path, HttpStatus.FOUND);
             web.get().uri(path).accept(MediaType.APPLICATION_JSON).exchange().expectStatus().isUnauthorized();
         }
@@ -178,10 +180,10 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
 
     @Test
     void registrationAndLoginValidateCredentialsAndCsrfWithoutCreatingOrExposingAnAccount() {
-        var browser = new Browser();
+        var browser = new Browser(web);
         browser.get("/account/register", HttpStatus.OK);
-        browser.post("/account/register", Map.of("username", "alice.shop", "displayName", "Алиса", "password", PASSWORD),
-                false, HttpStatus.FORBIDDEN);
+        browser.post("/account/register", Map.of("username", "alice.shop", "displayName", "Алиса",
+                "email", "alice.shop@example.test", "password", PASSWORD), false, HttpStatus.FORBIDDEN);
         assertEquals(0L, await(users.count()));
         browser.get("/account/register", HttpStatus.OK);
         register(browser, "alice.shop", "Алиса", HttpStatus.SEE_OTHER);
@@ -191,17 +193,31 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
         assertEquals(1L, await(users.count()));
         assertEquals(cartCount, await(carts.count()), "Duplicate registration must roll back its new cart");
         browser.get("/account/register", HttpStatus.OK);
-        browser.post("/account/register", Map.of("username", "unicode.shop", "displayName", "Гость", "password", "я".repeat(40)),
-                true, HttpStatus.BAD_REQUEST);
+        browser.post("/account/register", Map.of("username", "unicode.shop", "displayName", "Гость",
+                "email", "unicode.shop@example.test", "password", "я".repeat(40)), true, HttpStatus.BAD_REQUEST);
         assertEquals(1L, await(users.count()));
         assertEquals(cartCount, await(carts.count()));
+
+        // Контактная почта обязательна и уникальна без учёта регистра; отказ не оставляет ни аккаунта, ни корзины.
+        browser.get("/account/register", HttpStatus.OK);
+        browser.post("/account/register", Map.of("username", "mail.none", "displayName", "Гость", "password", PASSWORD),
+                true, HttpStatus.BAD_REQUEST);
+        for (String invalid : List.of("not-an-address", "two@@example.test", "user@localhost", "a".repeat(250) + "@example.test")) {
+            browser.post("/account/register", Map.of("username", "mail.bad", "displayName", "Гость",
+                    "email", invalid, "password", PASSWORD), true, HttpStatus.BAD_REQUEST);
+        }
+        browser.post("/account/register", Map.of("username", "mail.twin", "displayName", "Двойник",
+                "email", "ALICE.Shop@Example.TEST", "password", PASSWORD), true, HttpStatus.CONFLICT);
+        assertEquals(1L, await(users.count()));
+        assertEquals(cartCount, await(carts.count()));
+        assertEquals("alice.shop@example.test", await(users.findByUsername("alice.shop")).email());
 
         String loginPage = browser.get("/account/login", HttpStatus.OK);
         assertFalse(loginPage.contains("Не удалось войти."));
         assertFalse(loginPage.contains("Аккаунт создан."));
         browser.post("/account/login", Map.of("username", "alice.shop", "password", PASSWORD),
                 false, HttpStatus.FORBIDDEN);
-        browser.get("/profile", HttpStatus.FOUND);
+        browser.get("/cabinet", HttpStatus.FOUND);
         browser.get("/account/login", HttpStatus.OK);
         var failure = browser.post("/account/login", Map.of("username", "alice.shop", "password", "a wrong password"),
                 true, HttpStatus.FOUND);
@@ -210,10 +226,10 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
         assertFalse(browser.get("/account/login?error", HttpStatus.OK).contains("Аккаунт создан."));
         assertTrue(browser.get("/account/login?registered", HttpStatus.OK).contains("Аккаунт создан."));
         assertFalse(browser.get("/account/login?registered", HttpStatus.OK).contains("Не удалось войти."));
-        browser.get("/profile", HttpStatus.FOUND);
+        browser.get("/cabinet", HttpStatus.FOUND);
         browser.get("/account/login", HttpStatus.OK);
         login(browser, "ALICE.SHOP", PASSWORD);
-        assertTrue(browser.get("/profile", HttpStatus.OK).contains("Алиса"));
+        assertTrue(browser.get("/cabinet", HttpStatus.OK).contains("Алиса"));
     }
 
     @Test
@@ -221,32 +237,32 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
         String catalog = """
                 [{"sku":"seller-item","title":"Seller item","description":"Description","image":"CUP","price":1250}]
                 """;
-        var guest = new Browser();
+        var guest = new Browser(web);
         guest.get("/account/register", HttpStatus.OK);
-        for (String path : List.of("/account/seller", "/account/seller/analytics", "/account/seller/analytics/data", "/catalog")) {
+        for (String path : List.of("/cabinet/store", "/cabinet/store/analytics", "/cabinet/store/analytics/data", "/catalog")) {
             guest.get(path, HttpStatus.FOUND);
         }
         guest.upload(catalog, HttpStatus.FOUND);
-        guest.post("/account/seller/analytics/sync", Map.of("days", "7"), true, HttpStatus.FOUND);
+        guest.post("/cabinet/store/analytics/sync", Map.of("days", "7"), true, HttpStatus.FOUND);
 
-        var buyer = new Browser();
+        var buyer = new Browser(web);
         buyer.get("/account/register", HttpStatus.OK);
         buyer.post("/account/register", Map.of("username", "buyer.shop", "displayName", "Покупатель",
-                "password", PASSWORD, "role", "SELLER"), true, HttpStatus.SEE_OTHER);
+                "email", "buyer.shop@example.test", "password", PASSWORD, "role", "SELLER"), true, HttpStatus.SEE_OTHER);
         assertEquals(AccountRole.BUYER, await(users.findByUsername("buyer.shop")).role(),
                 "Public registration must ignore a requested privileged role");
         buyer.get("/account/login", HttpStatus.OK);
         login(buyer, "buyer.shop", PASSWORD);
-        buyer.get("/profile", HttpStatus.OK);
-        for (String path : List.of("/account/seller", "/account/seller/analytics", "/account/seller/analytics/data", "/catalog")) {
+        buyer.get("/cabinet", HttpStatus.OK);
+        for (String path : List.of("/cabinet/store", "/cabinet/store/analytics", "/cabinet/store/analytics/data", "/catalog")) {
             buyer.get(path, HttpStatus.FORBIDDEN);
         }
         buyer.upload(catalog, HttpStatus.FORBIDDEN);
-        buyer.post("/account/seller/analytics/sync", Map.of("days", "7"), true, HttpStatus.FORBIDDEN);
+        buyer.post("/cabinet/store/analytics/sync", Map.of("days", "7"), true, HttpStatus.FORBIDDEN);
         assertEquals(0L, await(database.sql("SELECT COUNT(*) AS total FROM products")
                 .map(row -> ((Number) row.get("total")).longValue()).one()));
 
-        var seller = new Browser();
+        var seller = new Browser(web);
         seller.get("/account/register", HttpStatus.OK);
         register(seller, "owner.shop", "Продавец", HttpStatus.SEE_OTHER);
         // Назначение продавца находится вне публичной регистрации; вход читает реальную сохранённую роль.
@@ -257,18 +273,18 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
         seller.upload(catalog, HttpStatus.SEE_OTHER);
         long productId = await(database.sql("SELECT id FROM products WHERE sku = 'seller-item'")
                 .map(row -> row.get("id", Long.class)).one());
-        buyer.get("/profile", HttpStatus.OK);
+        buyer.get("/cabinet", HttpStatus.OK);
         buyer.post("/cart/items", Map.of("id", Long.toString(productId), "action", "SET", "quantity", "2"),
                 true, HttpStatus.SEE_OTHER);
         buyer.post("/buy", Map.of(), true, HttpStatus.SEE_OTHER);
-        seller.get("/profile", HttpStatus.OK);
+        seller.get("/cabinet", HttpStatus.OK);
         seller.post("/cart/items", Map.of("id", Long.toString(productId), "action", "SET", "quantity", "1"),
                 true, HttpStatus.SEE_OTHER);
         seller.post("/buy", Map.of(), true, HttpStatus.SEE_OTHER);
 
-        String buyerProfile = buyer.get("/profile", HttpStatus.OK);
-        String sellerProfile = seller.get("/profile", HttpStatus.OK);
-        String store = seller.get("/account/seller", HttpStatus.OK);
+        String buyerProfile = buyer.get("/cabinet", HttpStatus.OK);
+        String sellerProfile = seller.get("/cabinet", HttpStatus.OK);
+        String store = seller.get("/cabinet/store", HttpStatus.OK);
         assertEquals("2500", metric(buyerProfile, "paid-value"));
         assertEquals("1250", metric(sellerProfile, "paid-value"));
         assertEquals("3750", metric(store, "seller-revenue"));
@@ -276,10 +292,10 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
         assertEquals("3", metric(store, "seller-units"));
         assertFalse(buyerProfile.contains("Выручка"));
         assertFalse(sellerProfile.contains("Выручка"));
-        assertTrue(buyer.get("/profile/analytics", HttpStatus.OK).contains("Только ваши покупки"));
-        assertTrue(seller.get("/account/seller/analytics", HttpStatus.OK).contains("Весь магазин"));
+        assertTrue(buyer.get("/cabinet/analytics", HttpStatus.OK).contains("Только ваши покупки"));
+        assertTrue(seller.get("/cabinet/store/analytics", HttpStatus.OK).contains("Весь магазин"));
         // Отключённый warehouse отвечает 503 после разрешённого доступа, а не подменяет результаты нулями.
-        seller.post("/account/seller/analytics/sync", Map.of("days", "7"), true, HttpStatus.SERVICE_UNAVAILABLE);
+        seller.post("/cabinet/store/analytics/sync", Map.of("days", "7"), true, HttpStatus.SERVICE_UNAVAILABLE);
     }
 
     @Test
@@ -289,13 +305,13 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
                 """.getBytes(StandardCharsets.UTF_8)));
         long productId = await(database.sql("SELECT id FROM products WHERE sku = 'wallet-item'")
                 .map(row -> row.get("id", Long.class)).one());
-        var buyer = new Browser();
+        var buyer = new Browser(web);
         buyer.get("/account/register", HttpStatus.OK);
         register(buyer, "wallet.shop", "Покупатель", HttpStatus.SEE_OTHER);
         StoreUser account = await(users.findByUsername("wallet.shop"));
         buyer.get("/account/login", HttpStatus.OK);
         login(buyer, "wallet.shop", PASSWORD);
-        buyer.get("/profile", HttpStatus.OK);
+        buyer.get("/cabinet", HttpStatus.OK);
         buyer.post("/cart/items", Map.of("id", Long.toString(productId), "action", "SET", "quantity", "1"),
                 true, HttpStatus.SEE_OTHER);
 
@@ -307,7 +323,7 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
         String unavailable = buyer.get("/cart/items", HttpStatus.OK);
         assertTrue(disabledCheckout(unavailable));
         assertTrue(unavailable.contains("Сервис платежей временно недоступен"));
-        assertTrue(buyer.get("/profile", HttpStatus.OK).contains("Не удалось проверить баланс"));
+        assertTrue(buyer.get("/cabinet", HttpStatus.OK).contains("Не удалось проверить баланс"));
         assertEquals(0L, await(database.sql("SELECT COUNT(*) AS total FROM purchase_orders")
                 .map(row -> ((Number) row.get("total")).longValue()).one()));
 
@@ -329,108 +345,20 @@ class AccountIntegrationTest extends StoreIntegrationTestBase {
         var completed = buyer.post("/buy", Map.of(), true, HttpStatus.SEE_OTHER);
         String orderPath = Objects.requireNonNull(completed.getResponseHeaders().getFirst(HttpHeaders.LOCATION));
         assertTrue(buyer.get(orderPath, HttpStatus.OK).contains("Оплата подтверждена"));
-        assertEquals("1250", metric(buyer.get("/profile", HttpStatus.OK), "paid-value"));
+        assertEquals("1250", metric(buyer.get("/cabinet", HttpStatus.OK), "paid-value"));
         assertEquals(1, PaymentsStub.DEBITS.get());
     }
 
     private void register(Browser browser, String username, String name, HttpStatus status) {
-        browser.post("/account/register", Map.of("username", username, "displayName", name, "password", PASSWORD), true, status);
+        browser.post("/account/register", Map.of("username", username, "displayName", name,
+                "email", username.toLowerCase(Locale.ROOT) + "@example.test", "password", PASSWORD), true, status);
     }
 
     private void login(Browser browser, String username, String password) {
         var result = browser.post("/account/login", Map.of("username", username, "password", password), true, HttpStatus.FOUND);
-        assertEquals("/profile", result.getResponseHeaders().getFirst(HttpHeaders.LOCATION));
+        assertEquals("/cabinet", result.getResponseHeaders().getFirst(HttpHeaders.LOCATION));
         // Вход заменил токен гостевой сессии, а профиль форм не содержит: новый токен берём со страницы с формой.
         browser.csrf = null;
-    }
-
-    private final class Browser {
-        private final Map<String, String> cookies = new HashMap<>();
-        private String csrf;
-        private String checkoutKey;
-        private String amountMinor;
-
-        private String get(String path, HttpStatus status) {
-            var result = web.get().uri(path).accept(MediaType.TEXT_HTML)
-                    .cookies(values -> cookies.forEach(values::set)).exchange().expectStatus().isEqualTo(status)
-                    .expectBody(String.class).returnResult();
-            saveCookies(result);
-            String html = Objects.requireNonNullElse(result.getResponseBody(), "");
-            var token = CSRF.matcher(html);
-            if (token.find()) {
-                csrf = token.group(1);
-            }
-            var key = Pattern.compile("<input\\b(?=[^>]*\\bname=\"checkoutKey\")[^>]*\\bvalue=\"([^\"]+)\"").matcher(html);
-            if (key.find()) {
-                checkoutKey = key.group(1);
-            }
-            var amount = Pattern.compile("<input\\b(?=[^>]*\\bname=\"amountMinor\")[^>]*\\bvalue=\"([^\"]+)\"").matcher(html);
-            if (amount.find()) {
-                amountMinor = amount.group(1);
-            }
-            return html;
-        }
-
-        private EntityExchangeResult<String> post(String path, Map<String, String> values, boolean withCsrf, HttpStatus status) {
-            if (path.equals("/buy") && !values.containsKey("checkoutKey") && (checkoutKey == null || amountMinor == null)) {
-                get("/cart/items", HttpStatus.OK);
-            }
-            var form = new LinkedMultiValueMap<String, String>();
-            values.forEach(form::set);
-            if (path.equals("/buy") && !values.containsKey("checkoutKey")) {
-                assertNotNull(checkoutKey, "The rendered checkout must supply its stable payment key");
-                form.set("checkoutKey", checkoutKey);
-            }
-            if (path.equals("/buy") && !values.containsKey("amountMinor")) {
-                assertNotNull(amountMinor, "The rendered checkout must supply its visible amount");
-                form.set("amountMinor", amountMinor);
-            }
-            if (withCsrf) {
-                form.set("_csrf", token());
-            }
-            var result = web.post().uri(path).accept(MediaType.TEXT_HTML).cookies(request -> cookies.forEach(request::set))
-                    .body(BodyInserters.fromFormData(form)).exchange().expectStatus().isEqualTo(status)
-                    .expectBody(String.class).returnResult();
-            saveCookies(result);
-            if (status.is2xxSuccessful() || status.is3xxRedirection()) {
-                if (path.equals("/cart/items") || path.equals("/account/login") || path.equals("/account/logout")) {
-                    checkoutKey = null;
-                    amountMinor = null;
-                }
-            }
-            return result;
-        }
-
-        private void upload(String catalog, HttpStatus status) {
-            var form = new MultipartBodyBuilder();
-            form.part("catalog", catalog.getBytes(StandardCharsets.UTF_8)).filename("catalog.json")
-                    .contentType(MediaType.APPLICATION_JSON);
-            form.part("_csrf", token());
-            var result = web.post().uri("/catalog/import").accept(MediaType.TEXT_HTML)
-                    .cookies(request -> cookies.forEach(request::set)).body(BodyInserters.fromMultipartData(form.build()))
-                    .exchange().expectStatus().isEqualTo(status).expectBody(String.class).returnResult();
-            saveCookies(result);
-        }
-
-        private String token() {
-            if (csrf == null) {
-                // Подтверждение выхода содержит форму для любой роли.
-                get("/account/logout", HttpStatus.OK);
-            }
-            assertNotNull(csrf, "A rendered form must supply the CSRF token");
-            return csrf;
-        }
-
-        private void saveCookies(EntityExchangeResult<?> result) {
-            result.getResponseCookies().forEach((name, values) -> values.forEach(cookie -> {
-                assertTrue(cookie.isHttpOnly(), "Identity cookies must be HttpOnly");
-                if (cookie.getMaxAge().isZero()) {
-                    cookies.remove(name);
-                } else {
-                    cookies.put(name, cookie.getValue());
-                }
-            }));
-        }
     }
 
     private static String metric(String html, String key) {

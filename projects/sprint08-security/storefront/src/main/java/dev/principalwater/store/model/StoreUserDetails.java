@@ -15,14 +15,22 @@ public final class StoreUserDetails implements UserDetails, CredentialsContainer
     private final String displayName;
     private String passwordHash;
     private final AccountRole role;
+    private final long authVersion;
 
     public StoreUserDetails(StoreUser user) {
-        accountId = user.id();
-        cartId = user.cartId();
-        username = user.username();
-        displayName = user.displayName();
+        this(user.id(), user.cartId(), user.username(), user.displayName(), user.role(), user.authVersion());
         passwordHash = user.passwordHash();
-        role = user.role();
+    }
+
+    // Сессия хранит личность без хеша пароля; этот конструктор восстанавливает principal из Redis.
+    public StoreUserDetails(UUID accountId, UUID cartId, String username, String displayName, AccountRole role,
+                            long authVersion) {
+        this.accountId = accountId;
+        this.cartId = cartId;
+        this.username = username;
+        this.displayName = displayName;
+        this.role = role;
+        this.authVersion = authVersion;
     }
 
     public boolean isSeller() { return role == AccountRole.SELLER; }
@@ -31,6 +39,7 @@ public final class StoreUserDetails implements UserDetails, CredentialsContainer
     public UUID cartId() { return cartId; }
     public String displayName() { return displayName; }
     public String getDisplayName() { return displayName; }
+    public long authVersion() { return authVersion; }
     @Override public String getUsername() { return username; }
     @Override public String getPassword() { return passwordHash; }
     @Override public Collection<? extends GrantedAuthority> getAuthorities() {

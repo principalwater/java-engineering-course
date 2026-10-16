@@ -21,20 +21,20 @@ public class AnalyticsController {
         this.dashboard = dashboard;
     }
 
-    @GetMapping({"/analytics", "/profile/analytics"})
+    @GetMapping(StorePaths.CABINET_ANALYTICS)
     public Mono<String> get(@RequestParam(required = false) Integer days,
                             @RequestAttribute(CartIdentityFilter.USER_ATTRIBUTE_NAME) UUID userId,
                             @RequestAttribute(CartIdentityFilter.ATTRIBUTE_NAME) UUID cartId, Model model) {
         return dashboard.load(period(days), userId, cartId).map(view -> {
             model.addAttribute("analytics", view);
             model.addAttribute("periods", AnalyticsPeriod.values());
-            model.addAttribute("analyticsBase", "/profile/analytics");
+            model.addAttribute("analyticsBase", StorePaths.CABINET_ANALYTICS);
             model.addAttribute("sellerAnalytics", false);
             return "analytics";
         });
     }
 
-    @GetMapping(value = "/profile/analytics/data", produces = MediaType.APPLICATION_JSON_VALUE)
+    @GetMapping(value = StorePaths.CABINET_ANALYTICS + "/data", produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
     public Mono<AnalyticsDashboard> data(@RequestParam(required = false) Integer days,
                                          @RequestAttribute(CartIdentityFilter.USER_ATTRIBUTE_NAME) UUID userId,

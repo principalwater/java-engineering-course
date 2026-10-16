@@ -1,6 +1,7 @@
 package dev.principalwater.store.controller;
 
 import dev.principalwater.store.TestBase;
+import dev.principalwater.store.config.AccountAuthenticationConfig;
 import dev.principalwater.store.config.SecurityConfig;
 import dev.principalwater.store.config.WebConfig;
 import dev.principalwater.store.model.AccountRole;
@@ -32,6 +33,7 @@ import dev.principalwater.store.service.CatalogImportService;
 import dev.principalwater.store.service.CatalogService;
 import dev.principalwater.store.service.CheckoutService;
 import dev.principalwater.store.service.OrderService;
+import dev.principalwater.store.service.RecoveryService;
 import dev.principalwater.store.util.DisplayFormats;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -74,9 +76,9 @@ import static org.springframework.security.test.web.reactive.server.SecurityMock
 
 @WebFluxTest(excludeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = ResourceAdmissionFilter.class),
         controllers = {CatalogController.class, CartController.class, OrderController.class,
-        CatalogImportController.class, ProfileController.class})
+        CatalogImportController.class, ProfileController.class, RecoveryController.class})
 @ActiveProfiles("test")
-@Import({SecurityConfig.class, WebConfig.class, DisplayFormats.class})
+@Import({AccountAuthenticationConfig.class, SecurityConfig.class, WebConfig.class, DisplayFormats.class})
 class StoreWebTest extends TestBase {
     @MockitoBean private AccountService accounts;
     private static final UUID CART_ID = UUID.fromString("652b77b8-9b3f-498c-9b99-321bd2fd3949");
@@ -90,6 +92,7 @@ class StoreWebTest extends TestBase {
     @MockitoBean private OrderService orders;
     @MockitoBean private CatalogImportService importer;
     @MockitoBean private WalletService wallets;
+    @MockitoBean private RecoveryService recovery;
 
     @BeforeEach
     void cartOwner() {
@@ -148,10 +151,10 @@ class StoreWebTest extends TestBase {
                     assertTrue(html.contains("12.10.2026, 13:00"));
                     assertTrue(html.contains("data-order-total=\"5000\""));
                 });
-        web.get().uri("/profile").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
+        web.get().uri("/cabinet").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
                 .expectBody(String.class).value(html -> {
                     assertTrue(html.contains("12.10.2026, 13:00"));
-                    assertTrue(html.contains("/profile/analytics"));
+                    assertTrue(html.contains("/cabinet/analytics"));
                     assertTrue(html.contains("Потрачено"));
                     assertFalse(html.contains("Выручка"));
                 });
@@ -306,6 +309,78 @@ class StoreWebTest extends TestBase {
                     assertFalse(html.contains("Заказ оформлен"));
                     assertFalse(html.contains("Оплата подтверждена"));
                 });
+    }
+
+    @ParameterizedTest
+    @MethodSource("movedPaths")
+    void movedPrivatePagesStayReachableThroughSafeGetRedirectsOnly(String oldPath, String newPath) {
+        anonymous.get().uri(oldPath).exchange().expectStatus().isTemporaryRedirect()
+                .expectHeader().valueEquals(HttpHeaders.LOCATION, newPath);
+        // Небезопасный метод не переписывается: закрытый старый адрес остаётся закрытым даже с валидным CSRF.
+        web.mutateWith(csrf()).post().uri(oldPath).exchange().expectStatus().isForbidden();
+    }
+
+    static Stream<Arguments> movedPaths() {
+        return Stream.of(Arguments.of("/profile", "/cabinet"), Arguments.of("/profile/analytics?days=30", "/cabinet/analytics?days=30"),
+                Arguments.of("/analytics", "/cabinet/analytics"), Arguments.of("/account/seller", "/cabinet/store"),
+                Arguments.of("/account/seller/analytics/data?days=7", "/cabinet/store/analytics/data?days=7"));
+    }
+
+    @Test
+    void recoveryPagesAreNeverCachedAndDoNotLeakTheTokenThroughReferrers() {
+        when(recovery.available()).thenReturn(true);
+        String token = "A".repeat(43);
+        for (String path : List.of("/account/recovery", "/account/recovery/reset?token=" + token,
+                "/account/recovery/reset?token=short")) {
+            anonymous.get().uri(path).accept(MediaType.TEXT_HTML).exchange()
+                    .expectHeader().valueMatches(HttpHeaders.CACHE_CONTROL, ".*no-store.*")
+                    .expectHeader().valueEquals("Referrer-Policy", "no-referrer");
+        }
+        anonymous.get().uri("/account/recovery/reset?token=" + token).accept(MediaType.TEXT_HTML).exchange()
+                .expectStatus().isOk().expectBody(String.class).value(html -> {
+                    assertTrue(Pattern.compile("<input\\b(?=[^>]*\\bname=\"token\")(?=[^>]*\\btype=\"hidden\")[^>]*\\bvalue=\""
+                            + token + "\"").matcher(html).find());
+                    // Страница не загружает чужие ресурсы, куда мог бы уйти адрес с токеном.
+                    assertFalse(Pattern.compile("(?:src|href|action)=\"(?:https?:)?//").matcher(html).find());
+                });
+        anonymous.get().uri("/account/recovery/reset?token=short").accept(MediaType.TEXT_HTML).exchange()
+                .expectStatus().isBadRequest().expectBody(String.class)
+                .value(html -> assertTrue(html.contains("Ссылка недействительна")));
+    }
+
+    @Test
+    void unavailableRecoveryNeitherSendsNorClaimsThatAMessageWasSent() {
+        when(recovery.available()).thenReturn(false);
+        anonymous.get().uri("/account/recovery").accept(MediaType.TEXT_HTML).exchange().expectStatus().isEqualTo(503)
+                .expectBody(String.class).value(html -> {
+                    assertTrue(html.contains("Восстановление пароля сейчас недоступно"));
+                    assertFalse(html.contains("отправили"));
+                });
+        anonymous.mutateWith(csrf()).post().uri("/account/recovery").body(BodyInserters.fromFormData("email", "someone@example.test"))
+                .exchange().expectStatus().isEqualTo(503);
+        anonymous.mutateWith(csrf()).post().uri("/account/recovery/reset")
+                .body(BodyInserters.fromFormData("token", "A".repeat(43)).with("password", "valid password long"))
+                .exchange().expectStatus().isEqualTo(503);
+        verify(recovery, never()).request(any());
+        verify(recovery, never()).reset(any(), any());
+    }
+
+    @Test
+    void recoveryFormsNeedCsrfAndValidInputBeforeReachingTheService() {
+        when(recovery.available()).thenReturn(true);
+        when(recovery.request(any())).thenReturn(Mono.empty());
+        anonymous.post().uri("/account/recovery").body(BodyInserters.fromFormData("email", "someone@example.test"))
+                .exchange().expectStatus().isForbidden();
+        anonymous.mutateWith(csrf()).post().uri("/account/recovery").body(BodyInserters.fromFormData("email", "not-an-address"))
+                .exchange().expectStatus().isBadRequest();
+        anonymous.mutateWith(csrf()).post().uri("/account/recovery/reset")
+                .body(BodyInserters.fromFormData("token", "A".repeat(43)).with("password", "short"))
+                .exchange().expectStatus().isBadRequest();
+        verify(recovery, never()).reset(any(), any());
+        verify(recovery, never()).request(any());
+        // Корректный запрос получает перенаправление без адреса в URL; тело ответа не зависит от аккаунта.
+        anonymous.mutateWith(csrf()).post().uri("/account/recovery").body(BodyInserters.fromFormData("email", "someone@example.test"))
+                .exchange().expectStatus().isSeeOther().expectHeader().valueEquals(HttpHeaders.LOCATION, "/account/recovery?sent");
     }
 
     private WebTestClient client(AccountRole role) {

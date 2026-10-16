@@ -39,13 +39,20 @@ public class SellerBootstrap implements ApplicationRunner {
     public void run(ApplicationArguments arguments) {
         if (properties.bootstrapPassword().isEmpty()) { return; }
         String username = AccountRules.normalizeUsername(properties.username());
+        String email = properties.email().isEmpty() ? null : AccountRules.normalizeEmail(properties.email());
         // Единственный startup wait выполняется на main-потоке до готовности приложения, не на event loop.
         users.findByUsername(username).flatMap(existing -> existing.role() == AccountRole.SELLER
-                ? Mono.just(existing) : Mono.error(new IllegalStateException("Seller username belongs to a buyer")))
+                ? attachContact(existing, email) : Mono.error(new IllegalStateException("Seller username belongs to a buyer")))
                 .switchIfEmpty(Mono.defer(() -> Mono.fromCallable(() -> passwords.encode(properties.bootstrapPassword()))
                         .subscribeOn(passwordScheduler).flatMap(hash -> carts.save(new ShoppingCart(UUID.randomUUID()))
                                 .flatMap(cart -> users.save(new StoreUser(UUID.randomUUID(), cart.id(), username,
-                                        hash, "Магазин", AccountRole.SELLER, null))).as(transactions::transactional))))
+                                        hash, "Магазин", AccountRole.SELLER, email))).as(transactions::transactional))))
                 .block(Duration.ofSeconds(15));
+    }
+
+    // Продавец, созданный до восстановления доступа, получает контакт из конфигурации; чужую почту не перезаписываем.
+    private Mono<StoreUser> attachContact(StoreUser seller, String email) {
+        return email == null || seller.email() != null ? Mono.just(seller)
+                : users.attachEmail(seller.id(), email).thenReturn(seller);
     }
 }

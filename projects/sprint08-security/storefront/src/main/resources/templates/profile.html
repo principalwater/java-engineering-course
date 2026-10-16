@@ -4,7 +4,7 @@
 <body>
 <header th:replace="~{fragments :: header('profile')}"></header>
 <main id="main">
-<nav class="cabinet-tabs" aria-label="Кабинет" th:if="${account != null and account.seller}"><a th:href="@{/profile}" aria-current="page">Мои покупки</a><a th:href="@{/account/seller}">Магазин</a></nav>
+<nav class="cabinet-tabs" aria-label="Кабинет" th:if="${account != null and account.seller}"><a th:href="@{/cabinet}" aria-current="page">Мои покупки</a><a th:href="@{/cabinet/store}">Магазин</a></nav>
 <div class="page-heading">
 <p class="scope-tag">Кабинет покупателя</p>
 <h1>Мои покупки</h1>
@@ -33,7 +33,7 @@
 <section class="empty-state" th:if="${profile.totalOrders == 0 and profile.pendingPayments == 0}"><h2>Первый заказ появится здесь</h2><p>Добавьте предметы в корзину и оплатите покупку — заказ сохранится в вашей истории.</p><a class="button primary" th:href="@{/items}">В коллекцию</a></section>
 <section class="profile-links" aria-label="Разделы кабинета">
 <a class="link-card" th:href="@{/orders}"><h2>История заказов</h2><p>Состав, исходные цены и статус оплаты каждого заказа.</p><span class="link-arrow" aria-hidden="true">↗</span></a>
-<a class="link-card" th:href="@{/profile/analytics}"><h2>Мои расходы</h2><p>Оплаченные покупки за выбранный период и товары, которые вы выбираете чаще.</p><span class="link-arrow" aria-hidden="true">↗</span></a>
+<a class="link-card" th:href="@{/cabinet/analytics}"><h2>Мои расходы</h2><p>Оплаченные покупки за выбранный период и товары, которые вы выбираете чаще.</p><span class="link-arrow" aria-hidden="true">↗</span></a>
 </section>
 </main>
 <footer th:replace="~{fragments :: footer}"></footer>

@@ -52,7 +52,7 @@ tasks.register('packageDeployment', Sync) {
     into layout.buildDirectory.dir('deployment')
 }
 tasks.register('bootJar') { dependsOn 'packageDeployment' }
-['postgresTest', 'analyticsTest', 'clusterTest', 'redisTest'].each { taskName ->
+['postgresTest', 'analyticsTest', 'clusterTest', 'redisTest', 'sessionTest'].each { taskName ->
     tasks.register(taskName) { dependsOn ":storefront:${taskName}" }
 }
 

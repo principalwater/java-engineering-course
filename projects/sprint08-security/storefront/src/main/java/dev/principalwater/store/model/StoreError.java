@@ -8,7 +8,10 @@ public enum StoreError {
     INVALID_PAGING(HttpStatus.BAD_REQUEST, "Invalid pagination parameters"),
     SEARCH_TOO_LONG(HttpStatus.BAD_REQUEST, "Search query exceeds the length limit"),
     INVALID_ACCOUNT(HttpStatus.BAD_REQUEST, "Invalid account details"),
-    ACCOUNT_EXISTS(HttpStatus.CONFLICT, "Username is already registered"),
+    // Один ответ для логина и почты: форма не подтверждает, какой из двух адресов занят.
+    ACCOUNT_EXISTS(HttpStatus.CONFLICT, "Username or email is already registered"),
+    INVALID_RECOVERY_TOKEN(HttpStatus.BAD_REQUEST, "Recovery link is invalid or expired"),
+    RECOVERY_BUSY(HttpStatus.SERVICE_UNAVAILABLE, "Too many password recovery requests are in progress; retry shortly"),
     INVALID_REQUEST(HttpStatus.BAD_REQUEST, "Invalid request parameters"),
     PRODUCT_NOT_FOUND(HttpStatus.NOT_FOUND, "Product not found"),
     ORDER_NOT_FOUND(HttpStatus.NOT_FOUND, "Order not found"),

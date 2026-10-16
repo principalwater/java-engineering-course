@@ -39,18 +39,25 @@ public class AccountService implements ReactiveUserDetailsService {
     public Mono<StoreUser> register(AccountRegistration registration) {
         return Mono.defer(() -> {
             if (!AccountRules.validCredentials(registration.username(), registration.password())
+                    || !AccountRules.validEmail(registration.email())
                     || registration.displayName() == null || registration.displayName().isBlank()
                     || registration.displayName().length() > AccountRules.DISPLAY_NAME_MAX_LENGTH) {
                 return Mono.error(new StoreException(StoreError.INVALID_ACCOUNT));
             }
             String username = AccountRules.normalizeUsername(registration.username());
+            String email = AccountRules.normalizeEmail(registration.email());
             // Хеширование не занимает event loop или connection; лимит очереди принадлежит общему scheduler.
             return Mono.fromCallable(() -> passwords.encode(registration.password())).subscribeOn(passwordScheduler)
                     .flatMap(hash -> carts.save(new ShoppingCart(UUID.randomUUID())).flatMap(cart ->
                             users.save(new StoreUser(UUID.randomUUID(), cart.id(), username, hash,
-                                    registration.displayName().strip()))).as(transactions::transactional))
+                                    registration.displayName().strip(), email))).as(transactions::transactional))
                     .onErrorMap(DuplicateKeyException.class, failure -> new StoreException(StoreError.ACCOUNT_EXISTS, failure));
         });
+    }
+
+    // Эпоха учётных данных из базы: сессия с другим номером принадлежит прежнему паролю и недействительна.
+    public Mono<Long> authVersion(UUID accountId) {
+        return users.findAuthVersion(accountId);
     }
 
     @Override

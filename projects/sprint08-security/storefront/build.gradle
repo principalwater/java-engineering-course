@@ -12,6 +12,8 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
+    implementation 'org.springframework.session:spring-session-data-redis'
     implementation 'io.swagger.core.v3:swagger-annotations-jakarta:2.2.34'
     implementation 'jakarta.annotation:jakarta.annotation-api'
     runtimeOnly 'io.r2dbc:r2dbc-h2'
@@ -36,7 +38,8 @@ tasks.named('compileJava') { dependsOn 'openApiGenerate' }
 tasks.named('pmdMain') { exclude '**/generated/**' }
 tasks.named('bootJar') { archiveFileName = 'storefront.jar' }
 tasks.named('test') {
-    exclude '**/AnalyticsIntegrationTest.class', '**/ClickHouseClusterTest.class', '**/CatalogCacheIntegrationTest.class'
+    exclude '**/AnalyticsIntegrationTest.class', '**/ClickHouseClusterTest.class', '**/CatalogCacheIntegrationTest.class',
+            '**/SharedSessionIntegrationTest.class'
 }
 
 tasks.register('postgresTest', Test) {
@@ -45,7 +48,8 @@ tasks.register('postgresTest', Test) {
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
     useJUnitPlatform()
-    include '**/StoreRepositoryTest.class', '**/StoreServiceTest.class', '**/AccountIntegrationTest.class'
+    include '**/StoreRepositoryTest.class', '**/StoreServiceTest.class', '**/AccountIntegrationTest.class',
+            '**/PasswordRecoveryIntegrationTest.class'
     // Отдельный диалект проверяет реальные блокировки и ограничения, без повторения WebFlux/unit-сценариев.
     outputs.upToDateWhen { false }
     doFirst {
@@ -98,6 +102,23 @@ tasks.register('redisTest', Test) {
     doFirst {
         if (!System.getenv('STORE_TEST_REDIS_URL')) {
             throw new GradleException('redisTest requires an isolated Redis URL')
+        }
+    }
+}
+
+tasks.register('sessionTest', Test) {
+    description = 'Verify shared Redis sessions across application instances, revocation and session-store outage'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform()
+    include '**/SharedSessionIntegrationTest.class'
+    // Тест поднимает три контекста приложения (две реплики и реплику без доступа к хранилищу).
+    maxHeapSize = '768m'
+    outputs.upToDateWhen { false }
+    doFirst {
+        if (!System.getenv('STORE_TEST_SESSIONS_URL')?.startsWith('redis://')) {
+            throw new GradleException('sessionTest requires an isolated session Redis URL')
         }
     }
 }

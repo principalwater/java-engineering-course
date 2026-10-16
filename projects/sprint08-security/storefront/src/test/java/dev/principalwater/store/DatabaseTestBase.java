@@ -27,7 +27,7 @@ public abstract class DatabaseTestBase extends ReactiveTestBase {
                         .contains(ConnectionFactoryOptions.parse(url).getRequiredValue(DATABASE)),
                 "Database cleanup requires its isolated test database");
         // R2DBC не участвует в test-managed JDBC rollback: очищаем отдельную БД в порядке FK.
-        Flux.just("checkout_intent_lines", "checkout_intents", "analytics_outbox", "order_items", "purchase_orders", "cart_items", "store_users",
+        Flux.just("checkout_intent_lines", "checkout_intents", "analytics_outbox", "order_items", "purchase_orders", "cart_items", "password_resets", "store_users",
                         "shopping_carts", "products")
                 .concatMap(table -> database.sql("DELETE FROM " + table).fetch().rowsUpdated())
                 .then().block(TIMEOUT);

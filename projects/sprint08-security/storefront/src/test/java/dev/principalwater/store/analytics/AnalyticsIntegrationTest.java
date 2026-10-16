@@ -83,12 +83,12 @@ class AnalyticsIntegrationTest extends StoreIntegrationTestBase {
         var buyer = accountClient(AccountRole.BUYER);
         var seller = accountClient(AccountRole.SELLER);
         // Пустое окно доступно, но среднего без заказов нет: wire-контракт сохраняет явный null.
-        web.get().uri("/profile/analytics/data").accept(MediaType.APPLICATION_JSON)
+        web.get().uri("/cabinet/analytics/data").accept(MediaType.APPLICATION_JSON)
                 .exchange().expectStatus().isOk().expectBody()
                 .jsonPath("$.summary.orders").isEqualTo("0")
                 .jsonPath("$.summary.averageOrder").hasJsonPath()
                 .jsonPath("$.summary.averageOrder").value(value -> assertNull(value));
-        web.get().uri("/profile/analytics").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
+        web.get().uri("/cabinet/analytics").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
                 .expectBody(String.class).value(html -> assertTrue(html.contains("data-metric=\"average-order\">—")));
         await(importer.importJson(json.writeValueAsBytes(List.of(productInput(
                 "analytics-keyboard", "Клавиатура", "Снимок заказа", 7900)))));
@@ -114,11 +114,11 @@ class AnalyticsIntegrationTest extends StoreIntegrationTestBase {
         assertEquals(1, total.orders());
         assertEquals(2, total.units());
         assertEquals(15800, total.orderValue());
-        buyer.mutateWith(csrf()).post().uri("/profile/analytics/sync").accept(MediaType.TEXT_HTML)
+        buyer.mutateWith(csrf()).post().uri("/cabinet/analytics/sync").accept(MediaType.TEXT_HTML)
                 .body(BodyInserters.fromFormData("days", "30")).exchange().expectStatus().isNotFound();
-        buyer.get().uri("/profile/analytics/data").accept(MediaType.APPLICATION_JSON)
+        buyer.get().uri("/cabinet/analytics/data").accept(MediaType.APPLICATION_JSON)
                 .exchange().expectStatus().isOk().expectBody().jsonPath("$.summary.orders").isEqualTo("0");
-        seller.get().uri("/account/seller/analytics/data").accept(MediaType.APPLICATION_JSON)
+        seller.get().uri("/cabinet/store/analytics/data").accept(MediaType.APPLICATION_JSON)
                 .exchange().expectStatus().isOk().expectBody()
                 .jsonPath("$.summary.orders").isEqualTo("2")
                 .jsonPath("$.summary.units").isEqualTo("101")
@@ -127,7 +127,7 @@ class AnalyticsIntegrationTest extends StoreIntegrationTestBase {
         StepVerifier.create(delivery.flush()).expectNext(DeliveryResult.delivered(1))
                 .expectComplete().verify(TIMEOUT);
         assertEquals(0, await(queue.status(firstCart)).pendingOrders());
-        web.get().uri("/profile/analytics").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
+        web.get().uri("/cabinet/analytics").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
                 .expectBody(String.class).value(html -> {
                     assertTrue(html.contains("data-metric=\"orders\">1"));
                     assertTrue(html.contains("Клавиатура"));
@@ -142,17 +142,17 @@ class AnalyticsIntegrationTest extends StoreIntegrationTestBase {
             assertTrue(await(carts.view(firstCart)).items().isEmpty());
             expectError(delivery.flush(), StoreError.ANALYTICS_UNAVAILABLE);
             assertEquals(1, await(queue.status(firstCart)).pendingOrders());
-            web.get().uri("/profile/analytics").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
+            web.get().uri("/cabinet/analytics").accept(MediaType.TEXT_HTML).exchange().expectStatus().isOk()
                     .expectBody(String.class).value(html -> {
                         assertTrue(html.contains("data-state=\"UNAVAILABLE\""));
                         assertTrue(html.contains("Аналитика сейчас недоступна"));
                         assertFalse(html.contains("data-metric=\"orders\""));
                     });
-            var sync = seller.mutateWith(csrf()).post().uri("/account/seller/analytics/sync").accept(MediaType.TEXT_HTML)
+            var sync = seller.mutateWith(csrf()).post().uri("/cabinet/store/analytics/sync").accept(MediaType.TEXT_HTML)
                     .body(BodyInserters.fromFormData("days", "30")).exchange().expectStatus().isSeeOther()
-                    .expectHeader().valueEquals(HttpHeaders.LOCATION, "/account/seller/analytics?days=30")
+                    .expectHeader().valueEquals(HttpHeaders.LOCATION, "/cabinet/store/analytics?days=30")
                     .expectBody().returnResult();
-            seller.get().uri("/account/seller/analytics?days=30").accept(MediaType.TEXT_HTML)
+            seller.get().uri("/cabinet/store/analytics?days=30").accept(MediaType.TEXT_HTML)
                     .cookies(cookies -> sync.getResponseCookies().forEach((name, values) ->
                             values.forEach(cookie -> cookies.add(name, cookie.getValue()))))
                     .exchange().expectStatus().isOk().expectBody(String.class).value(html ->
@@ -162,9 +162,9 @@ class AnalyticsIntegrationTest extends StoreIntegrationTestBase {
         }
         Awaitility.await().atMost(Duration.ofSeconds(45)).pollInterval(Duration.ofMillis(500)).ignoreExceptions()
                 .untilAsserted(() -> assertEquals(1, total(firstCart).orders()));
-        seller.mutateWith(csrf()).post().uri("/account/seller/analytics/sync").accept(MediaType.TEXT_HTML)
+        seller.mutateWith(csrf()).post().uri("/cabinet/store/analytics/sync").accept(MediaType.TEXT_HTML)
                 .body(BodyInserters.fromFormData("days", "30")).exchange().expectStatus().isSeeOther()
-                .expectHeader().valueEquals(HttpHeaders.LOCATION, "/account/seller/analytics?days=30");
+                .expectHeader().valueEquals(HttpHeaders.LOCATION, "/cabinet/store/analytics?days=30");
         var status = await(queue.status(firstCart));
         assertEquals(0, status.pendingOrders());
         assertNotNull(status.lastDelivery());
@@ -173,7 +173,7 @@ class AnalyticsIntegrationTest extends StoreIntegrationTestBase {
         assertEquals(2, total.orders());
         assertEquals(3, total.units());
         assertEquals(23700, total.orderValue());
-        web.get().uri("/profile/analytics/data?days=30").accept(MediaType.APPLICATION_JSON)
+        web.get().uri("/cabinet/analytics/data?days=30").accept(MediaType.APPLICATION_JSON)
                 .exchange().expectStatus().isOk().expectBody()
                 .jsonPath("$.summary.orders").isEqualTo("2")
                 .jsonPath("$.summary.units").isEqualTo("3")
@@ -184,7 +184,7 @@ class AnalyticsIntegrationTest extends StoreIntegrationTestBase {
                 .jsonPath("$.previous.averageOrder").value(value -> assertNull(value))
                 .jsonPath("$.period.days").isEqualTo(30)
                 .jsonPath("$.daily.length()").isEqualTo(30);
-        seller.get().uri("/account/seller/analytics/data?days=30").accept(MediaType.APPLICATION_JSON)
+        seller.get().uri("/cabinet/store/analytics/data?days=30").accept(MediaType.APPLICATION_JSON)
                 .exchange().expectStatus().isOk().expectBody()
                 .jsonPath("$.summary.orders").isEqualTo("3")
                 .jsonPath("$.summary.units").isEqualTo("102")
@@ -192,7 +192,7 @@ class AnalyticsIntegrationTest extends StoreIntegrationTestBase {
                 .jsonPath("$.previous.orders").isEqualTo("0")
                 .jsonPath("$.period.days").isEqualTo(30)
                 .jsonPath("$.daily.length()").isEqualTo(30);
-        web.get().uri("/profile/analytics?days=365").accept(MediaType.TEXT_HTML)
+        web.get().uri("/cabinet/analytics?days=365").accept(MediaType.TEXT_HTML)
                 .exchange().expectStatus().isBadRequest();
 
         var registered = await(users.findByUsername("warehouse.buyer"));
@@ -203,7 +203,7 @@ class AnalyticsIntegrationTest extends StoreIntegrationTestBase {
         assertEquals(registered.id(), accountBatch.facts().getFirst().userId());
         StepVerifier.create(delivery.flush()).expectNext(DeliveryResult.delivered(1))
                 .expectComplete().verify(TIMEOUT);
-        buyer.get().uri("/profile/analytics/data?days=30").accept(MediaType.APPLICATION_JSON)
+        buyer.get().uri("/cabinet/analytics/data?days=30").accept(MediaType.APPLICATION_JSON)
                 .exchange().expectStatus().isOk().expectBody()
                 .jsonPath("$.summary.orders").isEqualTo("1")
                 .jsonPath("$.summary.orderValue").isEqualTo("7900");
@@ -211,7 +211,7 @@ class AnalyticsIntegrationTest extends StoreIntegrationTestBase {
 
     private WebTestClient accountClient(AccountRole role) {
         String username = role == AccountRole.SELLER ? "warehouse.seller" : "warehouse.buyer";
-        StoreUser user = await(accounts.register(new AccountRegistration(username, "Пользователь аналитики", "warehouse account pass")));
+        StoreUser user = await(accounts.register(new AccountRegistration(username, "Пользователь аналитики", username + "@example.test", "warehouse account pass")));
         if (role == AccountRole.SELLER) {
             await(database.sql("UPDATE store_users SET role = 'SELLER' WHERE id = :id")
                     .bind("id", user.id()).fetch().rowsUpdated());

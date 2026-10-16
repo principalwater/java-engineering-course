@@ -6,7 +6,7 @@
 <main id="main" data-analytics
       th:with="live=${analytics.state.name() == 'AVAILABLE'}, comparable=${analytics.previous != null}"
       th:attr="data-state=${analytics.state.name()},data-days=${analytics.period.days},data-source=@{${analyticsBase + '/data'}},data-page=@{${analyticsBase}},data-value-label=${sellerAnalytics ? 'Выручка' : 'Расходы'}">
-<a class="back-link" th:href="${sellerAnalytics} ? @{/account/seller} : @{/profile}">В кабинет</a>
+<a class="back-link" th:href="${sellerAnalytics} ? @{/cabinet/store} : @{/cabinet}">В кабинет</a>
 <div class="page-heading">
 <p class="scope-tag" th:text="${sellerAnalytics ? 'Весь магазин' : 'Только ваши покупки'}"></p>
 <h1 th:text="${sellerAnalytics ? 'Продажи мастерской' : 'Мои расходы'}"></h1>

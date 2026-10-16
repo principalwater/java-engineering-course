@@ -16,9 +16,9 @@ import org.springframework.web.server.WebSession;
 import reactor.core.publisher.Mono;
 
 @Controller
-@RequestMapping("/account/seller")
+@RequestMapping(StorePaths.STORE)
 public class SellerController {
-    private static final String ANALYTICS_PATH = "/account/seller/analytics";
+    private static final String ANALYTICS_PATH = StorePaths.STORE_ANALYTICS;
     private final SellerService sellers;
 
     public SellerController(SellerService sellers) {

@@ -29,12 +29,12 @@ public class CatalogImportController {
         demo = new ClassPathResource("static/catalog-demo.json").getContentAsByteArray();
     }
 
-    @GetMapping("/catalog")
+    @GetMapping(StorePaths.CATALOG)
     public String catalog() {
         return "catalog";
     }
 
-    @PostMapping("/catalog/import")
+    @PostMapping(StorePaths.CATALOG + "/import")
     public Mono<RedirectView> upload(@RequestPart("catalog") Mono<FilePart> file, ServerWebExchange exchange) {
         return file.flatMap(part -> DataBufferUtils.join(part.content(), StoreLimits.MAX_IMPORT_BYTES))
                 .switchIfEmpty(Mono.error(new StoreException(StoreError.INVALID_CATALOG)))
@@ -49,7 +49,7 @@ public class CatalogImportController {
                 }).flatMap(importer::importJson).flatMap(result -> feedback(exchange, result, false));
     }
 
-    @PostMapping("/catalog/demo")
+    @PostMapping(StorePaths.CATALOG + "/demo")
     public Mono<RedirectView> demo(ServerWebExchange exchange) {
         return importer.importJson(demo).flatMap(result -> feedback(exchange, result, true));
     }

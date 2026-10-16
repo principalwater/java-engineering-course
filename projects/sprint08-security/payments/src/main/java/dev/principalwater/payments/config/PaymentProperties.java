@@ -6,11 +6,16 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 
 @ConfigurationProperties("payments")
 public final class PaymentProperties {
+    // Демонстрационное начисление (README): 10 000 000 ₽ в копейках; реального эквайринга нет.
+    private static final String DEFAULT_OPENING_BALANCE_MINOR = "1000000000";
+    // Стеки и Netty вне heap входят в бюджет контейнера (Dockerfile), поэтому по умолчанию два loop-потока.
+    private static final String DEFAULT_IO_WORKERS = "2";
     private static final int MAX_IO_WORKERS = 8;
     private final long openingBalanceMinor;
     private final int ioWorkers;
 
-    public PaymentProperties(@DefaultValue("1000000000") long openingBalanceMinor, @DefaultValue("2") int ioWorkers) {
+    public PaymentProperties(@DefaultValue(DEFAULT_OPENING_BALANCE_MINOR) long openingBalanceMinor,
+                             @DefaultValue(DEFAULT_IO_WORKERS) int ioWorkers) {
         if (openingBalanceMinor < 1 || openingBalanceMinor > PaymentRules.MAX_AMOUNT_MINOR) {
             throw new IllegalArgumentException("Opening balance must be between 1 and " + PaymentRules.MAX_AMOUNT_MINOR + " minor units");
         }

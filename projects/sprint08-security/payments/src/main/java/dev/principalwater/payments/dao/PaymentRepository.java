@@ -37,17 +37,9 @@ public class PaymentRepository {
     }
 
     public Mono<Void> createWallet(UUID account, long opening) {
-        return database.sql("""
-                INSERT INTO payment_wallets(account_id, opening_balance_minor, balance_minor, currency)
-                SELECT :account, :opening, :opening, 'RUB'
-                WHERE NOT EXISTS (SELECT 1 FROM payment_wallets WHERE account_id = :account)
-                """).bind(ACCOUNT_PARAMETER, account).bind("opening", opening).fetch().rowsUpdated()
-                .flatMap(created -> created == 0 ? Mono.empty() : database.sql("""
-                        INSERT INTO payment_journal(kind, journal_id, account_id, opening_minor, positive_account, negative_account,
-                                                    positive_minor, negative_minor)
-                        VALUES ('OPENING', :account, :account, :opening, 'CUSTOMER', 'ISSUER', :opening, :opposite)
-                        """).bind(ACCOUNT_PARAMETER, account).bind("opening", opening).bind("opposite", Math.negateExact(opening))
-                        .fetch().rowsUpdated().flatMap(this::requireOne));
+        // 0 строк — кошелёк уже открыт вместе со своей проводкой открытия.
+        return insertWalletIfAbsent(account, opening)
+                .flatMap(created -> created == 0 ? Mono.empty() : appendOpeningJournal(account, opening));
     }
 
     public Mono<Long> lockWallet(UUID account) {
@@ -66,20 +58,49 @@ public class PaymentRepository {
                 .fetch().rowsUpdated().flatMap(this::requireOne);
     }
 
+    // Шаги идут в транзакции PaymentService после save(): проводка ссылается на решение внешним ключом.
     public Mono<Void> debit(PaymentDecision decision, long previousBalance) {
+        return withdrawFromWallet(decision, previousBalance).then(appendDebitJournal(decision));
+    }
+
+    // Гонку создателей одного кошелька решает PK: проигравший получает DuplicateKeyException, транзакцию повторяет PaymentService.
+    private Mono<Long> insertWalletIfAbsent(UUID account, long opening) {
+        return database.sql("""
+                INSERT INTO payment_wallets(account_id, opening_balance_minor, balance_minor, currency)
+                SELECT :account, :opening, :opening, 'RUB'
+                WHERE NOT EXISTS (SELECT 1 FROM payment_wallets WHERE account_id = :account)
+                """).bind(ACCOUNT_PARAMETER, account).bind("opening", opening).fetch().rowsUpdated();
+    }
+
+    private Mono<Void> appendOpeningJournal(UUID account, long opening) {
+        return database.sql("""
+                INSERT INTO payment_journal(kind, journal_id, account_id, opening_minor, positive_account, negative_account,
+                                            positive_minor, negative_minor)
+                VALUES ('OPENING', :account, :account, :opening, 'CUSTOMER', 'ISSUER', :opening, :opposite)
+                """).bind(ACCOUNT_PARAMETER, account).bind("opening", opening).bind("opposite", Math.negateExact(opening))
+                .fetch().rowsUpdated().flatMap(this::requireOne);
+    }
+
+    // Условный UPDATE: ровно одна строка, пока остаток равен прочитанному под FOR UPDATE и покрывает сумму.
+    private Mono<Void> withdrawFromWallet(PaymentDecision decision, long previousBalance) {
         DebitCommand command = decision.command();
         return database.sql("""
                 UPDATE payment_wallets SET balance_minor = :balance
                 WHERE account_id = :account AND balance_minor = :previous AND balance_minor >= :amount
                 """).bind("balance", decision.balanceMinor()).bind(ACCOUNT_PARAMETER, command.accountId())
                 .bind("previous", previousBalance).bind("amount", command.amountMinor())
-                .fetch().rowsUpdated().flatMap(this::requireOne).then(database.sql("""
-                        INSERT INTO payment_journal(kind, journal_id, payment_id, account_id, payment_status, positive_account, negative_account,
-                                                    positive_minor, negative_minor)
-                        VALUES ('DEBIT', :key, :key, :account, 'SUCCEEDED', 'CLEARING', 'CUSTOMER', :amount, :opposite)
-                        """).bind("key", decision.paymentId()).bind(ACCOUNT_PARAMETER, command.accountId())
-                        .bind("amount", command.amountMinor()).bind("opposite", Math.negateExact(command.amountMinor()))
-                        .fetch().rowsUpdated().flatMap(this::requireOne));
+                .fetch().rowsUpdated().flatMap(this::requireOne);
+    }
+
+    private Mono<Void> appendDebitJournal(PaymentDecision decision) {
+        DebitCommand command = decision.command();
+        return database.sql("""
+                INSERT INTO payment_journal(kind, journal_id, payment_id, account_id, payment_status, positive_account, negative_account,
+                                            positive_minor, negative_minor)
+                VALUES ('DEBIT', :key, :key, :account, 'SUCCEEDED', 'CLEARING', 'CUSTOMER', :amount, :opposite)
+                """).bind("key", decision.paymentId()).bind(ACCOUNT_PARAMETER, command.accountId())
+                .bind("amount", command.amountMinor()).bind("opposite", Math.negateExact(command.amountMinor()))
+                .fetch().rowsUpdated().flatMap(this::requireOne);
     }
 
     private PaymentDecision decision(Row row) {

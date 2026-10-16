@@ -689,6 +689,8 @@ jobs:
             echo "STORE_TLS_CA=$STORE_SECRETS_DIR/tls_ca.pem"
             echo "PAYMENTS_OAUTH_TOKEN_URI=https://auth.valgrind-home.localhost:8448/realms/storefront-api/protocol/openid-connect/token"
           } >> "$GITHUB_ENV"
+      - name: Route TLS hostnames to the isolated runner
+        run: printf '127.0.0.1 shop.valgrind-home.localhost auth.valgrind-home.localhost\n' | sudo tee -a /etc/hosts > /dev/null
       # Keycloak is built from its pinned Quay digest; the Docker Official Image mirror applies only to Docker Hub images.
       - name: Start the storefront, payments, Keycloak, Redis and optional analytics
         id: containers

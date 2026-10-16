@@ -14,6 +14,7 @@ jobs:
       sprint05: ${{ steps.detect.outputs.sprint05 }}
       sprint06: ${{ steps.detect.outputs.sprint06 }}
       sprint07: ${{ steps.detect.outputs.sprint07 }}
+      sprint08: ${{ steps.detect.outputs.sprint08 }}
       exercises: ${{ steps.detect.outputs.exercises }}
       infrastructure: ${{ steps.detect.outputs.infrastructure }}
     steps:
@@ -54,6 +55,11 @@ jobs:
             echo "sprint07=true" >> "$GITHUB_OUTPUT"
           else
             echo "sprint07=false" >> "$GITHUB_OUTPUT"
+          fi
+          if test -f projects/sprint08-security/build.gradle; then
+            echo "sprint08=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sprint08=false" >> "$GITHUB_OUTPUT"
           fi
           if test -f exercises/sprint01/junit5/pom.xml; then
             echo "exercises=true" >> "$GITHUB_OUTPUT"
@@ -628,3 +634,85 @@ jobs:
       - name: Stop owned service containers
         if: always() && steps.containers.outcome != 'skipped'
         run: docker compose -p ci-sprint07 -f compose.yaml -f compose.analytics.yaml stop
+  sprint08:
+    needs: projects
+    if: needs.projects.outputs.sprint08 == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: projects/sprint08-security
+    env:
+      WEB_PORT: "18088"
+      PAYMENTS_PORT: "18098"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Java 21 and Gradle cache
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: |
+            projects/sprint08-security/**/*.gradle
+            projects/sprint08-security/gradle/wrapper/gradle-wrapper.properties
+      - name: Check both modules with PMD and package executable JARs with Gradle
+        run: ./gradlew --no-daemon --console=plain check bootJar packageDeployment
+      - name: Validate JavaScript and file-secret initialization
+        run: |
+          for script in storefront/src/main/resources/static/*.js; do node --check "$script"; done
+          node --check scripts/payment-load.js
+          python3 -m compileall -q scripts
+          python3 -m unittest discover -s storefront/src/test/python -v
+      # The verification scripts start their own bounded Keycloak and PostgreSQL containers for real JWTs.
+      - name: Verify both executable JARs with native H2, Redis and Keycloak
+        run: python3 scripts/verify-jar.py
+      - name: Verify both native PostgreSQL databases, payment transactions and Keycloak tokens
+        run: python3 scripts/verify-postgresql.py
+      - name: Verify cross-instance sessions, durable logout and session-store outage
+        run: python3 scripts/verify-sessions.py
+      - name: Verify Redis cache expiry, invalidation and outage recovery
+        run: python3 scripts/verify-cache.py
+      - name: Verify optional real ClickHouse delivery and recovery
+        run: python3 scripts/verify-analytics.py
+      - name: Initialize external runtime secrets
+        env:
+          STORE_SECRETS_DIR: ${{ runner.temp }}/sprint08-secrets
+        run: |
+          python3 scripts/init-secrets.py
+          python3 scripts/init-tls.py
+          {
+            echo "STORE_SECRETS_DIR=$STORE_SECRETS_DIR"
+            echo "STORE_UID=$(id -u)"
+            echo "STORE_GID=$(id -g)"
+            echo "STORE_TLS_CA=$STORE_SECRETS_DIR/tls_ca.pem"
+            echo "PAYMENTS_OAUTH_TOKEN_URI=https://auth.valgrind-home.localhost:8448/realms/storefront-api/protocol/openid-connect/token"
+          } >> "$GITHUB_ENV"
+      - name: Route TLS hostnames to the isolated runner
+        run: printf '127.0.0.1 shop.valgrind-home.localhost auth.valgrind-home.localhost\n' | sudo tee -a /etc/hosts > /dev/null
+      # Keycloak is built from its pinned Quay digest; the Docker Official Image mirror applies only to Docker Hub images.
+      - name: Start the storefront, payments, Keycloak, Redis and optional analytics
+        id: containers
+        run: docker compose -p ci-sprint08 -f compose.yaml -f compose.analytics.yaml up -d --build --wait --wait-timeout 300
+      - name: Verify real cookies, CSRF, OAuth tokens, balance and purchase forms
+        run: python3 scripts/verify-recovery.py --base-url https://shop.valgrind-home.localhost:8448 --payments-url http://localhost:18098
+      - name: Collect service diagnostics on failure
+        if: failure() && steps.containers.outcome != 'skipped'
+        run: |
+          docker compose -p ci-sprint08 -f compose.yaml -f compose.analytics.yaml ps -a
+          docker compose -p ci-sprint08 -f compose.yaml -f compose.analytics.yaml logs --no-color --tail 150
+      - name: Upload both executable JARs and Gradle reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sprint08-java21
+          path: |
+            projects/sprint08-security/build/deployment/*.jar
+            projects/sprint08-security/*/build/test-results/
+            projects/sprint08-security/*/build/reports/tests/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Stop owned service containers
+        if: always() && steps.containers.outcome != 'skipped'
+        run: docker compose -p ci-sprint08 -f compose.yaml -f compose.analytics.yaml stop

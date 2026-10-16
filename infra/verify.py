@@ -7,10 +7,12 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import ssl
 import sys
 import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from urllib.parse import urlparse
 import uuid
 
 import deploy
@@ -19,7 +21,8 @@ import deploy
 def request(url, method="GET", body=None):
     data = None if body is None else json.dumps(body).encode()
     headers = {} if data is None else {"Content-Type": "application/json"}
-    with urlopen(Request(url, data=data, headers=headers, method=method), timeout=15) as response:
+    context = ssl.create_default_context(cafile=os.environ.get("STORE_TLS_CA")) if url.startswith("https:") else None
+    with urlopen(Request(url, data=data, headers=headers, method=method), timeout=15, context=context) as response:
         raw = response.read()
         return json.loads(raw) if response.headers.get_content_type() == "application/json" else raw
 
@@ -56,13 +59,18 @@ def main():
             subprocess.run(driver + ["plan"] + optional + list(options), stdout=log, stderr=subprocess.STDOUT, check=True)
         return json.loads(subprocess.check_output(tofu + ["show", "-json", str(state / "reviewed.tfplan")], env=environment))
 
-    if args.stack.startswith("sprint07-"):
+    if args.stack.startswith(deploy.JAR_PREFIXES):
+        sprint = args.stack.split("-", 1)[0]
+        oauth = "token_url" in deployed
         specification = importlib.util.spec_from_file_location("storefront_smoke", deploy.REPOSITORY / deploy.STACKS[args.stack] / "scripts/smoke.py")
         smoke = importlib.util.module_from_spec(specification)
         specification.loader.exec_module(smoke)
         secrets_directory = Path(os.environ.get("COURSE_DEPLOY_SECRETS", Path.home() / ".config/java-engineering-course/tofu")) / args.stack
-        probe = smoke.MarketProbe(deployed["frontend_url"], payments_url=deployed["payments_url"],
-                                  secrets_dir=secrets_directory)
+        if oauth:
+            os.environ["STORE_TLS_CA"] = str(secrets_directory / "tls_ca.pem")
+        # OAuth stacks obtain client-credentials tokens from the published Keycloak endpoint; Sprint 7 reads a service token file.
+        probe = smoke.MarketProbe(deployed["frontend_url"], payments_url=deployed["payments_url"], secrets_dir=secrets_directory,
+                                  **({"token_uri": deployed["token_url"]} if oauth else {}))
         proof = probe.run()
         expected_total = probe.read(proof["order_path"]).order_total
 
@@ -71,41 +79,85 @@ def main():
             return True
 
         def payment_balance():
-            token = (secrets_directory / "payments_service_token").read_text().strip()
+            token = probe.service_token() if oauth else (secrets_directory / "payments_service_token").read_text().strip()
             endpoint = deployed["payments_url"] + "/api/v1/accounts/" + proof["account_id"] + "/balance"
             with urlopen(Request(endpoint, headers={"Authorization": "Bearer " + token}), timeout=10) as response:
                 return json.load(response)["balanceMinor"]
 
-        persistent = args.stack.endswith("-postgresql")
-        for service in ["storefront", "payments"]:
-            key = service + "_database" if persistent else service
-            container = deployed["containers"][key]
+        def replace(address, container):
             old_container = subprocess.check_output(["docker", "inspect", "--format", "{{.Id}}", container], text=True).strip()
-            address = (f'module.sprint07["{args.stack}"].module.postgres["{service}"].docker_container.database' if persistent
-                       else f'module.sprint07["{args.stack}"].docker_container.application["{service}"]')
             replacement = plan("--replace", address)
             changes = [change for change in replacement["resource_changes"] if change["change"]["actions"] != ["no-op"]]
             assert len(changes) == 1 and changes[0]["address"] == address, "Only the selected service may be replaced"
             subprocess.run(driver + ["apply"] + optional, check=True)
             new_container = subprocess.check_output(["docker", "inspect", "--format", "{{.Id}}", container], text=True).strip()
             assert old_container != new_container
+
+        persistent = args.stack.endswith("-postgresql")
+        for service in ["storefront", "payments"]:
+            key = service + "_database" if persistent else service
+            address = (f'module.{sprint}["{args.stack}"].module.postgres["{service}"].docker_container.database' if persistent
+                       else f'module.{sprint}["{args.stack}"].docker_container.application["{service}"]')
+            replace(address, deployed["containers"][key])
             if persistent:
                 await_value(lambda: probe.read(proof["order_path"]).order_total, expected_total)
                 await_value(payment_survives, True)
         if persistent:
             print("Independent PostgreSQL recreation: owned order, balance and idempotent ledger receipt survived")
         else:
-            try:
-                probe.read(proof["order_path"])
-            except HTTPError as error:
-                assert error.code == 404
+            if oauth:
+                # Restarting H2 removes accounts; a retained Redis session cannot authenticate without its account.
+                assert urlparse(probe.read(proof["order_path"]).url).path == "/account/login"
             else:
-                raise AssertionError("A new H2 storefront must not retain the previous order")
+                try:
+                    probe.read(proof["order_path"])
+                except HTTPError as error:
+                    assert error.code == 404
+                else:
+                    raise AssertionError("A new H2 storefront must not retain the previous order")
             assert not probe.read("/items").products
             await_value(payment_balance, proof["balance_minor"] + proof["payment_amount_minor"])
             # A fresh account/purchase proves both new JVMs can cooperate after their memory reset.
-            probe.run()
+            proof = probe.run()
             print("Both H2 services reset their in-memory data and accepted a new purchase")
+        if oauth and args.analytics:
+            seller = smoke.MarketProbe(deployed["frontend_url"], secrets_dir=secrets_directory)
+            seller.login("seller", (secrets_directory / "seller_password").read_text().strip())
+            seller.post("/cabinet/store/analytics/sync", seller.read("/cabinet/store/analytics"), days=7)
+            await_value(lambda: int(probe.read("/cabinet/analytics").metrics.get("orders", "0")), 1)
+            assert int(seller.read("/cabinet/store/analytics").metrics["orders"]) >= 2
+            print("ClickHouse: one buyer sees their own order; the seller sees both buyers' paid orders")
+        if oauth:
+            realm = deployed["token_url"].rsplit("/protocol/", 1)[0]
+            assert request(realm + "/.well-known/openid-configuration")["issuer"] == deployed["issuer"]
+            balance = deployed["payments_url"] + "/api/v1/accounts/" + proof["account_id"] + "/balance"
+            for headers in ({}, {"Authorization": "Bearer invalid-service-token"}):
+                try:
+                    urlopen(Request(balance, headers=headers), timeout=5).close()
+                except HTTPError as error:
+                    assert error.code == 401
+                else:
+                    raise AssertionError("Payments must reject missing or invalid bearer credentials")
+
+            def signing_keys():
+                return sorted(key["kid"] for key in request(deployed["jwk_set_url"])["keys"])
+
+            # Unchanged key ids prove the realm came from the retained database, not from a fresh import.
+            keys = signing_keys()
+            assert keys, "Keycloak must publish signing keys"
+            for name, address in [("authorization_database", "module.authorization_postgres[0].docker_container.database"),
+                                  ("authorization", "docker_container.authorization[0]")]:
+                replace(f'module.{sprint}["{args.stack}"].{address}', deployed["containers"][name])
+                await_value(signing_keys, keys)
+                await_value(payment_survives, True)
+            # Containers and state must hold only paths to secret files, never their contents.
+            known = deploy.secret_values(secrets_directory)
+            configurations = {"state": (state / "terraform.tfstate").read_text()}
+            for name in deployed["containers"].values():
+                configurations[name] = subprocess.check_output(["docker", "inspect", "--format", "{{json .Config}}", name], text=True)
+            for source, content in configurations.items():
+                assert not any(value in content for value in known), f"Secret file value found in {source}"
+            print("Keycloak: realm keys, token validation and secret-free containers survived database and server recreation")
     elif args.stack.startswith(("sprint05", "sprint06")):
         specification = importlib.util.spec_from_file_location("storefront_smoke", deploy.REPOSITORY / deploy.STACKS[args.stack] / "scripts/smoke.py")
         smoke = importlib.util.module_from_spec(specification)

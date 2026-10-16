@@ -6,19 +6,31 @@ terraform {
 
 locals {
   persistent = var.profile == "postgresql"
+  # Canonical issuer is public (the token iss claim); token and JWK traffic stays on the private network.
+  oauth_issuer   = var.oauth_enabled ? "https://auth.valgrind-home.localhost:${var.tls_port}/realms/storefront-api" : null
+  oauth_internal = "http://authorization:8080/realms/storefront-api/protocol/openid-connect"
   services = {
     storefront = {
       port = var.http_port
       # SQL fallback under a Redis outage exhausted the former 384 MiB cgroup budget.
       memory_mb = 512
-      secrets = merge({
-        "store.payments.service-token"                  = "payments_service_token"
-        "spring.data.redis.password"                    = "redis_password"
-        "store.seller.bootstrap-password"               = "seller_password"
-        }, local.persistent ? { "spring.r2dbc.password" = "db_password" } : {}, var.analytics_enabled ? {
-        "store.analytics.writer-password"               = "analytics_writer_password"
-        "store.analytics.reader-password"               = "analytics_reader_password"
-      } : {})
+      secrets = merge(
+        {
+          "spring.data.redis.password"      = "redis_password"
+          "store.seller.bootstrap-password" = "seller_password"
+        },
+        var.oauth_enabled ? {
+          "spring.security.oauth2.client.registration.payments.client-secret" = "oauth_client_secret"
+          "store.sessions.password"                                           = "session_redis_password"
+          } : {
+          "store.payments.service-token" = "payments_service_token"
+        },
+        local.persistent ? { "spring.r2dbc.password" = "db_password" } : {},
+        var.analytics_enabled ? {
+          "store.analytics.writer-password" = "analytics_writer_password"
+          "store.analytics.reader-password" = "analytics_reader_password"
+        } : {},
+      )
       environment = concat([
         "STORE_PAYMENTS_URL=http://payments:8080",
         "SPRING_DATA_REDIS_HOST=redis", "SPRING_DATA_REDIS_PORT=6379", "SPRING_DATA_REDIS_USERNAME=storefront",
@@ -26,24 +38,33 @@ locals {
         "STORE_SECRETS_LOCATION=/run/secrets/",
         ], local.persistent ? [
         "DB_URL=r2dbc:postgresql://store-db:5432/storefront", "DB_USER=storefront",
+        ] : [], var.oauth_enabled ? [
+        "PAYMENTS_OAUTH_TOKEN_URI=${local.oauth_internal}/token",
+        "SPRING_PROFILES_INCLUDE=shared-sessions", "STORE_SESSIONS_HOST=sessions", "STORE_SESSIONS_PORT=6379",
+        "STORE_SESSIONS_USERNAME=sessions", "STORE_SESSIONS_NAMESPACE=store:session:${var.stack_name}",
+        "SPRING_MAIL_HOST=mailpit", "SPRING_MAIL_PORT=1025", "STORE_RECOVERY_SENDER=noreply@example.test",
+        "STORE_RECOVERY_PUBLIC_BASE_URL=https://shop.valgrind-home.localhost:${var.tls_port}",
+        "SERVER_FORWARD_HEADERS_STRATEGY=framework", "SERVER_REACTIVE_SESSION_COOKIE_SECURE=true",
         ] : [], var.analytics_enabled ? [
         "STORE_ANALYTICS_ENABLED=true", "STORE_ANALYTICS_URL=http://clickhouse:8123",
       ] : [])
-      command = [
-        "--store.cart.cookie-name=${var.stack_name}-cart",
+      command = concat(var.oauth_enabled ? [] : ["--store.cart.cookie-name=${var.stack_name}-cart"], [
         "--server.reactive.session.cookie.name=${var.stack_name}-session",
-      ]
+      ])
     }
     payments = {
       port      = var.payments_port
       memory_mb = 384
-      secrets = merge({
+      # OAuth payments validates JWTs; a preshared bearer or client secret never reaches it.
+      secrets = merge(var.oauth_enabled ? {} : {
         "payments.service-token" = "payments_service_token"
       }, local.persistent ? { "spring.r2dbc.password" = "payments_runtime_password" } : {})
-      environment = local.persistent ? [
+      environment = concat(local.persistent ? [
         "PAYMENTS_DB_URL=r2dbc:postgresql://payments-db:5432/payments", "PAYMENTS_DB_USER=payments_runtime",
         "PAYMENTS_SQL_INIT_MODE=never",
-      ] : []
+        ] : [], var.oauth_enabled ? [
+        "PAYMENTS_OAUTH_ISSUER=${local.oauth_issuer}", "PAYMENTS_OAUTH_JWK_SET_URI=${local.oauth_internal}/certs",
+      ] : [])
       command = []
     }
   }
@@ -51,6 +72,16 @@ locals {
 
 resource "docker_network" "application" {
   name = var.stack_name
+  dynamic "ipam_config" {
+    for_each = var.network_subnet == null ? [] : [var.network_subnet]
+    content {
+      # Docker fills these defaults; declare them to avoid false network replacements on refresh.
+      subnet      = ipam_config.value
+      gateway     = cidrhost(ipam_config.value, 1)
+      ip_range    = ""
+      aux_address = {}
+    }
+  }
 }
 
 module "postgres" {
@@ -110,10 +141,11 @@ resource "docker_container" "application" {
   restart      = "unless-stopped"
   wait         = true
   wait_timeout = 180
+  # A required configtree import fails when no secret file is mounted, e.g. OAuth payments with H2.
   env = concat([
     "SERVER_PORT=8080", "SPRING_PROFILES_ACTIVE=${var.profile}",
-    "SPRING_CONFIG_IMPORT=configtree:/run/secrets/",
-  ], each.value.environment)
+    ], length(each.value.secrets) > 0 ? ["SPRING_CONFIG_IMPORT=configtree:/run/secrets/"] : [],
+  each.value.environment)
   networks_advanced {
     name    = docker_network.application.name
     aliases = [each.key]
@@ -144,5 +176,5 @@ resource "docker_container" "application" {
   }
   # The for_each control-plane barrier waits for both databases during initial apply.
   # Running JVMs recover independently; replacing one database must not replace them.
-  depends_on = [module.postgres]
+  depends_on = [module.postgres, module.authorization_postgres, docker_container.authorization, docker_container.sessions, docker_container.mailpit]
 }

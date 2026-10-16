@@ -98,3 +98,133 @@ run "missing_payment_artifact" {
   }
   expect_failures = [var.artifact_hashes]
 }
+
+run "default_keeps_the_shared_service_token" {
+  command = plan
+  module {
+    source = "./modules/rest-storefront"
+  }
+  assert {
+    condition = length(docker_container.authorization) == 0 && length(module.authorization_postgres) == 0 && (
+      !can(output.deployment.issuer) &&
+      length([for mount in docker_container.application["storefront"].volumes : mount if mount.container_path == "/run/secrets/store.payments.service-token"]) == 1 &&
+      length([for mount in docker_container.application["payments"].volumes : mount if mount.container_path == "/run/secrets/payments.service-token"]) == 1 &&
+      alltrue([for service in values(docker_container.application) : (
+        length([for setting in service.env : setting if startswith(setting, "PAYMENTS_OAUTH_")]) == 0 &&
+        contains(service.env, "SPRING_CONFIG_IMPORT=configtree:/run/secrets/")
+      )])
+    )
+    error_message = "Without OAuth the Sprint 7 shared service-token topology must remain unchanged."
+  }
+}
+
+run "oauth_authorization_server_and_secret_files" {
+  command = plan
+  module {
+    source = "./modules/rest-storefront"
+  }
+  variables {
+    # The fixture supplies only the files whose hashes the plan reads; Sprint 8 sources are absent from main.
+    project_directory  = abspath("tests/fixtures/oauth-project")
+    stack_name         = "java-tofu-sprint08-postgresql"
+    http_port          = 28091
+    payments_port      = 29091
+    analytics_port     = 28131
+    oauth_enabled      = true
+    authorization_port = 28381
+    tls_port           = 28448
+    mail_port          = 28028
+  }
+  assert {
+    condition = length(docker_container.authorization) == 1 && length(module.authorization_postgres) == 1 && (
+      module.authorization_postgres[0].container_name == "java-tofu-sprint08-postgresql-authorization-db" &&
+      output.deployment.containers.authorization == "java-tofu-sprint08-postgresql-authorization" &&
+      output.deployment.containers.authorization_database == module.authorization_postgres[0].container_name &&
+      output.deployment.issuer == "https://auth.valgrind-home.localhost:28448/realms/storefront-api"
+    )
+    error_message = "OAuth must add Keycloak with its own authorization database and the canonical public issuer."
+  }
+  assert {
+    condition = docker_container.authorization[0].read_only && docker_container.authorization[0].user == "10001:10001" && (
+      docker_container.authorization[0].memory == 768 && docker_container.authorization[0].memory_swap == 768 &&
+      docker_container.authorization[0].tmpfs["/tmp"] == "rw,noexec,nosuid,size=64m,mode=1777" &&
+      docker_container.authorization[0].tmpfs["/opt/keycloak/data"] == "rw,noexec,nosuid,size=32m,mode=1777" &&
+      alltrue([for port in docker_container.authorization[0].ports : port.ip == "127.0.0.1" && port.external == 28381]) &&
+      alltrue([for mount in docker_container.authorization[0].volumes : mount.read_only]) &&
+      length([for mount in docker_container.authorization[0].volumes : mount if mount.container_path == "/opt/keycloak/data/import/storefront-api-realm.json"]) == 1
+    )
+    error_message = "Keycloak needs a read-only root, bounded tmpfs, read-only realm and secret files, and a loopback port."
+  }
+  assert {
+    condition = alltrue([
+      for container in concat([docker_container.authorization[0]], values(docker_container.application)) :
+      alltrue([for setting in container.env : !can(regex("(PASSWORD|SECRET|TOKEN)=", setting))])
+      ]) && length([for mount in docker_container.authorization[0].volumes : mount if(
+        startswith(mount.container_path, "/run/secrets/") && startswith(mount.host_path, "/tmp/course-test-secrets/")
+    )]) == 3
+    error_message = "Secrets must be mounted files; no container environment may carry a password, token or client secret."
+  }
+  assert {
+    condition = length([for mount in docker_container.application["storefront"].volumes : mount if(
+      mount.container_path == "/run/secrets/spring.security.oauth2.client.registration.payments.client-secret" &&
+      endswith(mount.host_path, "/oauth_client_secret")
+      )]) == 1 && length([for mount in docker_container.application["storefront"].volumes : mount if endswith(mount.container_path, "service-token")]) == 0 && (
+      length([for mount in docker_container.application["payments"].volumes : mount if endswith(mount.container_path, "service-token") || endswith(mount.host_path, "/oauth_client_secret")]) == 0 &&
+      contains(docker_container.application["storefront"].env, "PAYMENTS_OAUTH_TOKEN_URI=http://authorization:8080/realms/storefront-api/protocol/openid-connect/token") &&
+      contains(docker_container.application["payments"].env, "PAYMENTS_OAUTH_ISSUER=https://auth.valgrind-home.localhost:28448/realms/storefront-api") &&
+      contains(docker_container.application["payments"].env, "PAYMENTS_OAUTH_JWK_SET_URI=http://authorization:8080/realms/storefront-api/protocol/openid-connect/certs")
+    )
+    error_message = "Only the storefront receives the client secret; payments validates issuer and JWKs without a preshared bearer."
+  }
+  assert {
+    condition = length(docker_container.sessions) == 1 && length(docker_volume.sessions) == 1 && (
+      output.deployment.frontend_url == "https://shop.valgrind-home.localhost:28448" &&
+      contains(docker_container.application["storefront"].env, "SPRING_PROFILES_INCLUDE=shared-sessions") &&
+      length(docker_container.sessions[0].ports) == 0 &&
+      alltrue([for port in docker_container.gateway[0].ports : port.ip == "127.0.0.1" && port.external == 28448]) &&
+      alltrue([for mount in docker_container.gateway[0].volumes : mount.read_only])
+    )
+    error_message = "Shared sessions require retained storage and no public Redis port; TLS keys stay read-only outside state."
+  }
+
+}
+
+run "oauth_h2_payments_without_secret_files" {
+  command = plan
+  module {
+    source = "./modules/rest-storefront"
+  }
+  variables {
+    project_directory  = abspath("tests/fixtures/oauth-project")
+    stack_name         = "java-tofu-sprint08-h2"
+    profile            = "h2"
+    http_port          = 28092
+    payments_port      = 29092
+    analytics_port     = 28132
+    oauth_enabled      = true
+    authorization_port = 28382
+    tls_port           = 28449
+    mail_port          = 28029
+  }
+  assert {
+    condition = length(module.postgres) == 0 && length(module.authorization_postgres) == 1 && (
+      length(docker_container.application["payments"].volumes) == 0 &&
+      length([for setting in docker_container.application["payments"].env : setting if startswith(setting, "SPRING_CONFIG_IMPORT=")]) == 0 &&
+      contains(docker_container.application["storefront"].env, "SPRING_CONFIG_IMPORT=configtree:/run/secrets/") &&
+      output.deployment.token_url == "https://auth.valgrind-home.localhost:28449/realms/storefront-api/protocol/openid-connect/token"
+    )
+    error_message = "H2 payments has no secret files, so it must not require a configtree; the storefront and Keycloak still keep theirs."
+  }
+}
+
+run "oauth_requires_the_public_issuer_port" {
+  command = plan
+  module {
+    source = "./modules/rest-storefront"
+  }
+  variables {
+    project_directory = abspath("tests/fixtures/oauth-project")
+    oauth_enabled     = true
+  }
+  expect_failures = [var.authorization_port, var.tls_port, var.mail_port]
+}

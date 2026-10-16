@@ -670,6 +670,8 @@ jobs:
         run: python3 scripts/verify-jar.py
       - name: Verify both native PostgreSQL databases, payment transactions and Keycloak tokens
         run: python3 scripts/verify-postgresql.py
+      - name: Verify cross-instance sessions, durable logout and session-store outage
+        run: python3 scripts/verify-sessions.py
       - name: Verify Redis cache expiry, invalidation and outage recovery
         run: python3 scripts/verify-cache.py
       - name: Verify optional real ClickHouse delivery and recovery
@@ -679,17 +681,20 @@ jobs:
           STORE_SECRETS_DIR: ${{ runner.temp }}/sprint08-secrets
         run: |
           python3 scripts/init-secrets.py
+          python3 scripts/init-tls.py
           {
             echo "STORE_SECRETS_DIR=$STORE_SECRETS_DIR"
             echo "STORE_UID=$(id -u)"
             echo "STORE_GID=$(id -g)"
+            echo "STORE_TLS_CA=$STORE_SECRETS_DIR/tls_ca.pem"
+            echo "PAYMENTS_OAUTH_TOKEN_URI=https://auth.valgrind-home.localhost:8448/realms/storefront-api/protocol/openid-connect/token"
           } >> "$GITHUB_ENV"
       # Keycloak is built from its pinned Quay digest; the Docker Official Image mirror applies only to Docker Hub images.
       - name: Start the storefront, payments, Keycloak, Redis and optional analytics
         id: containers
         run: docker compose -p ci-sprint08 -f compose.yaml -f compose.analytics.yaml up -d --build --wait --wait-timeout 300
       - name: Verify real cookies, CSRF, OAuth tokens, balance and purchase forms
-        run: python3 scripts/smoke.py --base-url http://localhost:18088 --payments-url http://localhost:18098
+        run: python3 scripts/verify-recovery.py --base-url https://shop.valgrind-home.localhost:8448 --payments-url http://localhost:18098
       - name: Collect service diagnostics on failure
         if: failure() && steps.containers.outcome != 'skipped'
         run: |

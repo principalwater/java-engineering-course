@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import ssl
 import sys
 import time
 from urllib.error import HTTPError, URLError
@@ -20,7 +21,8 @@ import deploy
 def request(url, method="GET", body=None):
     data = None if body is None else json.dumps(body).encode()
     headers = {} if data is None else {"Content-Type": "application/json"}
-    with urlopen(Request(url, data=data, headers=headers, method=method), timeout=15) as response:
+    context = ssl.create_default_context(cafile=os.environ.get("STORE_TLS_CA")) if url.startswith("https:") else None
+    with urlopen(Request(url, data=data, headers=headers, method=method), timeout=15, context=context) as response:
         raw = response.read()
         return json.loads(raw) if response.headers.get_content_type() == "application/json" else raw
 
@@ -64,6 +66,8 @@ def main():
         smoke = importlib.util.module_from_spec(specification)
         specification.loader.exec_module(smoke)
         secrets_directory = Path(os.environ.get("COURSE_DEPLOY_SECRETS", Path.home() / ".config/java-engineering-course/tofu")) / args.stack
+        if oauth:
+            os.environ["STORE_TLS_CA"] = str(secrets_directory / "tls_ca.pem")
         # OAuth stacks obtain client-credentials tokens from the published Keycloak endpoint; Sprint 7 reads a service token file.
         probe = smoke.MarketProbe(deployed["frontend_url"], payments_url=deployed["payments_url"], secrets_dir=secrets_directory,
                                   **({"token_uri": deployed["token_url"]} if oauth else {}))
@@ -119,9 +123,9 @@ def main():
         if oauth and args.analytics:
             seller = smoke.MarketProbe(deployed["frontend_url"], secrets_dir=secrets_directory)
             seller.login("seller", (secrets_directory / "seller_password").read_text().strip())
-            seller.post("/account/seller/analytics/sync", seller.read("/account/seller/analytics"), days=7)
-            await_value(lambda: int(probe.read("/profile/analytics").metrics.get("orders", "0")), 1)
-            assert int(seller.read("/account/seller/analytics").metrics["orders"]) >= 2
+            seller.post("/cabinet/store/analytics/sync", seller.read("/cabinet/store/analytics"), days=7)
+            await_value(lambda: int(probe.read("/cabinet/analytics").metrics.get("orders", "0")), 1)
+            assert int(seller.read("/cabinet/store/analytics").metrics["orders"]) >= 2
             print("ClickHouse: one buyer sees their own order; the seller sees both buyers' paid orders")
         if oauth:
             realm = deployed["token_url"].rsplit("/protocol/", 1)[0]

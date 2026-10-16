@@ -155,10 +155,12 @@ class DeploymentPlanTest(unittest.TestCase):
                 project.mkdir(parents=True)
                 with patch.object(deploy.subprocess, "run") as run:
                     deploy.prepare("sprint08-postgresql", secrets_directory, {"PATH": "/usr/bin"})
-            initialize, package = run.call_args_list
+            initialize, tls, package = run.call_args_list
             self.assertEqual("scripts/init-secrets.py", initialize.args[0][1])
             self.assertEqual(str(secrets_directory), initialize.kwargs["env"]["STORE_SECRETS_DIR"])
             self.assertEqual(project, initialize.kwargs["cwd"])
+            self.assertEqual("scripts/init-tls.py", tls.args[0][1])
+            self.assertEqual(str(secrets_directory), tls.kwargs["env"]["STORE_SECRETS_DIR"])
             self.assertEqual("scripts/package.py", package.args[0][1])
 
     def test_volume_deletion_cannot_pass_the_plan_gate(self):

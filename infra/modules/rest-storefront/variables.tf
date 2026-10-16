@@ -46,12 +46,30 @@ variable "oauth_enabled" {
   default     = false
 }
 variable "authorization_port" {
-  description = "Loopback Keycloak HTTP port; it is also the canonical public issuer port."
+  description = "Loopback Keycloak diagnostic HTTP port."
   type        = number
   default     = null
   validation {
     condition     = !var.oauth_enabled || var.authorization_port != null
     error_message = "Provide authorization_port when OAuth is enabled."
+  }
+}
+variable "tls_port" {
+  description = "Loopback HTTPS gateway port for OAuth deployments."
+  type        = number
+  default     = null
+  validation {
+    condition     = !var.oauth_enabled || var.tls_port != null
+    error_message = "Provide tls_port when OAuth is enabled."
+  }
+}
+variable "mail_port" {
+  description = "Loopback Mailpit test mailbox port for OAuth deployments."
+  type        = number
+  default     = null
+  validation {
+    condition     = !var.oauth_enabled || var.mail_port != null
+    error_message = "Provide mail_port when OAuth is enabled."
   }
 }
 variable "secrets_directory" {

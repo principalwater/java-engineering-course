@@ -125,6 +125,9 @@ def prepare(stack, secrets_directory, environment):
         secret_variable = "STORE_SECRETS_DIR" if stack.startswith(("sprint05", "sprint06", "sprint07", "sprint08")) else "BLOG_SECRETS_DIR"
         subprocess.run([sys.executable, "scripts/init-secrets.py"], cwd=project,
                        env={**environment, secret_variable: str(secrets_directory)}, check=True)
+        if stack.startswith("sprint08-"):
+            subprocess.run([sys.executable, "scripts/init-tls.py"], cwd=project,
+                           env={**environment, secret_variable: str(secrets_directory)}, check=True)
         if stack.startswith(JAR_PREFIXES):
             subprocess.run([sys.executable, "scripts/package.py"],
                            cwd=project, env=environment, check=True)

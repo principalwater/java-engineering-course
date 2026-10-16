@@ -22,8 +22,8 @@
 | `sprint06-h2` | `module.sprint06["sprint06-h2"]` | [Реактивная витрина с H2](../projects/sprint06-reactive-storefront/) | `28088` | Та же точка входа | `28128` |
 | `sprint07-postgresql` | `module.sprint07["sprint07-postgresql"]` | [Витрина и платежи с PostgreSQL](../projects/sprint07-rest-service/) | `28089` | Платежи: `29089` | `28129` |
 | `sprint07-h2` | `module.sprint07["sprint07-h2"]` | [Витрина и платежи с H2](../projects/sprint07-rest-service/) | `28090` | Платежи: `29090` | `28130` |
-| `sprint08-postgresql` | `module.sprint08["sprint08-postgresql"]` | [Защищённые витрина и платежи с PostgreSQL](../projects/sprint08-security/) | `28091` | Платежи: `29091`, Keycloak: `28381` | `28131` |
-| `sprint08-h2` | `module.sprint08["sprint08-h2"]` | [Защищённые витрина и платежи с H2](../projects/sprint08-security/) | `28092` | Платежи: `29092`, Keycloak: `28382` | `28132` |
+| `sprint08-postgresql` | `module.sprint08["sprint08-postgresql"]` | [Защищённые витрина и платежи с PostgreSQL](../projects/sprint08-security/) | HTTPS `28448` | HTTP-диагностика: `28091`, платежи: `29091`, Keycloak: `28381` | `28131` |
+| `sprint08-h2` | `module.sprint08["sprint08-h2"]` | [Защищённые витрина и платежи с H2](../projects/sprint08-security/) | HTTPS `28449` | HTTP-диагностика: `28092`, платежи: `29092`, Keycloak: `28382` | `28132` |
 | `docker-exercise` | `module.docker_exercise[0]` | [Docker: маршрутизация и JDBC](../exercises/supplements/docker/) | `28380` | Внутри сети | - |
 | `mvc-exercise` | `module.mvc_exercise[0]` | [MVC/JDBC WAR с H2](../exercises/sprint03/spring-mvc-jdbc/) | `28081/spring-web-demo` | Та же точка входа | - |
 
@@ -42,7 +42,7 @@
 - Контейнер работает от UID:GID владельца с read-only корнем; записываемы только `tmpfs` `/tmp` (64 МиБ) и `/opt/keycloak/data` (32 МиБ, `1777`). Realm-файл — read-only дочерний bind mount внутри этого `tmpfs`. Лимиты: 768 МиБ RAM, 2 CPU. Готовность проверяет management-порт 9000.
 - `authorization_db_password`, `authorization_admin_password` и `oauth_client_secret` монтируются файлами. `start-authorization.sh` читает их и экспортирует переменные только внутри процесса, поэтому окружение контейнера, план и state не содержат значений. Изменение скрипта или realm-файла пересоздаёт контейнер; Keycloak пропускает импорт уже существующего realm, поэтому новый JSON применяется только к новой БД авторизации.
 
-Канонический issuer (`iss` токена) публичный: `http://localhost:<порт Keycloak>/realms/storefront-api`. Запросы токена и JWK идут внутри сети на `authorization:8080`: `PAYMENTS_OAUTH_TOKEN_URI` у витрины, `PAYMENTS_OAUTH_ISSUER` и `PAYMENTS_OAUTH_JWK_SET_URI` у платежей. Витрина получает `oauth_client_secret` как `spring.security.oauth2.client.registration.payments.client-secret`; платежи не получают ни общего Bearer-токена, ни секрета клиента. У H2-платежей нет файлов секретов, поэтому для них не задаётся обязательный `SPRING_CONFIG_IMPORT`.
+Канонический issuer (`iss` токена) публичный: `https://auth.valgrind-home.localhost:<порт TLS>/realms/storefront-api`. Запросы токена и JWK идут внутри сети на `authorization:8080`: `PAYMENTS_OAUTH_TOKEN_URI` у витрины, `PAYMENTS_OAUTH_ISSUER` и `PAYMENTS_OAUTH_JWK_SET_URI` у платежей. Витрина получает `oauth_client_secret` как `spring.security.oauth2.client.registration.payments.client-secret`; платежи не получают ни общего Bearer-токена, ни секрета клиента. У H2-платежей нет файлов секретов, поэтому для них не задаётся обязательный `SPRING_CONFIG_IMPORT`.
 
 ```mermaid
 flowchart LR
@@ -102,7 +102,9 @@ python3 infra/deploy.py sprint08-h2 plan --analytics
 python3 infra/deploy.py sprint08-h2 apply --analytics
 ```
 
-Спринт 8 дополнительно использует `oauth_client_secret`, `authorization_db_password` и `authorization_admin_password`: их создаёт проектный `scripts/init-secrets.py` вне репозитория. Выбранный каталог исходников должен содержать `authorization/` проекта.
+Спринт 8 дополнительно использует OAuth-секреты, отдельный Redis сессий, Mailpit и Caddy. Магазин доступен по `https://shop.valgrind-home.localhost:<порт TLS>/cabinet`, авторизация — на `auth.valgrind-home.localhost` того же порта. Имена `.localhost` разрешаются в loopback; публичный DNS не нужен. Тестовый почтовый ящик опубликован на `127.0.0.1:28028` (PostgreSQL) или `28029` (H2), SMTP остаётся внутри сети.
+
+`deploy.py` вызывает проектные `init-secrets.py` и `init-tls.py`: на Mac исходники secrets и приватный ключ локального CA хранятся в томе AES-256 с ключом в Keychain. Для доверия браузера один раз выполните `mkcert -install`; нужны `mkcert` и OpenSSL 3. Контейнеры получают только read-only файлы, state содержит пути. Ключ CA в контейнеры не монтируется. Для рабочего окружения нужен внешний secret manager; этот механизм относится к локальному стенду.
 
 State и планы по умолчанию находятся в `~/.local/state/java-engineering-course/<selector>/`, секреты - в `~/.config/java-engineering-course/tofu/<selector>/`. Другие внешние каталоги задаются через `COURSE_DEPLOY_STATE` и `COURSE_DEPLOY_SECRETS`. Права каталогов - `0700`, файлов паролей и планов - `0600`. Существующие пароли сохраняются. Не используйте один каталог state для разных Docker Engines и не управляйте одним стендом одновременно из разных worktrees.
 
@@ -153,7 +155,7 @@ python3 infra/verify.py sprint08-h2 --analytics
 
 Для спринта 7 локальные mock-тесты проверяют граф двух приложений, независимые БД, H2, mounts, loopback и бюджеты ресурсов; Python-тест отклоняет изменение любого подготовленного JAR или исходников после планирования. Эти проверки не подтверждают работу реального стенда. Отдельный job `sprint07` запускает Gradle, JAR/H2/Redis, PostgreSQL, Redis recovery, ClickHouse и HTTP-сценарий Compose. Наличие проекта определяется по корневому `build.gradle` на проверяемом head; отсутствующий проект означает пропущенный job, существующий требует успешного результата. Завершение проверки останавливает её контейнеры, сохраняя контейнеры, тома и внешние секреты.
 
-Отдельный job `sprint08` повторяет эту последовательность: Gradle `check` с PMD и `bootJar`, JAR с H2/Redis и реальным Keycloak, native PostgreSQL, кеш, ClickHouse и Compose с OAuth-токеном; лимит — 40 минут, Compose ожидает готовность не дольше 300 секунд. Контекст `sprint08` входит в обязательные условия `/approve` по marker `projects/sprint08-security/build.gradle`; до появления проекта в `main` job пропускается. Список обязательных контекстов правил репозитория в GitHub обновляется отдельно от этого PR.
+Отдельный job `sprint08` повторяет эту последовательность: Gradle `check` с PMD и `bootJar`, JAR с H2/Redis и реальным Keycloak, native PostgreSQL, общая сессия двух JVM, кеш, ClickHouse и Compose по HTTPS с OAuth-токеном; лимит — 40 минут, Compose ожидает готовность не дольше 300 секунд. Контекст `sprint08` входит в обязательные условия `/approve` по marker `projects/sprint08-security/build.gradle`; до появления проекта в `main` job пропускается. Список обязательных контекстов правил репозитория в GitHub обновляется отдельно от этого PR.
 
 Mock-тесты спринта 8 используют минимальные файлы `tests/fixtures/oauth-project`, потому что исходников проекта в `main` нет: они проверяют граф, безопасность и секреты, но не содержимое реальных Dockerfile и realm. Реальные файлы проекта проходят `plan` и `check_plan` только при локальном checkout спринта 8; запуск Keycloak, JWT и сохранность БД проверяет `verify.py` после `apply`.
 

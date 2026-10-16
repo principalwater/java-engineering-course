@@ -110,6 +110,8 @@ module "sprint08" {
   artifact_hashes    = var.deployment_artifact_hashes
   oauth_enabled      = true
   authorization_port = each.key == "sprint08-h2" ? 28382 : 28381
+  tls_port           = each.key == "sprint08-h2" ? 28449 : 28448
+  mail_port          = each.key == "sprint08-h2" ? 28029 : 28028
   network_subnet     = each.key == "sprint08-h2" ? "10.251.8.32/27" : "10.251.8.0/27"
   http_port          = each.key == "sprint08-h2" ? 28092 : 28091
   payments_port      = each.key == "sprint08-h2" ? 29092 : 29091

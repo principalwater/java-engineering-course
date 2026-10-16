@@ -7,7 +7,7 @@ terraform {
 locals {
   persistent = var.profile == "postgresql"
   # Canonical issuer is public (the token iss claim); token and JWK traffic stays on the private network.
-  oauth_issuer   = var.oauth_enabled ? "http://localhost:${var.authorization_port}/realms/storefront-api" : null
+  oauth_issuer   = var.oauth_enabled ? "https://auth.valgrind-home.localhost:${var.tls_port}/realms/storefront-api" : null
   oauth_internal = "http://authorization:8080/realms/storefront-api/protocol/openid-connect"
   services = {
     storefront = {
@@ -21,6 +21,7 @@ locals {
         },
         var.oauth_enabled ? {
           "spring.security.oauth2.client.registration.payments.client-secret" = "oauth_client_secret"
+          "store.sessions.password"                                           = "session_redis_password"
           } : {
           "store.payments.service-token" = "payments_service_token"
         },
@@ -39,6 +40,11 @@ locals {
         "DB_URL=r2dbc:postgresql://store-db:5432/storefront", "DB_USER=storefront",
         ] : [], var.oauth_enabled ? [
         "PAYMENTS_OAUTH_TOKEN_URI=${local.oauth_internal}/token",
+        "SPRING_PROFILES_INCLUDE=shared-sessions", "STORE_SESSIONS_HOST=sessions", "STORE_SESSIONS_PORT=6379",
+        "STORE_SESSIONS_USERNAME=sessions", "STORE_SESSIONS_NAMESPACE=store:session:${var.stack_name}",
+        "SPRING_MAIL_HOST=mailpit", "SPRING_MAIL_PORT=1025", "STORE_RECOVERY_SENDER=noreply@example.test",
+        "STORE_RECOVERY_PUBLIC_BASE_URL=https://shop.valgrind-home.localhost:${var.tls_port}",
+        "SERVER_FORWARD_HEADERS_STRATEGY=framework",
         ] : [], var.analytics_enabled ? [
         "STORE_ANALYTICS_ENABLED=true", "STORE_ANALYTICS_URL=http://clickhouse:8123",
       ] : [])
@@ -170,5 +176,5 @@ resource "docker_container" "application" {
   }
   # The for_each control-plane barrier waits for both databases during initial apply.
   # Running JVMs recover independently; replacing one database must not replace them.
-  depends_on = [module.postgres, module.authorization_postgres, docker_container.authorization]
+  depends_on = [module.postgres, module.authorization_postgres, docker_container.authorization, docker_container.sessions, docker_container.mailpit]
 }

@@ -47,7 +47,8 @@ resource "docker_container" "authorization" {
   # Passwords and the client secret are files; start-authorization.sh exports them inside the process only.
   env = [
     "KC_BOOTSTRAP_ADMIN_USERNAME=admin",
-    "KC_HOSTNAME=http://localhost:${var.authorization_port}",
+    "KC_HOSTNAME=https://auth.valgrind-home.localhost:${var.tls_port}",
+    "KC_PROXY_HEADERS=xforwarded",
     "KC_HTTP_ENABLED=true",
     "KC_DB=postgres",
     "KC_DB_URL=jdbc:postgresql://authorization-db:5432/authorization",

@@ -132,13 +132,15 @@ run "oauth_authorization_server_and_secret_files" {
     analytics_port     = 28131
     oauth_enabled      = true
     authorization_port = 28381
+    tls_port           = 28448
+    mail_port          = 28028
   }
   assert {
     condition = length(docker_container.authorization) == 1 && length(module.authorization_postgres) == 1 && (
       module.authorization_postgres[0].container_name == "java-tofu-sprint08-postgresql-authorization-db" &&
       output.deployment.containers.authorization == "java-tofu-sprint08-postgresql-authorization" &&
       output.deployment.containers.authorization_database == module.authorization_postgres[0].container_name &&
-      output.deployment.issuer == "http://localhost:28381/realms/storefront-api"
+      output.deployment.issuer == "https://auth.valgrind-home.localhost:28448/realms/storefront-api"
     )
     error_message = "OAuth must add Keycloak with its own authorization database and the canonical public issuer."
   }
@@ -169,11 +171,22 @@ run "oauth_authorization_server_and_secret_files" {
       )]) == 1 && length([for mount in docker_container.application["storefront"].volumes : mount if endswith(mount.container_path, "service-token")]) == 0 && (
       length([for mount in docker_container.application["payments"].volumes : mount if endswith(mount.container_path, "service-token") || endswith(mount.host_path, "/oauth_client_secret")]) == 0 &&
       contains(docker_container.application["storefront"].env, "PAYMENTS_OAUTH_TOKEN_URI=http://authorization:8080/realms/storefront-api/protocol/openid-connect/token") &&
-      contains(docker_container.application["payments"].env, "PAYMENTS_OAUTH_ISSUER=http://localhost:28381/realms/storefront-api") &&
+      contains(docker_container.application["payments"].env, "PAYMENTS_OAUTH_ISSUER=https://auth.valgrind-home.localhost:28448/realms/storefront-api") &&
       contains(docker_container.application["payments"].env, "PAYMENTS_OAUTH_JWK_SET_URI=http://authorization:8080/realms/storefront-api/protocol/openid-connect/certs")
     )
     error_message = "Only the storefront receives the client secret; payments validates issuer and JWKs without a preshared bearer."
   }
+  assert {
+    condition = length(docker_container.sessions) == 1 && length(docker_volume.sessions) == 1 && (
+      output.deployment.frontend_url == "https://shop.valgrind-home.localhost:28448" &&
+      contains(docker_container.application["storefront"].env, "SPRING_PROFILES_INCLUDE=shared-sessions") &&
+      length(docker_container.sessions[0].ports) == 0 &&
+      alltrue([for port in docker_container.gateway[0].ports : port.ip == "127.0.0.1" && port.external == 28448]) &&
+      alltrue([for mount in docker_container.gateway[0].volumes : mount.read_only])
+    )
+    error_message = "Shared sessions require retained storage and no public Redis port; TLS keys stay read-only outside state."
+  }
+
 }
 
 run "oauth_h2_payments_without_secret_files" {
@@ -190,13 +203,15 @@ run "oauth_h2_payments_without_secret_files" {
     analytics_port     = 28132
     oauth_enabled      = true
     authorization_port = 28382
+    tls_port           = 28449
+    mail_port          = 28029
   }
   assert {
     condition = length(module.postgres) == 0 && length(module.authorization_postgres) == 1 && (
       length(docker_container.application["payments"].volumes) == 0 &&
       length([for setting in docker_container.application["payments"].env : setting if startswith(setting, "SPRING_CONFIG_IMPORT=")]) == 0 &&
       contains(docker_container.application["storefront"].env, "SPRING_CONFIG_IMPORT=configtree:/run/secrets/") &&
-      output.deployment.token_url == "http://127.0.0.1:28382/realms/storefront-api/protocol/openid-connect/token"
+      output.deployment.token_url == "https://auth.valgrind-home.localhost:28449/realms/storefront-api/protocol/openid-connect/token"
     )
     error_message = "H2 payments has no secret files, so it must not require a configtree; the storefront and Keycloak still keep theirs."
   }
@@ -211,5 +226,5 @@ run "oauth_requires_the_public_issuer_port" {
     project_directory = abspath("tests/fixtures/oauth-project")
     oauth_enabled     = true
   }
-  expect_failures = [var.authorization_port]
+  expect_failures = [var.authorization_port, var.tls_port, var.mail_port]
 }

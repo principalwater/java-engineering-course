@@ -106,7 +106,7 @@ def main():
             print("Independent PostgreSQL recreation: owned order, balance and idempotent ledger receipt survived")
         else:
             if oauth:
-                # Restarting H2 also removes users and WebSessions; the old cookie must lead to login.
+                # Restarting H2 removes accounts; a retained Redis session cannot authenticate without its account.
                 assert urlparse(probe.read(proof["order_path"]).url).path == "/account/login"
             else:
                 try:

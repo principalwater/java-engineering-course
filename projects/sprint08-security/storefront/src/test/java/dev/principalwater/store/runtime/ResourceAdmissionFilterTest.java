@@ -29,6 +29,9 @@ class ResourceAdmissionFilterTest extends ReactiveTestBase {
                 assertEquals(HttpStatus.SERVICE_UNAVAILABLE, rejected.getResponse().getStatusCode());
                 assertEquals("1", rejected.getResponse().getHeaders().getFirst("Retry-After"));
                 filter.filter(exchange("/actuator/health/readiness"), ignored -> Mono.empty()).block(TIMEOUT);
+                var lookalike = exchange("/actuator/health-shopper");
+                filter.filter(lookalike, ignored -> Mono.error(new AssertionError("A health lookalike bypassed admission"))).block(TIMEOUT);
+                assertEquals(HttpStatus.SERVICE_UNAVAILABLE, lookalike.getResponse().getStatusCode());
                 leases.getFirst().dispose();
                 var admitted = exchange("/items");
                 filter.filter(admitted, ignored -> Mono.empty()).block(TIMEOUT);
@@ -37,6 +40,28 @@ class ResourceAdmissionFilterTest extends ReactiveTestBase {
             assertEquals(0, metrics.get("store.http.active").gauge().value());
         } finally { metrics.close(); }
     }
+    @Test
+    void healthHasItsOwnFiniteReserveAndCancellationReleasesIt() {
+        var metrics = new SimpleMeterRegistry();
+        try {
+            var filter = new ResourceAdmissionFilter(new RuntimeProperties(2, 1, 32, 256, 8), metrics);
+            var first = filter.filter(exchange("/actuator/health"), ignored -> Mono.never()).subscribe();
+            var second = filter.filter(exchange("/actuator/health/readiness"), ignored -> Mono.never()).subscribe();
+            try {
+                var rejected = exchange("/actuator/health/liveness");
+                filter.filter(rejected, ignored -> Mono.error(new AssertionError("Health probes are unbounded"))).block(TIMEOUT);
+                assertEquals(HttpStatus.SERVICE_UNAVAILABLE, rejected.getResponse().getStatusCode());
+                first.dispose();
+                var admitted = exchange("/actuator/health/readiness");
+                filter.filter(admitted, ignored -> Mono.empty()).block(TIMEOUT);
+                assertNull(admitted.getResponse().getStatusCode());
+            } finally {
+                first.dispose();
+                second.dispose();
+            }
+        } finally { metrics.close(); }
+    }
+
     private MockServerWebExchange exchange(String path) {
         return MockServerWebExchange.from(MockServerHttpRequest.get(path));
     }

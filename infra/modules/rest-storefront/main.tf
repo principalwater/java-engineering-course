@@ -44,7 +44,7 @@ locals {
         "STORE_SESSIONS_USERNAME=sessions", "STORE_SESSIONS_NAMESPACE=store:session:${var.stack_name}",
         "SPRING_MAIL_HOST=mailpit", "SPRING_MAIL_PORT=1025", "STORE_RECOVERY_SENDER=noreply@example.test",
         "STORE_RECOVERY_PUBLIC_BASE_URL=https://shop.valgrind-home.localhost:${var.tls_port}",
-        "SERVER_FORWARD_HEADERS_STRATEGY=framework",
+        "SERVER_FORWARD_HEADERS_STRATEGY=framework", "SERVER_REACTIVE_SESSION_COOKIE_SECURE=true",
         ] : [], var.analytics_enabled ? [
         "STORE_ANALYTICS_ENABLED=true", "STORE_ANALYTICS_URL=http://clickhouse:8123",
       ] : [])

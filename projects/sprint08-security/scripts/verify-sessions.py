@@ -15,10 +15,12 @@ def copy_browser(source, target):
         target.cookies.set_cookie(copy.copy(cookie))
 
 
-def restart_store(shared, browser):
+def restart_store(shared, *browsers):
     subprocess.run(["docker", "restart", "--time", "30", shared["container"]], check=True, stdout=subprocess.DEVNULL)
     assert published_port(shared["container"], 6379) == shared["port"], "Redis host port changed on restart"
-    wait_for(lambda: urlparse(browser.read("/cabinet").url).path == "/cabinet", "Restored shared session")
+    # У каждой JVM свой Lettuce-клиент: готовность одного не означает восстановления второго.
+    for browser in browsers:
+        wait_for(lambda: urlparse(browser.read("/cabinet").url).path == "/cabinet", "Restored shared session")
 
 
 def memory_pressure(shared, buyer):
@@ -58,7 +60,7 @@ def verify_nodes(endpoints, shared, secrets_directory):
     replica = MarketProbe(endpoints["storefront_replica"], secrets_dir=secrets_directory)
     copy_browser(buyer, replica)
     assert urlparse(replica.read("/cabinet").url).path == "/cabinet", "The second JVM lost authentication"
-    restart_store(shared, replica)
+    restart_store(shared, replica, buyer)
     assert urlparse(buyer.read("/cabinet").url).path == "/cabinet", "The Redis restart lost authentication"
     stolen = MarketProbe(endpoints["storefront"], secrets_dir=secrets_directory)
     copy_browser(buyer, stolen)

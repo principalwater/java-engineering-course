@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -114,6 +115,42 @@ def redis(secrets_directory, administrative=False):
                      'redis-cli --user storefront --no-auth-warning SET financial:balance 1')
         denial = subprocess.check_output(["docker", "exec", name, "sh", "-c", forbidden], text=True)
         assert "NOPERM" in denial, "The catalog cache user must not write financial keys"
+        yield {"container": name, "host": "127.0.0.1", "port": published_port(name, 6379)}
+    finally:
+        if created:
+            stop_containers([name])
+
+
+@contextmanager
+def sessions(secrets_directory):
+    image = configuration()["services"]["redis"]["image"]
+    name = "sprint08-sessions-test-" + uuid.uuid4().hex
+    data = secrets_directory.parent / "session-data"
+    data.mkdir(mode=0o700)
+    # Пустой HostPort Docker меняется после restart; обе JVM должны сохранить один адрес Redis.
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        port = reservation.getsockname()[1]
+    command = ["docker", "run", "-d", "--name", name, "--user", f"{os.getuid()}:{os.getgid()}",
+               "--memory", "128m", "--memory-swap", "128m", "--cpus", "1", "--read-only",
+               "--tmpfs", "/tmp:rw,noexec,nosuid,size=1m,mode=1777", "--label", "dev.principalwater.deployment=" + name,
+               "--mount", f"type=bind,source={data},target=/data", "-p", f"127.0.0.1:{port}:6379", "--entrypoint", "redis-server"]
+    for filename in ("session_redis_users.acl", "session_redis_password"):
+        command += ["--mount", f"type=bind,source={secrets_directory / filename},target=/run/secrets/{filename},readonly"]
+    # INFO разрешён только диагностике изолированного теста, приложение остаётся на минимальном ACL.
+    with (secrets_directory / "session_redis_users.acl").open("a") as acl:
+        password_hash = hashlib.sha256((secrets_directory / "session_redis_password").read_bytes().strip()).hexdigest()
+        acl.write("user probe on #" + password_hash + " -@all +info\n")
+    command += ["--mount", f"type=bind,source={PROJECT / 'sessions/redis.conf'},target=/etc/redis/sessions.conf,readonly"]
+    created = False
+    try:
+        # 2 MiB вместо 64 MiB рабочего стенда: ограниченный HTTP-поток действительно достигает вытеснения.
+        subprocess.run(command + [image, "/etc/redis/sessions.conf", "--maxmemory", "2mb"],
+                       check=True, stdout=subprocess.DEVNULL)
+        created = True
+        ping = 'REDISCLI_AUTH="$(cat /run/secrets/session_redis_password)" redis-cli --user sessions --no-auth-warning ping'
+        wait_for(lambda: subprocess.run(["docker", "exec", name, "sh", "-c", ping],
+                                       capture_output=True).stdout.strip() == b"PONG", "Isolated session Redis")
         yield {"container": name, "host": "127.0.0.1", "port": published_port(name, 6379)}
     finally:
         if created:
@@ -286,7 +323,7 @@ def authorization(secrets_directory):
 
 
 @contextmanager
-def applications(secrets_directory, redis_endpoint, databases=None):
+def applications(secrets_directory, redis_endpoint, databases=None, session_endpoint=None):
     with ExitStack() as stack:
         directory = secrets_directory.parent / "jvm"
         directory.mkdir(mode=0o700)
@@ -314,5 +351,16 @@ def applications(secrets_directory, redis_endpoint, databases=None):
                 environment.update(STORE_PAYMENTS_URL=endpoints["payments"], SPRING_DATA_REDIS_HOST=redis_endpoint["host"],
                                    SPRING_DATA_REDIS_PORT=redis_endpoint["port"], SPRING_DATA_REDIS_USERNAME="storefront",
                                    STORE_CACHE_NAMESPACE="sprint08-jar-test", STORE_SECRETS_LOCATION=str(tree) + "/")
+                if session_endpoint:
+                    shutil.copyfile(secrets_directory / "session_redis_password", tree / "store.sessions.password")
+                    (tree / "store.sessions.password").chmod(0o600)
+                    environment.update(SPRING_PROFILES_INCLUDE="shared-sessions", STORE_SESSIONS_HOST=session_endpoint["host"],
+                                       STORE_SESSIONS_PORT=session_endpoint["port"], STORE_SESSIONS_USERNAME="sessions",
+                                       STORE_SESSIONS_NAMESPACE="store:session:sprint08-native")
             endpoints[service] = stack.enter_context(application(service, artifact, directory, secrets_directory, environment))
+            if service == "storefront" and session_endpoint:
+                replica_directory = directory / "replica"
+                replica_directory.mkdir(mode=0o700)
+                endpoints["storefront_replica"] = stack.enter_context(application(
+                    service, artifact, replica_directory, secrets_directory, {**environment, "SERVER_PORT": "18089"}))
         yield endpoints

@@ -9,9 +9,10 @@ import json
 import os
 from pathlib import Path
 import re
+import ssl
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlencode, urlparse
-from urllib.request import urlopen, build_opener, HTTPCookieProcessor, HTTPRedirectHandler, Request
+from urllib.request import urlopen, build_opener, HTTPCookieProcessor, HTTPRedirectHandler, HTTPSHandler, Request
 import uuid
 
 CSRF_FIELD = "_csrf"
@@ -74,13 +75,14 @@ class Redirects(HTTPRedirectHandler):
 class MarketProbe:
     def __init__(self, base, payments_url=None, secrets_dir=None, token_uri=None):
         self.token_uri = token_uri or os.environ.get("PAYMENTS_OAUTH_TOKEN_URI",
-                "http://localhost:18381/realms/storefront-api/protocol/openid-connect/token")
+                "https://auth.valgrind-home.localhost:8448/realms/storefront-api/protocol/openid-connect/token")
         self.base = base.rstrip("/")
         self.payments_url = payments_url.rstrip("/") if payments_url else None
         self.secrets_dir = Path(secrets_dir or os.environ.get("STORE_SECRETS_DIR", os.environ.get("SECRETS_DIR", Path.home() / ".config/java-engineering-course/sprint08")))
         self.cookies = CookieJar()
         self.redirects = Redirects()
-        self.http = build_opener(HTTPCookieProcessor(self.cookies), self.redirects)
+        self.tls_context = ssl.create_default_context(cafile=os.environ.get("STORE_TLS_CA"))
+        self.http = build_opener(HTTPCookieProcessor(self.cookies), self.redirects, HTTPSHandler(context=self.tls_context))
 
     def read(self, path, data=None, content_type=None):
         headers = {"Accept": "text/html"}
@@ -105,7 +107,7 @@ class MarketProbe:
         page = self.read("/account/login")
         result = self.read("/account/login", urlencode({CSRF_FIELD: page.token, "username": username,
                            "password": password}).encode(), "application/x-www-form-urlencoded")
-        assert urlparse(result.url).path == "/profile", "Account login failed"
+        assert urlparse(result.url).path == "/cabinet", "Account login failed"
         return result
 
     def register_account(self, display_name="HTTP probe"):
@@ -113,8 +115,9 @@ class MarketProbe:
         password = "Probe-" + uuid.uuid4().hex
         page = self.read("/account/register")
         self.read("/account/register", urlencode({CSRF_FIELD: page.token, "username": username,
-                  "displayName": display_name, "password": password}).encode(), "application/x-www-form-urlencoded")
+                  "displayName": display_name, "email": username + "@example.test", "password": password}).encode(), "application/x-www-form-urlencoded")
         self.login(username, password)
+        self.account_credentials = (username, password)
         return username, password
 
     def verify_user_isolation(self, proof, product, credentials):
@@ -172,7 +175,7 @@ class MarketProbe:
         request = Request(self.token_uri, data=urlencode({"grant_type": "client_credentials", "scope": scope}).encode(),
                           headers={"Authorization": "Basic " + basic, "Content-Type": "application/x-www-form-urlencoded"})
         # Сервисный запрос не использует cookie jar браузера: cookie не изолированы по порту.
-        with urlopen(request, timeout=10) as response:
+        with urlopen(request, timeout=10, context=self.tls_context) as response:
             return json.load(response)["access_token"]
 
     def verify_payment(self, proof):
@@ -259,8 +262,8 @@ class MarketProbe:
         order_path = urlparse(order.url).path
         assert self.read(order_path).order_total == 400
         self.read("/orders")
-        profile = self.read("/profile")
-        assert "/profile/analytics" in profile.links
+        profile = self.read("/cabinet")
+        assert "/cabinet/analytics" in profile.links
         assert not self.read("/cart/items").products
         self.read("/analytics")
         print("HTTP: catalog upload, literal search, quantity controls, CSRF, order snapshot, profile and navigation passed")
@@ -279,7 +282,7 @@ class MarketProbe:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default="http://localhost:8088")
+    parser.add_argument("--base-url", default="https://shop.valgrind-home.localhost:8448")
     parser.add_argument("--payments-url")
     parser.add_argument("--secrets-dir", type=Path)
     arguments = parser.parse_args()

@@ -59,7 +59,7 @@ def initialize(directory, repository):
     # Отдельный Redis не вытесняет сессии и не получает прав на публичный кеш каталога.
     session_content = ("user default off\nuser sessions on #" + session_hash +
                        " ~store:session:* -@all +ping +hello +client|setname +client|setinfo"
-                       " +hgetall +hmget +hget +hset +hdel +del +unlink +exists +expire +pexpire"
+                       " +hgetall +hmget +hget +hset +hmset +hdel +del +unlink +exists +expire +pexpire"
                        " +expireat +pexpireat +pttl +ttl +rename\n")
     descriptor, temporary = tempfile.mkstemp(prefix=".session-acl-", dir=directory)
     try:

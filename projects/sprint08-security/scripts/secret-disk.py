@@ -68,6 +68,8 @@ def unlock(directory, repository):
     if directory.is_symlink() or directory.resolve().is_relative_to(repository.resolve()):
         raise ValueError("Secret mount must be a real directory outside the repository")
     directory = directory.resolve()
+    if any(directory.parent.glob(directory.name + ".migration-*")):
+        raise ValueError("An interrupted secret migration must be recovered before continuing")
     image = disk_path(directory)
     mounted = mounted_image(directory)
     if mounted:
@@ -111,6 +113,8 @@ def unlock(directory, repository):
                 raise ValueError("Existing encrypted secret differs from the migration source")
             shutil.copyfile(source, destination)
             destination.chmod(0o600)
+            with destination.open("rb") as copied:
+                os.fsync(copied.fileno())
             if destination.read_bytes() != source.read_bytes():
                 raise RuntimeError("Secret migration verification failed")
         shutil.rmtree(previous)

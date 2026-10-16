@@ -17,6 +17,25 @@ specification.loader.exec_module(store_tls)
 
 
 class LocalTlsTest(unittest.TestCase):
+    def test_ca_key_migration_resumes_after_copy_without_changing_the_key(self):
+        with tempfile.TemporaryDirectory() as root:
+            ca = Path(root) / "ca"
+            ca.mkdir()
+            source = ca / "rootCA-key.pem"
+            source.write_bytes(b"private CA fixture")
+            encrypted = Path(root) / "encrypted"
+            target_directory = encrypted / "local-ca"
+            target_directory.mkdir(parents=True)
+            target = target_directory / source.name
+            target.write_bytes(source.read_bytes())
+            target.chmod(0o400)
+            with patch.object(store_tls.subprocess, "check_output", return_value=str(ca) + "\n"):
+                store_tls.protect_mkcert_key(encrypted)
+                store_tls.protect_mkcert_key(encrypted)
+            self.assertTrue(source.is_symlink())
+            self.assertEqual(b"private CA fixture", source.read_bytes())
+            self.assertEqual(0o400, target.stat().st_mode & 0o777)
+
     def test_certificates_match_both_hosts_and_keep_the_existing_key(self):
         with tempfile.TemporaryDirectory() as root:
             directory = Path(root) / "secrets"
@@ -26,6 +45,9 @@ class LocalTlsTest(unittest.TestCase):
             store_tls.initialize(directory)
             self.assertEqual(original, {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
                                         for path in directory.iterdir()})
+            with patch.object(store_tls, "HOSTS", store_tls.HOSTS + ("extra.valgrind-home.localhost",)):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    store_tls.initialize(directory)
             # load_cert_chain проверяет также соответствие приватного ключа сертификату.
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.load_cert_chain(directory / "tls_certificate.pem", directory / "tls_private_key.pem")

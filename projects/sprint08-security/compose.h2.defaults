@@ -1,0 +1,4 @@
+TLS_PORT=8449
+AUTH_PORT=18382
+AUTH_PUBLIC_URL=https://auth.valgrind-home.localhost:8449
+MAIL_PORT=18029

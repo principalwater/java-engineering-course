@@ -1,5 +1,5 @@
 name: sprint08-security
-include: [compose.oauth.yaml]
+include: [compose.oauth.yaml, compose.security.yaml]
 x-java: &java
   user: "${STORE_UID:-10001}:${STORE_GID:-10001}"
   healthcheck:
@@ -75,6 +75,7 @@ services:
     environment:
       SERVER_PORT: '8080'
       SPRING_PROFILES_ACTIVE: postgresql
+      SPRING_PROFILES_INCLUDE: shared-sessions
       SPRING_CONFIG_IMPORT: configtree:/run/secrets/
       DB_URL: r2dbc:postgresql://store-db:5432/storefront
       DB_USER: storefront
@@ -85,14 +86,26 @@ services:
       SPRING_DATA_REDIS_PORT: '6379'
       SPRING_DATA_REDIS_USERNAME: storefront
       STORE_CACHE_NAMESPACE: sprint08-compose-postgresql
+      STORE_SESSIONS_HOST: sessions
+      STORE_SESSIONS_PORT: '6379'
+      STORE_SESSIONS_USERNAME: sessions
+      STORE_SESSIONS_NAMESPACE: store:session:sprint08-compose-postgresql
+      SPRING_MAIL_HOST: mailpit
+      SPRING_MAIL_PORT: '1025'
+      STORE_RECOVERY_PUBLIC_BASE_URL: https://shop.valgrind-home.localhost:${TLS_PORT:-8448}
+      STORE_RECOVERY_SENDER: noreply@example.test
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+      SERVER_REACTIVE_SESSION_COOKIE_SECURE: 'true'
     secrets:
       - {source: db_password, target: spring.r2dbc.password}
       - {source: oauth_client_secret, target: spring.security.oauth2.client.registration.payments.client-secret}
       - {source: redis_password, target: spring.data.redis.password}
       - {source: seller_password, target: store.seller.bootstrap-password}
+      - {source: session_redis_password, target: store.sessions.password}
     ports: ['127.0.0.1:${WEB_PORT:-8088}:8080']
     depends_on:
       store-db: {condition: service_healthy}
+      sessions: {condition: service_healthy}
   payments:
     <<: *java
     build:
@@ -105,7 +118,7 @@ services:
       PAYMENTS_DB_URL: r2dbc:postgresql://payments-db:5432/payments
       PAYMENTS_DB_USER: payments_runtime
       PAYMENTS_SQL_INIT_MODE: never
-      PAYMENTS_OAUTH_ISSUER: ${AUTH_PUBLIC_URL:-http://localhost:18381}/realms/storefront-api
+      PAYMENTS_OAUTH_ISSUER: ${AUTH_PUBLIC_URL:-https://auth.valgrind-home.localhost:8448}/realms/storefront-api
       PAYMENTS_OAUTH_JWK_SET_URI: http://authorization:8080/realms/storefront-api/protocol/openid-connect/certs
     secrets:
       - {source: payments_runtime_password, target: spring.r2dbc.password}

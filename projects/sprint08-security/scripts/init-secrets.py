@@ -56,7 +56,7 @@ def initialize(directory, repository):
     if session_acl.is_symlink():
         raise ValueError("Secret files must not be symlinks")
     session_hash = hashlib.sha256((directory / "session_redis_password").read_bytes().strip()).hexdigest()
-    # Отдельный Redis не вытесняет сессии и не получает прав на публичный кеш каталога.
+    # Сессии и публичный кеш изолированы разными Redis, паролями и пространствами ключей.
     session_content = ("user default off\nuser sessions on #" + session_hash +
                        " ~store:session:* -@all +ping +hello +client|setname +client|setinfo"
                        " +hgetall +hmget +hget +hset +hmset +hdel +del +unlink +exists +expire +pexpire"

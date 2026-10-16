@@ -1,0 +1,25 @@
+{
+	admin off
+	auto_https off
+}
+
+https://shop.valgrind-home.localhost:8443 {
+	tls /run/secrets/tls_certificate.pem /run/secrets/tls_private_key.pem
+	header Referrer-Policy no-referrer
+	reverse_proxy storefront:8080 {
+		header_up -Forwarded
+		header_up -X-Forwarded-*
+		header_up X-Forwarded-Host shop.valgrind-home.localhost:{$TLS_PORT}
+		header_up X-Forwarded-Proto https
+	}
+}
+
+https://auth.valgrind-home.localhost:8443 {
+	tls /run/secrets/tls_certificate.pem /run/secrets/tls_private_key.pem
+	reverse_proxy authorization:8080 {
+		header_up -Forwarded
+		header_up -X-Forwarded-*
+		header_up X-Forwarded-Host auth.valgrind-home.localhost:{$TLS_PORT}
+		header_up X-Forwarded-Proto https
+	}
+}

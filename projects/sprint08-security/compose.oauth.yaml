@@ -22,7 +22,8 @@ services:
     user: "${STORE_UID:-10001}:${STORE_GID:-10001}"
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_HOSTNAME: "${AUTH_PUBLIC_URL:-http://localhost:18381}"
+      KC_HOSTNAME: "${AUTH_PUBLIC_URL:-https://auth.valgrind-home.localhost:8448}"
+      KC_PROXY_HEADERS: xforwarded
       KC_HTTP_ENABLED: 'true'
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://authorization-db:5432/authorization

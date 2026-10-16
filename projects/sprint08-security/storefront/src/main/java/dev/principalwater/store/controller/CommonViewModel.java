@@ -60,6 +60,13 @@ public class CommonViewModel {
         if (exchange.getRequest().getMethod() != HttpMethod.GET) {
             return Mono.empty();
         }
-        return exchange.getSession().flatMap(session -> Mono.justOrEmpty((String) session.getAttributes().remove("notice")));
+        // ReactiveRedisSessionRepository сохраняет delta при смене id: завершаем CSRF-rotation до изменения уведомления.
+        return csrf(exchange).then(exchange.getSession()).flatMap(session -> {
+            String message = session.getAttribute("notice");
+            if (message != null) {
+                session.getAttributes().remove("notice");
+            }
+            return Mono.justOrEmpty(message);
+        });
     }
 }

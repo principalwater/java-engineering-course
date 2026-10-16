@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -31,6 +32,7 @@ def initialize(directory):
         for host in HOSTS:
             subprocess.run(["openssl", "x509", "-in", str(certificate), "-noout", "-checkhost", host],
                            check=True, stdout=subprocess.PIPE)
+        ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(certificate, key)
         for path in (certificate, key, authority):
             path.chmod(0o600)
         return directory

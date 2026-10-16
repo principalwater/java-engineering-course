@@ -34,6 +34,9 @@ class LocalTlsTest(unittest.TestCase):
                                       capture_output=True)
             self.assertNotEqual(0, rejected.returncode)
             self.assertTrue(all(path.stat().st_mode & 0o777 == 0o600 for path in directory.iterdir()))
+            (directory / "tls_private_key.pem").write_bytes(b"invalid private key")
+            with self.assertRaises(ssl.SSLError):
+                store_tls.initialize(directory)
 
     def test_refuses_incomplete_material_and_symlink_without_overwriting(self):
         with tempfile.TemporaryDirectory() as root:

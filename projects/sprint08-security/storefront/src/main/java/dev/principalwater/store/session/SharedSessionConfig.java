@@ -1,12 +1,16 @@
 package dev.principalwater.store.session;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JavaType;
+import com.fasterxml.jackson.databind.cfg.MapperConfig;
+import com.fasterxml.jackson.databind.jsontype.PolymorphicTypeValidator;
 import dev.principalwater.store.model.StoreUserDetails;
 import dev.principalwater.store.runtime.RuntimeProperties;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.SocketOptions;
 import io.lettuce.core.TimeoutOptions;
 import io.lettuce.core.resource.ClientResources;
+import java.util.Set;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.ReactiveHealthIndicator;
 import org.springframework.boot.autoconfigure.web.ServerProperties;
@@ -21,9 +25,13 @@ import org.springframework.data.redis.connection.RedisPassword;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
-import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.security.jackson2.SecurityJackson2Modules;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextImpl;
+import org.springframework.security.web.server.csrf.DefaultCsrfToken;
 import org.springframework.session.config.ReactiveSessionRepositoryCustomizer;
 import org.springframework.session.data.redis.ReactiveRedisSessionRepository;
 import org.springframework.session.data.redis.config.annotation.SpringSessionRedisConnectionFactory;
@@ -42,6 +50,11 @@ import reactor.core.publisher.Mono;
 @EnableConfigurationProperties(SessionStoreProperties.class)
 @Import(RedisWebSessionConfiguration.class)
 public class SharedSessionConfig {
+    // Формат уже записанных сессий: только используемые Security-типы и штатные контейнеры authorities.
+    private static final Set<String> SESSION_TYPES = Set.of(SecurityContextImpl.class.getName(),
+            UsernamePasswordAuthenticationToken.class.getName(), SimpleGrantedAuthority.class.getName(),
+            StoreUserDetails.class.getName(), DefaultCsrfToken.class.getName(),
+            "java.util.ArrayList", "java.util.Collections$UnmodifiableRandomAccessList");
     @Bean(defaultCandidate = false)
     @SpringSessionRedisConnectionFactory
     public LettuceConnectionFactory sessionConnectionFactory(SessionStoreProperties properties, ClientResources redisResources,
@@ -89,13 +102,21 @@ public class SharedSessionConfig {
     }
 
     /**
-     * JSON вместо JDK-сериализации. Allowlist Spring Security пропускает только известные классы контекста
-     * безопасности и классы с явным mixin; произвольный @class из Redis отвергается при чтении.
+     * JSON вместо JDK-сериализации. Явный набор типов дополняет модули Spring Security: произвольный @class из Redis отвергается при чтении.
      */
     public static RedisSerializer<Object> sessionSerializer(ClassLoader loader) {
         var mapper = new ObjectMapper();
         mapper.registerModules(SecurityJackson2Modules.getModules(loader));
         mapper.addMixIn(StoreUserDetails.class, StoreUserDetailsMixin.class);
-        return new GenericJackson2JsonRedisSerializer(mapper);
+        // Стандартный Security mapper доверяет также Jackson-аннотациям классов; сессии разрешают только явный набор.
+        var allowed = new PolymorphicTypeValidator.Base() {
+            @Override
+            public Validity validateSubClassName(MapperConfig<?> config, JavaType baseType, String name) {
+                return SESSION_TYPES.contains(name) ? Validity.ALLOWED : Validity.DENIED;
+            }
+        };
+        mapper.setPolymorphicTypeValidator(allowed);
+        mapper.activateDefaultTypingAsProperty(allowed, ObjectMapper.DefaultTyping.NON_FINAL, "@class");
+        return new Jackson2JsonRedisSerializer<>(mapper, Object.class);
     }
 }

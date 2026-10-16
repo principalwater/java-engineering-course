@@ -1,5 +1,6 @@
 package dev.principalwater.store.session;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import dev.principalwater.store.TestBase;
 import dev.principalwater.store.model.AccountRole;
 import dev.principalwater.store.model.StoreUser;
@@ -73,6 +74,19 @@ class SessionJsonTest extends TestBase {
     void aForeignClassNamedInRedisIsRejectedInsteadOfInstantiated(String type) {
         byte[] hostile = ("{\"@class\":\"" + type + "\"}").getBytes(StandardCharsets.UTF_8);
         assertThrows(SerializationException.class, () -> serializer.deserialize(hostile));
+    }
+
+    @Test
+    void aFinalTypeIgnoringUnknownFieldsStillNeedsExplicitPermission() {
+        byte[] hostile = ("{\"@class\":\"" + ForeignValue.class.getName() + "\",\"marker\":\"foreign\"}")
+                .getBytes(StandardCharsets.UTF_8);
+        assertThrows(SerializationException.class, () -> serializer.deserialize(hostile));
+    }
+
+    // Условный final DTO зависимости: отсутствие ошибок конструктора не должно разрешать чужой тип из Redis.
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static final class ForeignValue {
+        public String marker;
     }
 
     @Test

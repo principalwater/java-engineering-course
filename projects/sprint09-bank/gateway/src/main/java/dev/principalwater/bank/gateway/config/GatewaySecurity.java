@@ -9,6 +9,7 @@ import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
@@ -71,17 +72,14 @@ public class GatewaySecurity {
                                                         authentication.map(
                                                                 auth ->
                                                                         new AuthorizationDecision(
-                                                                                auth
-                                                                                                instanceof
-                                                                                                JwtAuthenticationToken
-                                                                                                        token
-                                                                                        && "bank-front"
-                                                                                                .equals(
-                                                                                                        token.getToken()
-                                                                                                                .getClaimAsString(
-                                                                                                                        "azp")))))
+                                                                                isBankFront(auth))))
                                         .anyExchange()
                                         .denyAll())
                 .build();
+    }
+
+    private boolean isBankFront(Authentication authentication) {
+        return authentication instanceof JwtAuthenticationToken token
+                && "bank-front".equals(token.getToken().getClaimAsString("azp"));
     }
 }

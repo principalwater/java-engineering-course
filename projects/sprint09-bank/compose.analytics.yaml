@@ -1,0 +1,148 @@
+services:
+  accounts:
+    environment:
+      BANK_ANALYTICS_ENABLED: 'true'
+  front:
+    environment:
+      BANK_ANALYTICS_ENABLED: 'true'
+  cassandra:
+    image: cassandra:5.0.9@sha256:8870ec4d9608abe9160a7d09b51a0f0c13c6a95ea0610266ea58eb7d30a144de
+    entrypoint: [bash, /setup/start-cassandra.sh]
+    command: [cassandra, -f]
+    environment:
+      CASSANDRA_CLUSTER_NAME: bank09
+      CASSANDRA_DC: datacenter1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      CASSANDRA_NUM_TOKENS: '16'
+      MAX_HEAP_SIZE: 384M
+      HEAP_NEWSIZE: 64M
+      JVM_EXTRA_OPTS: -XX:MaxDirectMemorySize=96m -XX:ActiveProcessorCount=2 -XX:ParallelGCThreads=2 -XX:ConcGCThreads=2
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+      - ./scripts/start-cassandra.sh:/setup/start-cassandra.sh:ro
+    read_only: true
+    tmpfs:
+      # Cassandra загружает JNA/LZ4 из tmpfs: noexec запрещает mmap нативных библиотек.
+      - /tmp:rw,exec,nosuid,size=64m,mode=1777
+      - /var/log/cassandra:rw,noexec,nosuid,size=32m,mode=1777
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    stop_grace_period: 45s
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 1.5
+  cassandra-init:
+    image: cassandra:5.0.9@sha256:8870ec4d9608abe9160a7d09b51a0f0c13c6a95ea0610266ea58eb7d30a144de
+    entrypoint: [bash, /setup/init-cassandra.sh]
+    volumes: ['./scripts/init-cassandra.sh:/setup/init-cassandra.sh:ro']
+    secrets: [cassandra_admin_password, cassandra_activity_password]
+    read_only: true
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=8m,mode=1777']
+    depends_on: [cassandra]
+    restart: 'no'
+    mem_limit: 192m
+    memswap_limit: 192m
+    cpus: 0.5
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8-alpine@sha256:2ad322429c7965bde31e3a6389daa2df62db7e1898b1b91d50eb3a7bad716f1f
+    entrypoint: [bash, /setup/start-clickhouse.sh]
+    environment:
+      CLICKHOUSE_SKIP_USER_SETUP: '1'
+    secrets: [analytics_admin_password, analytics_writer_password, analytics_reader_password]
+    volumes:
+      - analytics-hot:/var/lib/clickhouse
+      - analytics-cold:/var/lib/clickhouse-cold
+      - ./scripts/start-clickhouse.sh:/setup/start-clickhouse.sh:ro
+      - ./database/clickhouse-users.xml:/setup/clickhouse-users.xml:ro
+      - ./database/clickhouse-storage.xml:/etc/clickhouse-server/config.d/bank.xml:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,mode=1777
+      - /var/log/clickhouse-server:rw,noexec,nosuid,size=32m,mode=1777
+      - /etc/clickhouse-server/users.d:rw,noexec,nosuid,size=1m,mode=0755
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: 768m
+    memswap_limit: 768m
+    cpus: 1.0
+    ulimits: {nofile: {soft: 262144, hard: 262144}}
+  clickhouse-init:
+    image: clickhouse/clickhouse-server:26.8-alpine@sha256:2ad322429c7965bde31e3a6389daa2df62db7e1898b1b91d50eb3a7bad716f1f
+    entrypoint: [bash, /setup/init-clickhouse.sh]
+    secrets: [analytics_admin_password]
+    volumes:
+      - ./scripts/init-clickhouse.sh:/setup/init-clickhouse.sh:ro
+      - ./database/init-clickhouse.sql:/setup/init-clickhouse.sql:ro
+    read_only: true
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=8m,mode=1777']
+    depends_on: [clickhouse]
+    restart: 'no'
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 0.5
+  analytics:
+    image: bank09-analytics:local
+    build: {context: ., args: {SERVICE: analytics}}
+    user: "${BANK_UID:-10001}:${BANK_GID:-10001}"
+    environment:
+      SERVER_PORT: '8080'
+      SERVER_SHUTDOWN: graceful
+      SPRING_APPLICATION_NAME: analytics
+      SPRING_CLOUD_ZOOKEEPER_CONNECT_STRING: discovery:2181
+      SPRING_CLOUD_ZOOKEEPER_DISCOVERY_INSTANCE_HOST: analytics
+      SPRING_CLOUD_ZOOKEEPER_DISCOVERY_INSTANCE_PORT: '8080'
+      SPRING_CLOUD_ZOOKEEPER_CONFIG_WATCH_ENABLED: 'false'
+      BANK_SECURITY_ISSUER: https://auth-bank.valgrind-home.localhost:8449/realms/bank
+      BANK_SECURITY_JWK_SET_URI: http://authorization:8080/realms/bank/protocol/openid-connect/certs
+      BANK_SECURITY_AUDIENCE: analytics-api
+      SPRING_DATASOURCE_URL: jdbc:postgresql://database:5432/bank?currentSchema=analytics&connectTimeout=5&socketTimeout=15
+      SPRING_DATASOURCE_USERNAME: analytics
+      BANK_ANALYTICS_CLICKHOUSE_URL: http://clickhouse:8123
+      BANK_ANALYTICS_CLICKHOUSE_USER: bank_writer
+      SPRING_CASSANDRA_CONTACT_POINTS: cassandra
+      SPRING_CASSANDRA_PORT: '9042'
+      SPRING_CASSANDRA_LOCAL_DATACENTER: datacenter1
+      SPRING_CASSANDRA_KEYSPACE_NAME: bank_activity
+      SPRING_CASSANDRA_USERNAME: bank_activity
+      SPRING_CASSANDRA_SCHEMA_ACTION: none
+      SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_SERVICE_TOKEN_URI: http://authorization:8080/realms/bank/protocol/openid-connect/token
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_SERVICE_PROVIDER: service
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_SERVICE_AUTHORIZATION_GRANT_TYPE: client_credentials
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_SERVICE_CLIENT_ID: analytics-service
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_SERVICE_SCOPE: accounts.resolve
+    secrets:
+      - {source: db_analytics_password, target: spring.datasource.password}
+      - {source: oauth_analytics_secret, target: spring.security.oauth2.client.registration.service.client-secret}
+      - {source: analytics_writer_password, target: bank.analytics.clickhouse-password}
+      - {source: cassandra_activity_password, target: spring.cassandra.password}
+    read_only: true
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=64m,mode=1777']
+    depends_on:
+      config-seed: {condition: service_completed_successfully}
+      database: {condition: service_started}
+      authorization: {condition: service_started}
+      cassandra-init: {condition: service_completed_successfully}
+      clickhouse-init: {condition: service_completed_successfully}
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1.0
+volumes:
+  cassandra-data:
+  analytics-hot:
+  analytics-cold:
+secrets:
+  cassandra_admin_password:
+    file: ${BANK_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint09}/cassandra_admin_password
+  cassandra_activity_password:
+    file: ${BANK_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint09}/cassandra_activity_password
+  analytics_admin_password:
+    file: ${BANK_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint09}/analytics_admin_password
+  analytics_writer_password:
+    file: ${BANK_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint09}/analytics_writer_password
+  analytics_reader_password:
+    file: ${BANK_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint09}/analytics_reader_password

@@ -24,6 +24,13 @@ def output_lines():
             for name in ("coffee-processed.txt", "coffee-errors.txt")}
 
 
+def pipeline_stats():
+    result = subprocess.run([*COMPOSE, "exec", "-T", "logstash", "curl", "-fsS",
+                             "http://localhost:9600/_node/stats/pipelines"],
+                            cwd=ROOT, text=True, capture_output=True, timeout=15)
+    return json.loads(result.stdout).get("pipelines", {}).get("main", {}) if result.returncode == 0 else {}
+
+
 def check_document(document, fields=FIELDS):
     assert set(document) == fields, f"Unexpected output fields: {set(document)}"
     assert type(document["isNight"]) is bool, "isNight must be a JSON boolean"
@@ -77,6 +84,9 @@ def verify():
         return lines if sum(len(lines[n]) - len(before[n]) for n in lines) >= 7 else None
 
     lines = wait_for(files_ready, "Filebeat → Kafka → Logstash file output")
+    plugins = pipeline_stats()["plugins"]
+    assert [plugin["name"] for plugin in plugins["inputs"]] == ["kafka"], "Unexpected extra input pipeline"
+    assert {plugin["name"] for plugin in plugins["outputs"]} == {"file", "elasticsearch"}, "Unexpected extra output pipeline"
     new = {name: [json.loads(line) for line in rows[len(before[name]):]] for name, rows in lines.items()}
     assert len(new["coffee-processed.txt"]) == 5 and len(new["coffee-errors.txt"]) == 2
     for name, documents in new.items():
@@ -123,12 +133,7 @@ def verify():
     wait_for(replay_finished, "Kafka replay committed offsets")
     # Нулевой lag означает запись в PQ, поэтому отдельно ждём завершения output.
     def outputs_finished():
-        pipeline = subprocess.run([*COMPOSE, "exec", "-T", "logstash", "curl", "-fsS",
-                                   "http://localhost:9600/_node/stats/pipelines"],
-                                  cwd=ROOT, text=True, capture_output=True, timeout=15)
-        if pipeline.returncode:
-            return False
-        main = json.loads(pipeline.stdout).get("pipelines", {}).get("main", {})
+        main = pipeline_stats()
         return main.get("events", {}).get("out", 0) >= len(ids) and main.get("queue", {}).get("events_count") == 0
 
     wait_for(outputs_finished, "Logstash replay output acknowledgements")

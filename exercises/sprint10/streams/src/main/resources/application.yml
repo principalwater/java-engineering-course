@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: profile-event-streams
+  main:
+    web-application-type: none
+  kafka:
+    bootstrap-servers: 127.0.0.1:19591,127.0.0.1:19592
+    streams:
+      application-id: profile-event-enrichment
+      state-dir: ./build/streams-state
+      properties:
+        default.key.serde: org.apache.kafka.common.serialization.Serdes$UUIDSerde
+        default.value.serde: org.springframework.kafka.support.serializer.JsonSerde
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.UUIDSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.add.type.headers: false

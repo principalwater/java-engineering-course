@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: kafka-producer
+  main:
+    web-application-type: none
+  profiles:
+    default: uuid
+  kafka:
+    bootstrap-servers: 127.0.0.1:19591,127.0.0.1:19592
+    admin:
+      fail-fast: true
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+        max.block.ms: 5000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 15000
+---
+spring:
+  config:
+    activate:
+      on-profile: orders
+  kafka:
+    producer:
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.add.type.headers: false

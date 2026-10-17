@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-logging
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: event-logging}
+  template:
+    metadata:
+      labels: {app: event-logging}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001}
+      containers:
+        - name: application
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          ports:
+            - {name: http, containerPort: 8080}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 512Mi}
+          volumeMounts:
+            - {name: temp, mountPath: /tmp}
+          startupProbe:
+            httpGet: {path: /actuator/health/liveness, port: http}
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:
+            httpGet: {path: /actuator/health/liveness, port: http}
+            periodSeconds: 5
+          readinessProbe:
+            httpGet: {path: /actuator/health/readiness, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+      volumes:
+        - name: temp
+          emptyDir: {medium: Memory, sizeLimit: 32Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: event-logging
+spec:
+  selector: {app: event-logging}
+  ports:
+    - {name: http, port: 8080, targetPort: http}

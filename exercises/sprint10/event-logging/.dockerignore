@@ -1,0 +1,7 @@
+*
+!Dockerfile
+!build
+build/*
+!build/libs
+build/libs/*
+!build/libs/event-logging-service.jar

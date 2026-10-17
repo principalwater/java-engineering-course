@@ -17,6 +17,7 @@ jobs:
       sprint08: ${{ steps.detect.outputs.sprint08 }}
       exercises: ${{ steps.detect.outputs.exercises }}
       observability: ${{ steps.detect.outputs.observability }}
+      kafka: ${{ steps.detect.outputs.kafka }}
       infrastructure: ${{ steps.detect.outputs.infrastructure }}
     steps:
       - name: Check out source
@@ -76,6 +77,103 @@ jobs:
             echo "observability=true" >> "$GITHUB_OUTPUT"
           else
             echo "observability=false" >> "$GITHUB_OUTPUT"
+          fi
+          if test -f exercises/sprint10/kafka-clients/build.gradle; then
+            echo "kafka=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "kafka=false" >> "$GITHUB_OUTPUT"
+          fi
+  kafka-exercises:
+    needs: projects
+    if: needs.projects.outputs.kafka == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Java 21 and Gradle cache
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: exercises/sprint10/**/build.gradle
+      - name: Build Kafka applications and test the real Streams topology
+        run: |
+          exercises/sprint02/file-transformer-gradle-plugin/gradlew --no-daemon --console=plain -p exercises/sprint10/kafka-clients installDist
+          exercises/sprint02/file-transformer-gradle-plugin/gradlew --no-daemon --console=plain -p exercises/sprint10/spring-kafka bootJar
+          exercises/sprint02/file-transformer-gradle-plugin/gradlew --no-daemon --console=plain -p exercises/sprint10/streams test bootJar
+          exercises/sprint02/file-transformer-gradle-plugin/gradlew --no-daemon --console=plain -p exercises/sprint10/event-logging bootJar
+      - name: Verify native transactions ISR rebalance batching and crash replay
+        run: |
+          docker compose -p java-sprint10-kafka -f exercises/sprint10/broker/compose.yml up -d --wait --wait-timeout 120
+          exercises/sprint02/file-transformer-gradle-plugin/gradlew --no-daemon --console=plain -p exercises/sprint10/kafka-clients kafkaTest
+          python3 exercises/sprint10/kafka-clients/verify.py
+      - name: Verify Spring Kafka retries SQL recovery and replay
+        run: |
+          python3 exercises/sprint10/spring-kafka/verify.py
+          docker compose -p java-sprint10-kafka -f exercises/sprint10/broker/compose.yml stop
+      - name: Install verified Kubernetes tools
+        run: |
+          echo "KUBECONFIG=$RUNNER_TEMP/sprint10/kubeconfig" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/sprint10-tools/bin" "$RUNNER_TEMP/sprint10"
+          cd "$RUNNER_TEMP/sprint10-tools"
+          curl --fail --location --retry 3 -o kind https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64
+          curl --fail --location --retry 3 -o kind.sha256sum https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64.sha256sum
+          sed 's/kind-linux-amd64/kind/' kind.sha256sum | sha256sum --check
+          curl --fail --location --retry 3 -O https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz
+          curl --fail --location --retry 3 -O https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz.sha256sum
+          sha256sum --check helm-v4.3.1-linux-amd64.tar.gz.sha256sum
+          tar -xzf helm-v4.3.1-linux-amd64.tar.gz
+          curl --fail --location --retry 3 -o kubectl https://dl.k8s.io/release/v1.34.11/bin/linux/amd64/kubectl
+          curl --fail --location --retry 3 -o kubectl.sha256 https://dl.k8s.io/release/v1.34.11/bin/linux/amd64/kubectl.sha256
+          printf '%s  kubectl\n' "$(cat kubectl.sha256)" | sha256sum --check
+          install -m 0755 kind kubectl linux-amd64/helm bin/
+          echo "$RUNNER_TEMP/sprint10-tools/bin" >> "$GITHUB_PATH"
+      - name: Deploy separate Helm releases to an isolated kind cluster
+        run: |
+          docker network create --subnet 10.251.10.32/27 java-sprint10-kind
+          KIND_EXPERIMENTAL_DOCKER_NETWORK=java-sprint10-kind kind create cluster --name java-sprint10 \
+            --config exercises/sprint10/event-logging/kind.yml --kubeconfig "$KUBECONFIG" --wait 180s
+          chmod 600 "$KUBECONFIG"
+          bash exercises/sprint10/event-logging/deploy.sh
+          python3 exercises/sprint10/event-logging/verify.py
+      - name: Collect Kafka diagnostics on failure
+        if: failure()
+        run: |
+          docker compose -p java-sprint10-kafka -f exercises/sprint10/broker/compose.yml logs --no-color --tail 80
+          if test -f "$KUBECONFIG"; then
+            kubectl --kubeconfig "$KUBECONFIG" -n java-sprint10 get pods,pvc
+            kubectl --kubeconfig "$KUBECONFIG" -n java-sprint10 describe pods
+            kubectl --kubeconfig "$KUBECONFIG" -n java-sprint10 logs deployment/event-logging --tail=80
+          fi
+      - name: Upload Kafka test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sprint10-kafka-tests
+          path: |
+            exercises/sprint10/kafka-clients/build/test-results/
+            exercises/sprint10/kafka-clients/build/verification/
+            exercises/sprint10/spring-kafka/target/verification/
+            exercises/sprint10/streams/build/test-results/
+            exercises/sprint10/streams/build/reports/tests/
+            exercises/sprint10/event-logging/target/verification/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Stop owned Kafka and kind resources
+        if: always()
+        run: |
+          docker compose -p java-sprint10-kafka -f exercises/sprint10/broker/compose.yml stop
+          if docker inspect java-sprint10-control-plane > /dev/null 2>&1; then
+            if kubectl --kubeconfig "$KUBECONFIG" --request-timeout=10s -n java-sprint10 get deployment/event-logging; then
+              kubectl --kubeconfig "$KUBECONFIG" --request-timeout=10s -n java-sprint10 scale deployment/event-logging --replicas=0
+            fi
+            if kubectl --kubeconfig "$KUBECONFIG" --request-timeout=10s -n java-sprint10 get statefulset/kafka; then
+              kubectl --kubeconfig "$KUBECONFIG" --request-timeout=10s -n java-sprint10 scale statefulset/kafka --replicas=0
+              kubectl --kubeconfig "$KUBECONFIG" -n java-sprint10 wait --for=delete pod/kafka-0 --timeout=90s
+            fi
+            docker stop java-sprint10-control-plane
           fi
   observability-exercises:
     needs: projects

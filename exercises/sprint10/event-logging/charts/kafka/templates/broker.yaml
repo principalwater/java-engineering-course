@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector: {app: study-kafka}
+  ports:
+    - {name: broker, port: 9092}
+    - {name: controller, port: 9093}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+spec:
+  selector: {app: study-kafka}
+  ports:
+    - {name: broker, port: 9092}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+spec:
+  serviceName: kafka-headless
+  replicas: 1
+  selector:
+    matchLabels: {app: study-kafka}
+  template:
+    metadata:
+      labels: {app: study-kafka}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, runAsUser: 1000, fsGroup: 1000}
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: kafka
+          image: {{ .Values.image | quote }}
+          ports:
+            - {name: broker, containerPort: 9092}
+          env:
+            - {name: CLUSTER_ID, value: {{ .Values.clusterId | quote }}}
+            - {name: KAFKA_NODE_ID, value: "0"}
+            # shortcut: один broker/controller, для HA нужны отдельный quorum и репликация.
+            - {name: KAFKA_PROCESS_ROLES, value: "broker,controller"}
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: "0@kafka-0.kafka-headless.{{ .Release.Namespace }}.svc.cluster.local:9093"
+            - {name: KAFKA_LISTENERS, value: "PLAINTEXT://:9092,CONTROLLER://:9093"}
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "PLAINTEXT://kafka-0.kafka-headless.{{ .Release.Namespace }}.svc.cluster.local:9092"
+            - {name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT"}
+            - {name: KAFKA_CONTROLLER_LISTENER_NAMES, value: "CONTROLLER"}
+            - {name: KAFKA_INTER_BROKER_LISTENER_NAME, value: "PLAINTEXT"}
+            - {name: KAFKA_LOG_DIRS, value: "/var/lib/kafka/data/logs"}
+            - {name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR, value: "1"}
+            - {name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR, value: "1"}
+            - {name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR, value: "1"}
+            - {name: KAFKA_AUTO_CREATE_TOPICS_ENABLE, value: "false"}
+            - {name: KAFKA_HEAP_OPTS, value: "-Xms256m -Xmx256m"}
+          resources:
+            requests: {cpu: 100m, memory: 384Mi}
+            limits: {memory: 640Mi}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/kafka/data}
+          startupProbe:
+            tcpSocket: {port: broker}
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            tcpSocket: {port: broker}
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: {port: broker}
+            periodSeconds: 10
+            failureThreshold: 6
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: {{ .Values.storage }}

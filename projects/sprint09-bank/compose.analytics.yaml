@@ -1,4 +1,55 @@
 services:
+  kafka:
+    image: apache/kafka:4.2.2@sha256:1213eb3943d551e5ed1fca7a4e109001cee35770b66a02a0c37a8964efe09b69
+    # Официальный data-dir доступен группе root; UID остаётся владельцем private secret-файлов.
+    user: "${BANK_UID:-10001}:0"
+    entrypoint: [bash, /setup/start-kafka.sh]
+    environment:
+      LOG_DIR: /tmp/bank-kafka-logs
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx256m -XX:ActiveProcessorCount=2
+      KAFKA_GC_LOG_OPTS: -Xlog:gc=warning:stdout
+      KAFKA_LOG4J_OPTS: -Dlog4j2.configurationFile=/opt/kafka/config/tools-log4j2.yaml
+    secrets: [kafka_admin_password, kafka_analytics_password]
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+      - ./scripts/start-kafka.sh:/setup/start-kafka.sh:ro
+      - ./kafka/server.properties:/setup/kafka/server.properties:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+      # Эти image VOLUME не используются; tmpfs исключает скрытые anonymous volumes.
+      - /etc/kafka/secrets:rw,noexec,nosuid,size=1m,mode=0700
+      - /mnt/shared/config:rw,noexec,nosuid,size=1m,mode=0700
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: 768m
+    memswap_limit: 768m
+    cpus: 1.0
+  kafka-init:
+    image: apache/kafka:4.2.2@sha256:1213eb3943d551e5ed1fca7a4e109001cee35770b66a02a0c37a8964efe09b69
+    user: "${BANK_UID:-10001}:${BANK_GID:-10001}"
+    entrypoint: [bash, /setup/init-kafka.sh]
+    environment:
+      LOG_DIR: /tmp/bank-kafka-logs
+      KAFKA_HEAP_OPTS: -Xms64m -Xmx128m -XX:ActiveProcessorCount=1
+      KAFKA_LOG4J_OPTS: -Dlog4j2.configurationFile=/opt/kafka/config/tools-log4j2.yaml
+    secrets: [kafka_admin_password]
+    volumes: ['./scripts/init-kafka.sh:/setup/init-kafka.sh:ro']
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=8m,mode=1777
+      - /etc/kafka/secrets:rw,noexec,nosuid,size=1m,mode=0700
+      - /mnt/shared/config:rw,noexec,nosuid,size=1m,mode=0700
+      - /var/lib/kafka/data:rw,noexec,nosuid,size=1m,mode=0700
+    depends_on: [kafka]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    restart: 'no'
+    mem_limit: 384m
+    memswap_limit: 384m
+    cpus: 0.5
   accounts:
     environment:
       BANK_ANALYTICS_ENABLED: 'true'
@@ -100,6 +151,8 @@ services:
       SPRING_DATASOURCE_USERNAME: analytics
       BANK_ANALYTICS_CLICKHOUSE_URL: http://clickhouse:8123
       BANK_ANALYTICS_CLICKHOUSE_USER: bank_writer
+      BANK_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      BANK_ANALYTICS_KAFKA_USER: bank_analytics
       SPRING_CASSANDRA_CONTACT_POINTS: cassandra
       SPRING_CASSANDRA_PORT: '9042'
       SPRING_CASSANDRA_LOCAL_DATACENTER: datacenter1
@@ -116,6 +169,7 @@ services:
       - {source: oauth_analytics_secret, target: spring.security.oauth2.client.registration.service.client-secret}
       - {source: analytics_writer_password, target: bank.analytics.clickhouse-password}
       - {source: cassandra_activity_password, target: spring.cassandra.password}
+      - {source: kafka_analytics_password, target: bank.analytics.kafka-password}
     read_only: true
     tmpfs: ['/tmp:rw,noexec,nosuid,size=64m,mode=1777']
     depends_on:
@@ -124,6 +178,7 @@ services:
       authorization: {condition: service_started}
       cassandra-init: {condition: service_completed_successfully}
       clickhouse-init: {condition: service_completed_successfully}
+      kafka-init: {condition: service_completed_successfully}
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     restart: unless-stopped
@@ -132,10 +187,15 @@ services:
     memswap_limit: 512m
     cpus: 1.0
 volumes:
+  kafka-data:
   cassandra-data:
   analytics-hot:
   analytics-cold:
 secrets:
+  kafka_admin_password:
+    file: ${BANK_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint09}/kafka_admin_password
+  kafka_analytics_password:
+    file: ${BANK_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint09}/kafka_analytics_password
   cassandra_admin_password:
     file: ${BANK_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint09}/cassandra_admin_password
   cassandra_activity_password:

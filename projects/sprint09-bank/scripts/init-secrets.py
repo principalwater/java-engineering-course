@@ -16,6 +16,7 @@ SECRET_NAMES = (
     "demo_analyst_password", "analytics_admin_password", "analytics_writer_password",
     "analytics_reader_password",
     "cassandra_admin_password", "cassandra_activity_password",
+    "kafka_admin_password", "kafka_analytics_password",
 )
 
 

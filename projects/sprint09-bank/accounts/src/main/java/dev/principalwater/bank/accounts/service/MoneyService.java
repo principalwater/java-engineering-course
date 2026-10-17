@@ -14,6 +14,7 @@ import dev.principalwater.bank.runtime.error.BankException;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -47,7 +48,8 @@ public class MoneyService {
     public OperationResult execute(InternalOperation command) {
         validateTarget(command);
         Account identity = accounts.provision(command.actor());
-        Instant now = clock.instant();
+        // Точность timestamptz — микросекунды: первый ответ и повтор должны совпадать.
+        Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
         if (!operations.reserve(identity.id(), command, now)) {
             return operations.replay(identity.id(), command);
         }

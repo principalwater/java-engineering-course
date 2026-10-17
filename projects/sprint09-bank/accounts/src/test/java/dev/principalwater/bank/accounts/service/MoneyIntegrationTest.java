@@ -14,6 +14,7 @@ import dev.principalwater.bank.contract.OperationStatus;
 import dev.principalwater.bank.contract.OperationType;
 import dev.principalwater.bank.runtime.error.BankException;
 import dev.principalwater.bank.testing.BankFixtures;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -26,12 +27,13 @@ class MoneyIntegrationTest extends AccountsTestBase {
     @Autowired private ProfileService profiles;
 
     @Test
-    void replayReturnsOriginalOutcomeEvenAfterLaterTransactions() {
+    void replayReturnsOriginalOutcomeWithNanosecondClockEvenAfterLaterTransactions() {
         Actor alice = ready("alice");
         InternalOperation command = BankFixtures.deposit(alice, 10_000);
         OperationResult original = money.execute(command);
         money.execute(BankFixtures.deposit(alice, 5_000));
         assertEquals(original, money.execute(command));
+        assertEquals(Instant.parse("2026-10-17T12:00:00.123456Z"), original.occurredAt());
         assertEquals(15_000, profiles.own(alice).balanceMinor());
         assertEquals(2, count("ledger_entry"));
     }

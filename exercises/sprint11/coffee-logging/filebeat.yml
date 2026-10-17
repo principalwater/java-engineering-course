@@ -1,0 +1,15 @@
+filebeat.inputs:
+  - type: filestream
+    id: coffee-file
+    paths: [/logs/coffee.log]
+    prospector.scanner.check_interval: 1s
+    # В Filebeat 9.0 стандартный fingerprint ждёт 1024 байта; короткому учебному файлу достаточно 64.
+    prospector.scanner.fingerprint.length: 64
+output.kafka:
+  hosts: ["kafka:9092"]
+  topic: coffee-logs
+  required_acks: -1
+  codec.format:
+    string: '%{[message]}'
+logging.level: warning
+monitoring.enabled: false

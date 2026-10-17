@@ -1,0 +1,11 @@
+plugins { id 'application' }
+group = 'dev.principalwater.study'
+version = '1.0-SNAPSHOT'
+java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+repositories { mavenCentral() }
+dependencies {
+    implementation 'org.apache.logging.log4j:log4j-api:2.25.3'
+    runtimeOnly 'org.apache.logging.log4j:log4j-core:2.25.3'
+}
+application { mainClass = 'dev.principalwater.study.coffee.CoffeeManagement' }
+tasks.named('run') { standardInput = System.in }

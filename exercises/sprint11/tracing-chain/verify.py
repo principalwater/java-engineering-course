@@ -31,7 +31,7 @@ def await_result(operation, accepted, timeout=60):
             value = operation()
             if accepted(value):
                 return value
-        except (URLError, TimeoutError):
+        except (URLError, TimeoutError, ConnectionError):
             pass
         if time.monotonic() >= deadline:
             raise AssertionError("Timed out waiting for the required state")
@@ -68,7 +68,7 @@ def check_trace(trace_id):
 
 
 def main():
-    assert get(ZIPKIN + "/api/v2/services")[0] == 200
+    await_result(lambda: get(ZIPKIN + "/api/v2/services"), lambda result: result[0] == 200)
     java = str(Path(os.environ["JAVA_HOME"]) / "bin/java") if "JAVA_HOME" in os.environ else "java"
     output = ROOT / "build/verification"
     output.mkdir(parents=True, exist_ok=True)

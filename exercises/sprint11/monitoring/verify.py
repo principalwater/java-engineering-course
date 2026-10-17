@@ -30,7 +30,7 @@ def await_value(operation, accepted, timeout=90):
             value = operation()
             if accepted(value):
                 return value
-        except (URLError, TimeoutError):
+        except (URLError, TimeoutError, ConnectionError):
             pass
         if time.monotonic() >= deadline:
             raise AssertionError("Timed out waiting for required monitoring evidence")

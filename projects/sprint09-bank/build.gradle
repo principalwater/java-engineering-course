@@ -18,6 +18,7 @@ subprojects {
     spotless {
         java {
             target 'src/**/*.java'
+            forbidWildcardImports()
             googleJavaFormat('1.36.1').aosp()
         }
     }

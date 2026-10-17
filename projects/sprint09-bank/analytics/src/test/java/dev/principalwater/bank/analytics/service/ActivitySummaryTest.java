@@ -1,6 +1,10 @@
 package dev.principalwater.bank.analytics.service;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import dev.principalwater.bank.analytics.dao.CassandraActivityStore;
 import dev.principalwater.bank.analytics.model.AnalyticsEventType;

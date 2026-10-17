@@ -1,0 +1,23 @@
+server:
+  address: 127.0.0.1
+  port: 19888
+spring:
+  application:
+    name: config-server
+  profiles:
+    active: native
+  cloud:
+    config:
+      server:
+        native:
+          search-locations: file:./target/config-repo/
+          add-label-locations: false
+  security:
+    user:
+      name: operator
+      password: ${LAB_OPERATOR_PASSWORD}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

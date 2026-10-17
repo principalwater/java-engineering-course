@@ -1,0 +1,263 @@
+{
+  "realm": "bank-realm",
+  "enabled": true,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "accessTokenLifespan": 300,
+  "roles": {
+    "realm": [
+      {
+        "name": "USER"
+      },
+      {
+        "name": "TRANSFER_WRITE"
+      },
+      {
+        "name": "SERVICE"
+      },
+      {
+        "name": "ACCOUNTS_WRITE"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "bank-ui",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${UI_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "serviceAccountsEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "redirectUris": [
+        "http://127.0.0.1:19930/login/oauth2/code/keycloak"
+      ],
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "roles"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "name": "api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "bank-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "transfer-service",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${TRANSFER_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "redirectUris": [],
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "roles"
+      ],
+      "attributes": {},
+      "protocolMappers": [
+        {
+          "name": "api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "accounts-service",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "other-service",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${OTHER_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "redirectUris": [],
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "roles"
+      ],
+      "attributes": {},
+      "protocolMappers": [
+        {
+          "name": "api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "accounts-service",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "wrong-audience",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${WRONG_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "redirectUris": [],
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "roles"
+      ],
+      "attributes": {},
+      "protocolMappers": [
+        {
+          "name": "api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "another-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "validation-probe",
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "secret": null,
+      "standardFlowEnabled": true,
+      "serviceAccountsEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "redirectUris": [
+        "http://127.0.0.1:19939/callback"
+      ],
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "roles"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "name": "api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "bank-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "test-user",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Study",
+      "lastName": "User",
+      "email": "test-user@example.invalid",
+      "realmRoles": [
+        "USER",
+        "TRANSFER_WRITE"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${LAB_USER_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "read-user",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Study",
+      "lastName": "User",
+      "email": "read-user@example.invalid",
+      "realmRoles": [
+        "USER"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${LAB_USER_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "other-user",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Study",
+      "lastName": "User",
+      "email": "other-user@example.invalid",
+      "realmRoles": [
+        "USER",
+        "TRANSFER_WRITE"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${LAB_USER_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "service-account-transfer-service",
+      "enabled": true,
+      "serviceAccountClientId": "transfer-service",
+      "realmRoles": [
+        "SERVICE",
+        "ACCOUNTS_WRITE"
+      ]
+    },
+    {
+      "username": "service-account-other-service",
+      "enabled": true,
+      "serviceAccountClientId": "other-service",
+      "realmRoles": [
+        "SERVICE",
+        "ACCOUNTS_WRITE"
+      ]
+    },
+    {
+      "username": "service-account-wrong-audience",
+      "enabled": true,
+      "serviceAccountClientId": "wrong-audience",
+      "realmRoles": [
+        "SERVICE",
+        "ACCOUNTS_WRITE"
+      ]
+    }
+  ]
+}

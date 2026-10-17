@@ -346,6 +346,45 @@ jobs:
           java -jar frontend-service/build/libs/frontend-service.jar > target/frontend.log 2>&1 &
           frontend_pid=$!
           python3 verify.py
+      - name: Verify Config Server Gateway and remote Bus lifecycle
+        working-directory: exercises/sprint09/config-bus
+        run: |
+          python3 init.py
+          ../../sprint02/file-transformer-gradle-plugin/gradlew --no-daemon --console=plain bootJar
+          cleanup() { docker compose -p ci-sprint09-config stop; }
+          trap cleanup EXIT
+          docker compose -p ci-sprint09-config up -d --wait --wait-timeout 150
+          python3 verify.py
+      - name: Verify published contracts and real four-service OAuth boundaries
+        working-directory: exercises/sprint09/secured-services
+        run: |
+          python3 init.py
+          ../../sprint02/file-transformer-gradle-plugin/gradlew --no-daemon --console=plain \
+            -Dmaven.repo.local="$PWD/target/maven" bootJar :identity:test :transfer-service:test
+          cleanup() { docker compose -p ci-sprint09-security stop; }
+          trap cleanup EXIT
+          docker compose -p ci-sprint09-security up -d --wait --wait-timeout 150
+          python3 verify.py
+      - name: Collect sprint 09 exercise diagnostics on failure
+        if: failure()
+        run: |
+          if test -f exercises/sprint09/config-bus/target/rabbit.env; then
+            docker compose -p ci-sprint09-config -f exercises/sprint09/config-bus/compose.yml logs --no-color --tail 80
+          fi
+          if test -f exercises/sprint09/secured-services/target/lab.env; then
+            docker compose -p ci-sprint09-security -f exercises/sprint09/secured-services/compose.yml logs --no-color --tail 80
+          fi
+          for logfile in exercises/sprint09/*/target/*.log; do
+            if test -f "$logfile"; then tail -n 80 "$logfile"; fi
+          done
+      - name: Upload sprint 09 contract and identity reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sprint09-contract-identity-tests
+          path: exercises/sprint09/secured-services/*/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Prepare the exercise image mirror
         working-directory: exercises/sprint03/spring-mvc-jdbc
         run: python3 ../../../.github/scripts/prepare-project-ci.py --exercise

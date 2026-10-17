@@ -1,0 +1,35 @@
+plugins {
+    id 'org.springframework.boot' version '3.5.8' apply false
+    id 'io.spring.dependency-management' version '1.1.7' apply false
+}
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'org.springframework.boot'
+    apply plugin: 'io.spring.dependency-management'
+    group = 'dev.principalwater.study'
+    version = '1.0-SNAPSHOT'
+    java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+    repositories { mavenCentral() }
+    dependencyManagement { imports { mavenBom 'org.springframework.cloud:spring-cloud-dependencies:2025.0.0' } }
+    dependencies {
+        implementation 'org.springframework.boot:spring-boot-starter-actuator'
+        implementation 'org.springframework.boot:spring-boot-starter-security'
+    }
+    tasks.named('bootJar') { archiveFileName = "${project.name}.jar" }
+}
+project(':config-server') {
+    dependencies { implementation 'org.springframework.cloud:spring-cloud-config-server' }
+}
+project(':property-printer') {
+    dependencies {
+        implementation 'org.springframework.boot:spring-boot-starter-web'
+        implementation 'org.springframework.cloud:spring-cloud-starter-config'
+        implementation 'org.springframework.cloud:spring-cloud-starter-bus-amqp'
+    }
+}
+project(':gateway') {
+    dependencies {
+        implementation 'org.springframework.cloud:spring-cloud-starter-gateway-server-webflux'
+        implementation 'org.springframework.cloud:spring-cloud-starter-loadbalancer'
+    }
+}

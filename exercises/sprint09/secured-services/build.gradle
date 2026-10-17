@@ -1,0 +1,100 @@
+plugins {
+    id 'org.springframework.boot' version '3.5.8' apply false
+    id 'io.spring.dependency-management' version '1.1.7' apply false
+    id 'org.springframework.cloud.contract' version '4.3.0' apply false
+}
+subprojects {
+    apply plugin: 'java-library'
+    apply plugin: 'io.spring.dependency-management'
+    group = 'dev.principalwater.study.bank'
+    version = '1.0-SNAPSHOT'
+    java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+    repositories { mavenCentral() }
+    dependencyManagement { imports {
+        mavenBom 'org.springframework.boot:spring-boot-dependencies:3.5.8'
+        mavenBom 'org.springframework.cloud:spring-cloud-dependencies:2025.0.0'
+    } }
+    tasks.withType(Test).configureEach {
+        useJUnitPlatform()
+        maxHeapSize = '384m'
+        systemProperty 'maven.repo.local', rootProject.file('target/maven').absolutePath
+    }
+}
+project(':identity') {
+    apply plugin: 'maven-publish'
+    dependencies {
+        api 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+        testImplementation 'org.junit.jupiter:junit-jupiter'
+        testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    }
+    publishing { publications { library(MavenPublication) { from components.java } } }
+}
+configure(subprojects.findAll { it.name != 'identity' }) {
+    apply plugin: 'org.springframework.boot'
+    dependencies {
+        implementation 'org.springframework.boot:spring-boot-starter-actuator'
+        implementation 'org.springframework.boot:spring-boot-starter-validation'
+        testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    }
+    tasks.named('bootJar') { archiveFileName = "${project.name}.jar" }
+}
+project(':bank-ui') {
+    dependencies {
+        implementation 'org.springframework.boot:spring-boot-starter-web'
+        implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
+        implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
+        implementation 'org.springframework.boot:spring-boot-starter-webflux'
+    }
+}
+project(':bank-gateway') {
+    dependencies {
+        implementation project(':identity')
+        implementation 'org.springframework.cloud:spring-cloud-starter-gateway-server-webflux'
+    }
+}
+configure([project(':transfer-service'), project(':accounts-service')]) {
+    dependencies {
+        implementation project(':identity')
+        implementation 'org.springframework.boot:spring-boot-starter-web'
+        testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    }
+}
+project(':transfer-service') {
+    dependencies {
+        implementation 'org.springframework.boot:spring-boot-starter-webflux'
+        implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
+        testImplementation 'org.springframework.cloud:spring-cloud-starter-contract-stub-runner'
+    }
+}
+project(':accounts-service') {
+    apply plugin: 'org.springframework.cloud.contract'
+    apply plugin: 'maven-publish'
+    tasks.named('jar') { archiveClassifier = '' }
+    dependencies {
+        testImplementation 'org.springframework.cloud:spring-cloud-starter-contract-verifier'
+    }
+    contracts {
+        testFramework = org.springframework.cloud.contract.verifier.config.TestFramework.JUNIT5
+        baseClassForTests = 'dev.principalwater.study.bank.accounts.AccountsContractBase'
+    }
+    publishing {
+        publications {
+            library(MavenPublication) {
+                from components.java
+                artifact tasks.named('verifierStubsJar')
+            }
+        }
+    }
+    tasks.named('publishToMavenLocal') { dependsOn tasks.named('contractTest'), project(':identity').tasks.named('publishToMavenLocal') }
+}
+
+configure([project(':identity'), project(':accounts-service')]) {
+    publishing.publications.withType(MavenPublication).configureEach {
+        versionMapping { allVariants { fromResolutionResult() } }
+    }
+}
+
+project(':transfer-service').tasks.named('test') {
+    dependsOn ':accounts-service:publishToMavenLocal'
+    inputs.files(project(':accounts-service').tasks.named('verifierStubsJar'))
+}

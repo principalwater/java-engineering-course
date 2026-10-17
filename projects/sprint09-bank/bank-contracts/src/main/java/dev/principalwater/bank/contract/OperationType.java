@@ -1,3 +1,7 @@
 package dev.principalwater.bank.contract;
 
-public enum OperationType { DEPOSIT, WITHDRAW, TRANSFER }
+public enum OperationType {
+    DEPOSIT,
+    WITHDRAW,
+    TRANSFER
+}

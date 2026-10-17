@@ -6,6 +6,11 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import java.util.UUID;
 
-public record CashRequest(@NotNull UUID operationId, @NotNull OperationType type,
-                          @NotNull @Positive @Max(BankLimits.MAX_AMOUNT_MINOR)
-                          @JsonDeserialize(using = StrictMinorDeserializer.class) Long amountMinor) { }
+public record CashRequest(
+        @NotNull UUID operationId,
+        @NotNull OperationType type,
+        @NotNull
+                @Positive
+                @Max(BankLimits.MAX_AMOUNT_MINOR)
+                @JsonDeserialize(using = StrictMinorDeserializer.class)
+                Long amountMinor) {}

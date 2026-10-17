@@ -2,6 +2,7 @@ plugins {
     id 'base'
     id 'org.springframework.boot' version '3.5.16' apply false
     id 'org.springframework.cloud.contract' version '4.3.4' apply false
+    id 'com.diffplug.spotless' version '8.10.4' apply false
 }
 
 allprojects {
@@ -13,6 +14,13 @@ allprojects {
 subprojects {
     apply plugin: 'java-library'
     apply plugin: 'pmd'
+    apply plugin: 'com.diffplug.spotless'
+    spotless {
+        java {
+            target 'src/**/*.java'
+            googleJavaFormat('1.36.1').aosp()
+        }
+    }
     java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
     dependencies {
         api platform('org.springframework.boot:spring-boot-dependencies:3.5.16')
@@ -32,6 +40,7 @@ subprojects {
         useJUnitPlatform()
         maxHeapSize = '384m'
         maxParallelForks = 1
+        environment 'BANK_CONFIG_IMPORT', 'optional:classpath:bank-common.properties'
         testLogging { events 'failed', 'skipped'; exceptionFormat 'short' }
     }
     tasks.withType(AbstractArchiveTask).configureEach { preserveFileTimestamps = false; reproducibleFileOrder = true }

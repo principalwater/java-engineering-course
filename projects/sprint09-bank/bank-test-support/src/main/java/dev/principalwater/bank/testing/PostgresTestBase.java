@@ -6,10 +6,12 @@ import org.testcontainers.containers.PostgreSQLContainer;
 
 public abstract class PostgresTestBase extends SecurityTestBase {
     // Один контейнер на JVM и стабильные свойства сохраняют кеш Spring TestContext.
-    private static final PostgreSQLContainer<?> DATABASE = new PostgreSQLContainer<>("postgres:17.11-alpine")
-            .withDatabaseName("bank_test");
+    private static final PostgreSQLContainer<?> DATABASE =
+            new PostgreSQLContainer<>("postgres:17.11-alpine").withDatabaseName("bank_test");
 
-    static { DATABASE.start(); }
+    static {
+        DATABASE.start();
+    }
 
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry properties) {

@@ -8,5 +8,5 @@ public final class BankLimits {
     public static final String DEFAULT_PAGE_SIZE = "20";
     public static final String CURRENCY = "RUB";
 
-    private BankLimits() { }
+    private BankLimits() {}
 }

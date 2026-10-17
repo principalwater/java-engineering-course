@@ -1,15 +1,15 @@
-"""Проверка независимого восстановления двух проекций на работающем стенде."""
+"""Проверка брокера и независимого восстановления проекций на работающем стенде."""
 
 import hashlib
 import uuid
 
 
 def verify_analytics_failures(runtime_module, users, containers):
-    """Использует уже проверенные сессии; останавливает только два переданных хранилища."""
+    """Использует уже проверенные сессии; останавливает только переданные Kafka/Cassandra/ClickHouse."""
     runtime = runtime_module
     alice, analyst = users["alice"], users["analyst"]
     runtime.require(analyst is not None, "Projection recovery requires the analyst fixture")
-    for dependency in ("cassandra", "clickhouse"):
+    for dependency in ("kafka", "cassandra", "clickhouse"):
         runtime.require(dependency in containers, "Missing projection dependency: " + dependency)
         runtime.inspect_owned(containers[dependency])
 
@@ -27,7 +27,8 @@ def verify_analytics_failures(runtime_module, users, containers):
 
     for dependency, amount, unavailable_user, unavailable_path, independent_user, independent_path in (
             ("cassandra", 11, alice, "/ui/analytics", analyst, "/ui/analytics/business"),
-            ("clickhouse", 13, analyst, "/ui/analytics/business", alice, "/ui/analytics")):
+            ("clickhouse", 13, analyst, "/ui/analytics/business", alice, "/ui/analytics"),
+            ("kafka", 17, alice, "/ui/analytics", analyst, "/ui/analytics/business")):
         runtime.wait_for("previous source and projection deliveries", lambda: runtime.scalar(containers,
             "SELECT (SELECT count(*) FROM accounts.bank_outbox WHERE target='analytics' AND status='PENDING')"
             " + (SELECT count(*) FROM analytics.analytics_inbox WHERE NOT (cassandra_done AND warehouse_done))") == 0)
@@ -50,14 +51,19 @@ def verify_analytics_failures(runtime_module, users, containers):
             runtime.require(original["balanceMinor"] == account["balanceMinor"] + amount,
                             "Projection outage blocked the committed deposit")
             runtime.wait_for("independent projection delivery", lambda: event_matches(
-                event_id, dependency != "cassandra", dependency != "clickhouse"))
+                event_id, dependency not in ("cassandra", "kafka"), dependency not in ("clickhouse", "kafka")))
             runtime.require(runtime.scalar(containers, ledger_sql) == 1,
                             "Projection outage changed the ledger effect count")
             unavailable = unavailable_user.json("GET", unavailable_path)
             runtime.require(unavailable.get("available") is False
                             and unavailable.get("operationsCount") is None,
                             "Unavailable projection invented a financial count")
-            available(independent_user, independent_path)
+            if dependency == "kafka":
+                other = independent_user.json("GET", independent_path)
+                runtime.require(other.get("available") is False and other.get("operationsCount") is None,
+                                "Broker outage invented a business projection")
+            else:
+                available(independent_user, independent_path)
         finally:
             # Даже провал проверки возвращает исходное хранилище без удаления его volume.
             runtime.change_state(containers, dependency, "start")
@@ -75,4 +81,4 @@ def verify_analytics_failures(runtime_module, users, containers):
         runtime.require(available(alice, "/ui/analytics")["operationsCount"] == personal_after["operationsCount"]
                         and available(analyst, "/ui/analytics/business")["operationsCount"] == business_after["operationsCount"],
                         "Immutable command replay duplicated a projected operation")
-        print("PASS " + dependency + " outage: independent delivery, durable recovery and one money effect")
+        print("PASS " + dependency + " outage: durable projection recovery and one money effect")

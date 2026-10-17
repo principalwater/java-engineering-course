@@ -490,7 +490,7 @@ def load_script(name):
 
 def stop_owned(containers):
     apps = ("edge", "front", "gateway", "cash", "transfer", "accounts", "notifications", "analytics", "authorization")
-    for group in (apps, ("cassandra-init", "clickhouse-init", "config-seed", "cassandra", "clickhouse", "discovery", "database")):
+    for group in (apps, ("cassandra-init", "clickhouse-init", "kafka-init", "config-seed", "cassandra", "clickhouse", "kafka", "discovery", "database")):
         names = []
         for service in group:
             if service in containers:
@@ -516,7 +516,7 @@ def main():
     arguments = parser.parse_args()
     require(re.fullmatch(r"[a-zA-Z0-9_.-]+", arguments.container_prefix) is not None, "Invalid container prefix")
     root = Path(__file__).resolve().parents[1]
-    services = (*CORE_APPS, *STORES, "config-seed", *(("analytics", "cassandra", "clickhouse", "cassandra-init", "clickhouse-init") if arguments.analytics else ()))
+    services = (*CORE_APPS, *STORES, "config-seed", *(("analytics", "cassandra", "clickhouse", "kafka", "cassandra-init", "clickhouse-init", "kafka-init") if arguments.analytics else ()))
     containers = {service: arguments.container_prefix + "-" + service + ("" if arguments.external else "-1") for service in services}
     prepared = False
     try:
@@ -535,8 +535,8 @@ def main():
             if arguments.analytics:
                 compose += ["-f", str(root / "compose.analytics.yaml")]
             run([*compose, "up", "-d", "--build"], timeout=300, env=environment)
-            # Caddy admin выключен; изменение bind-mounted Caddyfile само не перезапускает процесс.
-            run([*compose, "restart", "edge"], timeout=45, env=environment)
+            # Обновляем Caddyfile и loopback mapping после остановки VM; остальные сервисы сохраняются.
+            run([*compose, "up", "-d", "--no-deps", "--force-recreate", "edge"], timeout=45, env=environment)
         users = verify(arguments.base_url, arguments.secrets_dir, containers, arguments.analytics)
         if not arguments.external:
             verify_recovery(users["alice"], users["bob"], containers)

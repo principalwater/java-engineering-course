@@ -1,0 +1,14 @@
+dependencies {
+    api project(':bank-contracts')
+    api 'org.springframework.boot:spring-boot-starter-web'
+    api 'org.springframework.boot:spring-boot-starter-validation'
+    api 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    api 'org.springframework.boot:spring-boot-starter-oauth2-client'
+    api 'org.springframework.boot:spring-boot-starter-jdbc'
+    api 'org.springframework.cloud:spring-cloud-starter-zookeeper-discovery'
+    api 'org.springframework.cloud:spring-cloud-starter-zookeeper-config'
+    api 'org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j'
+    runtimeOnly 'org.postgresql:postgresql'
+    api 'org.flywaydb:flyway-core'
+    runtimeOnly 'org.flywaydb:flyway-database-postgresql'
+}

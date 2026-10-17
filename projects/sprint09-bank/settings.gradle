@@ -1,0 +1,2 @@
+rootProject.name = 'bank'
+include 'bank-contracts', 'bank-runtime', 'bank-test-support', 'accounts', 'cash', 'transfer', 'notifications', 'front', 'gateway', 'analytics'

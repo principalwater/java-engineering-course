@@ -1,0 +1,5 @@
+**
+!build/
+!build/deployment/
+!build/deployment/*.jar
+!Dockerfile

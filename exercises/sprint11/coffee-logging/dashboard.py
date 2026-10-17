@@ -29,9 +29,9 @@ def visualization(object_id, title, aggregation, encoding, mark):
 
 def setup():
     wait_for(lambda: request("/api/status", user="study", kibana=True)["status"]["overall"]["level"] == "available", "Kibana")
-    request("/api/data_views/data_view", {"data_view": {
+    wait_for(lambda: request("/api/data_views/data_view", {"data_view": {
         "id": "coffee-logs", "name": "Coffee Logs", "title": "coffee-logs-*", "timeFieldName": "@timestamp",
-    }, "override": True}, "POST", user="study", kibana=True)
+    }, "override": True}, "POST", user="study", kibana=True), "Kibana authorized Data View creation")
     visualization("coffee-activity", "Активность по времени", {
         "date_histogram": {"field": "@timestamp", "fixed_interval": "1m", "min_doc_count": 0},
     }, {"x": {"field": "key", "type": "temporal", "title": "Время приёма, UTC", "scale": {"type": "utc"}, "axis": {"format": "%H:%M"}},

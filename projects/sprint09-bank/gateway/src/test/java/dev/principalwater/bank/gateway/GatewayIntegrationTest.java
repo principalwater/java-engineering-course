@@ -84,6 +84,14 @@ class GatewayIntegrationTest extends SecurityTestBase {
                             JWT.token(
                                     "alice",
                                     "bank-front",
+                                    null,
+                                    "accounts.read",
+                                    JWT.issuer(),
+                                    Instant.now().plusSeconds(300),
+                                    "alice"),
+                            JWT.token(
+                                    "alice",
+                                    "bank-front",
                                     List.of("wrong-api"),
                                     "accounts.read",
                                     JWT.issuer(),

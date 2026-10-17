@@ -32,8 +32,9 @@ public class ApiJwtConfiguration {
         OAuth2TokenValidator<Jwt> audience =
                 jwt -> {
                     List<String> audiences = jwt.getAudience();
-                    return audiences.contains(BankTokenProfile.USER_AUDIENCE)
-                                    || audiences.contains(properties.audience())
+                    return audiences != null
+                                    && (audiences.contains(BankTokenProfile.USER_AUDIENCE)
+                                            || audiences.contains(properties.audience()))
                             ? OAuth2TokenValidatorResult.success()
                             : OAuth2TokenValidatorResult.failure(
                                     new OAuth2Error(

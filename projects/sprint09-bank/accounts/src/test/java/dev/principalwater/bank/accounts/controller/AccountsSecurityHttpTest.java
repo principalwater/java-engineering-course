@@ -179,6 +179,16 @@ class AccountsSecurityHttpTest extends AccountsTestBase {
                                 expires,
                                 "alice")),
                 Arguments.of(
+                        "missing audience",
+                        JWT.token(
+                                "alice-sub",
+                                "bank-front",
+                                null,
+                                "accounts.read",
+                                JWT.issuer(),
+                                expires,
+                                "alice")),
+                Arguments.of(
                         "audience",
                         JWT.token(
                                 "alice-sub",

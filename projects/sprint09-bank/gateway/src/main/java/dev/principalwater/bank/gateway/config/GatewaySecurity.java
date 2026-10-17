@@ -46,7 +46,7 @@ public class GatewaySecurity {
         OAuth2TokenValidator<Jwt> userAudience =
                 jwt -> {
                     List<String> audiences = jwt.getAudience();
-                    return audiences.contains(BankTokenProfile.USER_AUDIENCE)
+                    return audiences != null && audiences.contains(BankTokenProfile.USER_AUDIENCE)
                             ? OAuth2TokenValidatorResult.success()
                             : OAuth2TokenValidatorResult.failure(
                                     new OAuth2Error(

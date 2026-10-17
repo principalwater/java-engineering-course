@@ -1,0 +1,13 @@
+server:
+  address: 127.0.0.1
+  port: 19301
+spring:
+  application:
+    name: chain-${server.port}
+management:
+  endpoints.web.exposure.include: health
+  endpoint.health.probes.enabled: true
+  zipkin.tracing.endpoint: http://127.0.0.1:19411/api/v2/spans
+  tracing:
+    propagation.type: W3C
+    sampling.probability: 1.0

@@ -24,6 +24,7 @@
 | `sprint07-h2` | `module.sprint07["sprint07-h2"]` | [Витрина и платежи с H2](../projects/sprint07-rest-service/) | `28090` | Платежи: `29090` | `28130` |
 | `sprint08-postgresql` | `module.sprint08["sprint08-postgresql"]` | [Защищённые витрина и платежи с PostgreSQL](../projects/sprint08-security/) | HTTPS `28448` | HTTP-диагностика: `28091`, платежи: `29091`, Keycloak: `28381` | `28131` |
 | `sprint08-h2` | `module.sprint08["sprint08-h2"]` | [Защищённые витрина и платежи с H2](../projects/sprint08-security/) | HTTPS `28449` | HTTP-диагностика: `28092`, платежи: `29092`, Keycloak: `28382` | `28132` |
+| `sprint09` | `module.sprint09[0]` | Банк: шесть Java-сервисов | HTTPS `28450` | Внутри сети | Внутри сети, вместе с Cassandra |
 | `docker-exercise` | `module.docker_exercise[0]` | [Docker: маршрутизация и JDBC](../exercises/supplements/docker/) | `28380` | Внутри сети | - |
 | `mvc-exercise` | `module.mvc_exercise[0]` | [MVC/JDBC WAR с H2](../exercises/sprint03/spring-mvc-jdbc/) | `28081/spring-web-demo` | Та же точка входа | - |
 
@@ -125,6 +126,51 @@ tofu -chdir=infra output -json deployment
 - Boot/Java-процессы без root используют числовые UID:GID владельца на хосте, чтобы читать смонтированные секреты с правами `0600` на Linux. Пароли монтируются только для чтения; Java/entrypoint получают их при запуске. Содержимое секретов не попадает в переменные Terraform, аргументы сборки образа, конфигурацию контейнера и state.
 - У платежей PostgreSQL создаёт схему от `payments_owner`, затем отдельную роль `payments_runtime`. Приложение получает только `payments_runtime_password` и запускается с `PAYMENTS_SQL_INIT_MODE=never`; владелец БД и его пароль ему недоступны. Роль может добавлять решения и журнал, но не изменять или удалять их; изменяется только баланс кошелька. Init-wrapper копирует host-owned файл `0600` в приватный `tmpfs` для UID PostgreSQL. Проверка готовности ждёт финальный TCP listener, чтобы исключить временный Unix socket процесса initdb.
 - Блоги переиспользуют существующую интеграцию PostgreSQL/ClickHouse с ролью чтения и ограниченными привилегиями. Аналитика опциональна. File secrets - локальный способ передачи пароля, а не шифрование или замена Vault; рабочему окружению нужны внешний secret manager и отдельные настройки TLS/аутентификации.
+
+## Банк: спринт 9
+
+Селектор `sprint09` создаёт отдельные Docker-ресурсы для Front, Gateway, Accounts, Cash, Transfer, Notifications, PostgreSQL, ZooKeeper, Keycloak и Caddy. Аналитика включается через `--analytics`: добавляются Java-сервис Analytics, Cassandra с парольной аутентификацией и ClickHouse с отдельными hot/cold-томами. Шесть постоянных томов создаются независимо от этого флага и защищены `prevent_destroy`; отключение аналитики сохраняет её данные.
+
+При лимите Docker VM `8 GiB` запускайте полные Compose- и native-стенды последовательно: совместный запуск вызвал OOM и перезапуски Cassandra. Перед переключением остановите контейнеры предыдущего стенда, сохранив его тома и state.
+
+У стенда префикс `java-tofu-sprint09`, подсеть `10.251.9.96/27` и единственный опубликованный порт `127.0.0.1:28450`. Адрес банка — `https://bank.valgrind-home.localhost:28450`, issuer — `https://auth-bank.valgrind-home.localhost:28450/realms/bank`. Compose использует другие имена ресурсов, подсеть и порт; его контейнеры и данные не подключаются к native state.
+
+Gradle `check packageDeployment` проверяет сервисы, UI и producer/consumer-контракты и готовит семь `build/deployment/<service>.jar`. Java-образы используют проектный Dockerfile с аргументом `SERVICE`; образы Keycloak и Caddy — собственные Dockerfile проекта. Для UI нужен Node `24.4.0`; Java — `21`.
+
+Для деклараций с YAML anchors и merge-массивами нужен закреплённый PyYAML. Установите его в отдельный Python runtime:
+
+```sh
+python3 -m venv "$HOME/.local/share/java-engineering-course/infra-python"
+. "$HOME/.local/share/java-engineering-course/infra-python/bin/activate"
+python3 -m pip install -r infra/requirements.txt
+
+python3 infra/deploy.py sprint09 plan
+python3 infra/deploy.py sprint09 apply
+python3 infra/verify.py sprint09
+```
+
+Если исходники банка находятся в соседнем checkout, передавайте один и тот же `--project-dir` при `plan`, `apply` и проверке:
+
+```sh
+python3 infra/deploy.py sprint09 plan --analytics \
+  --project-dir "$PWD/../java-engineering-course-sprint09-project/projects/sprint09-bank"
+python3 infra/deploy.py sprint09 apply --analytics \
+  --project-dir "$PWD/../java-engineering-course-sprint09-project/projects/sprint09-bank"
+python3 infra/verify.py sprint09 --analytics \
+  --project-dir "$PWD/../java-engineering-course-sprint09-project/projects/sprint09-bank"
+```
+
+`deploy.py` читает проектные `compose.yaml` и `compose.analytics.yaml` через `safe_load`, сохраняет нормализованный публичный JSON в каталоге state `runtime/`, а Docker provider создаёт ресурсы по этим декларациям. Используются environment, file secrets, read-only bind mounts, named volumes, tmpfs, resource limits, entrypoint/command, `no-new-privileges`, сброс capabilities и `nofile`. Для существующих сервисов analytics overlay объединяет только environment, сохраняя остальные настройки; другие правила слияния требуют явной поддержки. Сеть, имена и единственный TLS-порт принадлежат native модулю. Допустимы Java build context `.` с единственным аргументом `SERVICE` и отдельные context `./authorization`, `./edge`; изменение `config/jvm-network.security` вызывает пересборку Java-образов. Неизвестные сервисы, поля, secret settings в environment, дополнительные порты и неподдерживаемые build/mount/dependency/network-настройки отклоняются.
+
+Порядок создания: хранилища → авторизация → конечные init-контейнеры → приложения → Caddy. Init-контейнеры завершаются штатно, а postcondition проверяет код `0`. Docker healthchecks и постоянная платформа мониторинга не добавляются. `infra/verify.py` вызывает внешний API проектного verifier, затем пересоздаёт только native PostgreSQL-контейнер: сверяет точные остатки, receipts и журнал, ждёт восстановления HTTP и нового OIDC-входа, завершает сессии и требует пустого повторного плана. Проектный `verify-runtime.py --external` использует тот же API без управления контейнерами и secret disk; дополнительные managed fault probes выполняет job `sprint09`.
+
+Исходные секреты по умолчанию находятся в `~/.config/java-engineering-course/tofu/sprint09/`: на Mac это AES-256-том с ключом в Keychain; на изолированном Linux CI разрешены private-файлы при `BANK_ALLOW_PLAINTEXT_TEST_SECRETS=true`. Keycloak материализует значения только в private tmpfs. OpenTofu получает read-only пути. Публичные копии realm и Caddy сохраняют placeholders, меняется только порт `8449` → `28450`; ключ CA в контейнеры не передаётся. Полный комплект ранее выданных leaf/key/CA можно перенести в отдельный AES-источник без открытия приватного ключа CA. Для нового сертификата сначала откройте прежнее зашифрованное хранилище доверенного CA. Production требует внешнего secret manager и отдельных настроек TLS; процесс приложения или БД получает необходимые credentials в памяти.
+
+Сохранённый план защищён от изменения любого из семи JAR, исходников, инфраструктуры и нормализованных runtime-файлов. Значения secret-файлов проверяются перед сохранением публичного JSON и при проверке плана, включая многострочные значения. После `apply`, в том числе неуспешного, driver устанавливает `0600` для state и его резервной копии. Документация и screenshots не входят в исполняемый fingerprint.
+
+Локально проверены реальные core/analytics saved plans на Docker provider `4.6.0`: `28` и `36` новых ресурсов соответственно, без изменений и удаления чужих ресурсов. Точные значения secret-файлов отсутствовали в обоих планах, а после native `apply --analytics` — в state и конфигурациях контейнеров. Полный native-прогон подтвердил TLS/OIDC, семь регистраций discovery, общую конфигурацию, деньги и replay, личную/ролевую аналитику, сохранность финансовых данных после пересоздания PostgreSQL и пустой повторный план. Конечная нагрузка: `24` команды, `4` клиента, `24` повтора; наблюдаемый p95 `0.153 s`, без заявления SLA. Во время отдельного serial-прогона новых перезапусков Cassandra не было. После проверки остановлены только native-контейнеры, AES-источник закрыт, state и шесть томов сохранены. Mock-тесты отдельно проверяют граф, изоляцию, ограничения и неизменность storage identities на минимальных JSON fixtures.
+
+Job `sprint09` активируется по `projects/sprint09-bank/build.gradle` на проверяемом head: Java `21`, Node `24.4.0`, Gradle `check packageDeployment`, Python discovery всех `scripts/test_*.py` для secrets/TLS/runtime-границ и `verify-runtime.py --analytics`. Сохраняются JAR, JUnit/HTML-отчёты, stubs и сгенерированные producer-тесты. При отсутствии проекта job пропускается; `/approve` проверяет marker и результат точного head, сохраняя прежние app ID и протокол согласования. Серверный ruleset обновляется отдельно.
 
 ## Проверка
 

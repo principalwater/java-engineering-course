@@ -16,6 +16,7 @@ jobs:
       sprint07: ${{ steps.detect.outputs.sprint07 }}
       sprint08: ${{ steps.detect.outputs.sprint08 }}
       exercises: ${{ steps.detect.outputs.exercises }}
+      observability: ${{ steps.detect.outputs.observability }}
       infrastructure: ${{ steps.detect.outputs.infrastructure }}
     steps:
       - name: Check out source
@@ -70,6 +71,77 @@ jobs:
             echo "infrastructure=true" >> "$GITHUB_OUTPUT"
           else
             echo "infrastructure=false" >> "$GITHUB_OUTPUT"
+          fi
+          if test -f exercises/sprint11/tracing-chain/build.gradle; then
+            echo "observability=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "observability=false" >> "$GITHUB_OUTPUT"
+          fi
+  observability-exercises:
+    needs: projects
+    if: needs.projects.outputs.observability == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Java 21 and Gradle cache
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: exercises/sprint11/**/build.gradle
+      - name: Build the tracing, monitoring and logging applications
+        run: |
+          exercises/sprint02/file-transformer-gradle-plugin/gradlew --no-daemon --console=plain -p exercises/sprint11/tracing-chain bootJar
+          exercises/sprint02/file-transformer-gradle-plugin/gradlew --no-daemon --console=plain -p exercises/sprint11/monitoring bootJar
+          exercises/sprint02/file-transformer-gradle-plugin/gradlew --no-daemon --console=plain -p exercises/sprint11/coffee-logging installDist
+      - name: Verify real Zipkin spans and context isolation
+        working-directory: exercises/sprint11/tracing-chain
+        run: |
+          docker compose -p java-sprint11-tracing -f compose.yml up -d
+          python3 verify.py
+          docker compose -p java-sprint11-tracing -f compose.yml stop
+      - name: Verify metrics and the firing-to-resolved mail cycle
+        working-directory: exercises/sprint11/monitoring
+        run: |
+          python3 init.py
+          docker compose -p java-sprint11-monitoring -f compose.yml up -d --build
+          python3 verify.py --alerts
+          docker compose -p java-sprint11-monitoring -f compose.yml stop orders
+          docker compose -p java-sprint11-monitoring -f compose.yml stop
+      - name: Verify Filebeat, Kafka, Logstash, Elasticsearch and dashboard transfer
+        working-directory: exercises/sprint11/coffee-logging
+        run: |
+          python3 init.py
+          docker compose -p java-sprint11-coffee -f compose.yml up -d --wait --wait-timeout 180 kafka elasticsearch
+          python3 bootstrap.py
+          docker compose -p java-sprint11-coffee -f compose.yml exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic coffee-logs --partitions 1 --replication-factor 1
+          python3 verify.py
+          docker compose -p java-sprint11-coffee -f compose.yml up -d kibana
+          python3 dashboard.py
+      - name: Collect observability diagnostics on failure
+        if: failure()
+        run: |
+          docker compose -p java-sprint11-tracing -f exercises/sprint11/tracing-chain/compose.yml logs --no-color --tail 100
+          if test -f exercises/sprint11/monitoring/target/lab.env; then
+            docker compose -p java-sprint11-monitoring -f exercises/sprint11/monitoring/compose.yml logs --no-color --tail 100
+          fi
+          if test -f exercises/sprint11/coffee-logging/target/logstash.env; then
+            docker compose -p java-sprint11-coffee -f exercises/sprint11/coffee-logging/compose.yml logs --no-color --tail 100
+          fi
+      - name: Stop owned observability containers
+        if: always()
+        run: |
+          docker compose -p java-sprint11-tracing -f exercises/sprint11/tracing-chain/compose.yml stop
+          if test -f exercises/sprint11/monitoring/target/lab.env; then
+            docker compose -p java-sprint11-monitoring -f exercises/sprint11/monitoring/compose.yml stop orders
+            docker compose -p java-sprint11-monitoring -f exercises/sprint11/monitoring/compose.yml stop
+          fi
+          if test -f exercises/sprint11/coffee-logging/target/logstash.env; then
+            docker compose -p java-sprint11-coffee -f exercises/sprint11/coffee-logging/compose.yml stop filebeat logstash kibana
+            docker compose -p java-sprint11-coffee -f exercises/sprint11/coffee-logging/compose.yml stop elasticsearch kafka
           fi
   infrastructure:
     needs: projects

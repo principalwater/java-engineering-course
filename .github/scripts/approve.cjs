@@ -11,6 +11,7 @@ const REQUIRED_JOBS = new Map([
   ['sprint06', 'projects/sprint06-reactive-storefront/build.gradle'],
   ['sprint07', 'projects/sprint07-rest-service/build.gradle'],
   ['sprint08', 'projects/sprint08-security/build.gradle'],
+  ['observability-exercises', 'exercises/sprint11/tracing-chain/build.gradle'],
 ]);
 
 function requireCondition(condition, message) {

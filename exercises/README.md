@@ -12,6 +12,7 @@
 | 6 | [Каталог упражнений](sprint06/README.md): Java Flow, R2DBC, MySQL и HTML-приложение WebFlux |
 | 7 | [Каталог упражнений](sprint07/README.md): OpenAPI, REST API автомастерской и Spring Data Redis |
 | 8 | [Каталог упражнений](sprint08/README.md): OIDC login, Keycloak и защищённая пара WebFlux-сервисов |
+| 11 | [Каталог упражнений](sprint11/README.md): Micrometer/Zipkin, Prometheus/Grafana и цепочка логов до Elasticsearch/Kibana |
 
 У каждого решения свои исходники, версии инструментов, команды запуска и результаты проверки. Материалы оформлены как описание выполненной работы, без переноса теории и банка ответов тренажёра.
 

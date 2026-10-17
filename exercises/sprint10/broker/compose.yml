@@ -1,0 +1,54 @@
+x-common: &common
+  image: apache/kafka:4.0.0@sha256:3f7b939115cd4872e9cee9369d80bd69712fde55f9902f46d793f64848dedc75
+  mem_limit: 512m
+  healthcheck:
+    test: [CMD, /opt/kafka/bin/kafka-topics.sh, --bootstrap-server, localhost:9092, --list]
+    interval: 5s
+    timeout: 5s
+    retries: 30
+x-environment: &environment
+  # shortcut: один controller для локального стенда; для HA нужен отдельный нечётный quorum.
+  KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker1:9093
+  KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+  KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 2
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+  KAFKA_DEFAULT_REPLICATION_FACTOR: 2
+  KAFKA_MIN_INSYNC_REPLICAS: 2
+  KAFKA_LOG_DIRS: /var/lib/kafka/data
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+  KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+  KAFKA_HEAP_OPTS: -Xms256m -Xmx256m
+  CLUSTER_ID: uBlRBGxLT1O_ShF9v2yTlg
+services:
+  broker1:
+    <<: *common
+    hostname: broker1
+    environment:
+      <<: *environment
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:19591
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://broker1:9092,EXTERNAL://127.0.0.1:19591
+    ports: ["127.0.0.1:19591:19591"]
+    volumes: ["broker1-storage:/var/lib/kafka/data"]
+  broker2:
+    <<: *common
+    hostname: broker2
+    environment:
+      <<: *environment
+      KAFKA_NODE_ID: 2
+      KAFKA_PROCESS_ROLES: broker
+      KAFKA_LISTENERS: INTERNAL://:9092,EXTERNAL://:19592
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://broker2:9092,EXTERNAL://127.0.0.1:19592
+    ports: ["127.0.0.1:19592:19592"]
+    volumes: ["broker2-storage:/var/lib/kafka/data"]
+volumes:
+  broker1-storage:
+  broker2-storage:
+networks:
+  default:
+    ipam:
+      config: [{subnet: 10.251.10.0/27}]

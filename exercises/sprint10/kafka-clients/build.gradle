@@ -1,0 +1,21 @@
+plugins { id 'application' }
+group = 'dev.principalwater.study'
+version = '1.0-SNAPSHOT'
+java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+repositories { mavenCentral() }
+dependencies {
+    implementation 'org.apache.kafka:kafka-clients:4.0.0'
+    runtimeOnly 'org.slf4j:slf4j-simple:1.7.36'
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.13.4'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.13.4'
+}
+application { mainClass = 'dev.principalwater.study.kafka.Workshop' }
+tasks.named('test') { useJUnitPlatform { excludeTags 'kafka' } }
+tasks.register('kafkaTest', Test) {
+    dependsOn tasks.named('installDist')
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform { includeTags 'kafka' }
+    testLogging { events 'passed', 'failed'; showStandardStreams = true }
+    maxHeapSize = '256m'
+}

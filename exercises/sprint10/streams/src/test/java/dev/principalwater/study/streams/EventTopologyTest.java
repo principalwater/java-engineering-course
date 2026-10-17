@@ -50,7 +50,10 @@ class EventTopologyTest {
             broker.consumeFromAnEmbeddedTopic(consumer, true, DETAILS);
             // seekToEnd ленивый: фиксируем позицию до отправки fixtures, иначе новый результат можно пропустить.
             consumer.assignment().forEach(consumer::position);
-            producer.send(PROFILES, UUID.randomUUID(), new UserProfile("Other", "Moscow")).get();
+            UUID otherKey = UUID.randomUUID();
+            var otherProfile = new UserProfile("Other", "Moscow");
+            producer.send(PROFILES, otherKey, otherProfile).get();
+            awaitProfile(otherKey, otherProfile);
             if (revisions > 0) {
                 expected = new UserProfile("Vasily", "Kaliningrad");
                 producer.send(PROFILES, key, expected).get();

@@ -18,7 +18,8 @@ public final class ProfileRules {
                 || normalized.indexOf(' ') <= 0
                 || normalized.codePoints().anyMatch(Character::isISOControl)
                 || birthDate == null
-                || !birthDate.isBefore(today.minusYears(ADULT_AGE_YEARS))) {
+                || birthDate.isAfter(today)
+                || !birthDate.plusYears(ADULT_AGE_YEARS).isBefore(today)) {
             throw new BankException(BankError.INVALID_PROFILE);
         }
         return normalized;

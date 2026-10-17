@@ -1,0 +1,21 @@
+services:
+  rabbitmq:
+    image: rabbitmq@sha256:294b01e1796a8acede4619f32a1c394fae1f8021e57986ea01aad38dc2a4f502
+    hostname: study-rabbit
+    environment:
+      RABBITMQ_DEFAULT_USER: study
+    env_file: target/rabbit.env
+    ports: ["127.0.0.1:19472:5672", "127.0.0.1:19473:15672"]
+    volumes: ["rabbit-data:/var/lib/rabbitmq"]
+    mem_limit: 512m
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+volumes:
+  rabbit-data:
+networks:
+  default:
+    ipam:
+      config: [{subnet: 10.251.9.0/28}]

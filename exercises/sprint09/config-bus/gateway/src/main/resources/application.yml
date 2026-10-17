@@ -1,0 +1,29 @@
+server:
+  address: 127.0.0.1
+  port: 19800
+spring:
+  application:
+    name: application-gateway
+  cloud:
+    discovery:
+      client:
+        simple:
+          instances:
+            property-printer-service:
+              - uri: http://127.0.0.1:19901
+              - uri: http://127.0.0.1:19902
+    gateway:
+      server:
+        webflux:
+          httpclient:
+            connect-timeout: 3000
+            response-timeout: 15s
+  security:
+    user:
+      name: operator
+      password: ${LAB_OPERATOR_PASSWORD}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

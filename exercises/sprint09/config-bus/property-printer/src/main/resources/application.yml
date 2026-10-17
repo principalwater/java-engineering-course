@@ -1,0 +1,28 @@
+server:
+  address: 127.0.0.1
+  shutdown: graceful
+spring:
+  application:
+    name: property-printer
+  config:
+    import: configserver:http://127.0.0.1:19888
+  cloud:
+    config:
+      username: operator
+      password: ${LAB_OPERATOR_PASSWORD}
+      request-connect-timeout: 3000
+      request-read-timeout: 5000
+  rabbitmq:
+    host: 127.0.0.1
+    port: 19472
+    username: study
+    password: ${RABBITMQ_DEFAULT_PASS}
+  security:
+    user:
+      name: operator
+      password: ${LAB_OPERATOR_PASSWORD}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,busrefresh,busshutdown

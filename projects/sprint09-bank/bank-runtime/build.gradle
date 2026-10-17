@@ -11,4 +11,9 @@ dependencies {
     runtimeOnly 'org.postgresql:postgresql'
     api 'org.flywaydb:flyway-core'
     runtimeOnly 'org.flywaydb:flyway-database-postgresql'
+    testImplementation project(':bank-test-support')
+}
+
+tasks.named('test') {
+    inputs.files(rootProject.file('compose.yaml'), rootProject.file('compose.analytics.yaml')).withPropertyName('deployedCompose')
 }

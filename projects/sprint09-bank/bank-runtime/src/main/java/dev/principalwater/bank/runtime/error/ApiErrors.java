@@ -15,11 +15,29 @@ public class ApiErrors {
     private static final Logger LOG = LoggerFactory.getLogger(ApiErrors.class);
 
     @ExceptionHandler(BankException.class)
-    public ResponseEntity<ErrorBody> domain(BankException exception) { return response(exception.getError()); }
+    public ResponseEntity<ErrorBody> domain(BankException exception) {
+        return response(exception.getError());
+    }
 
-    @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class,
-            HandlerMethodValidationException.class, IllegalArgumentException.class})
-    public ResponseEntity<ErrorBody> invalid(Exception exception) { return response(BankError.INVALID_REQUEST); }
+    @ExceptionHandler({
+        MethodArgumentNotValidException.class,
+        HttpMessageNotReadableException.class,
+        HandlerMethodValidationException.class,
+        IllegalArgumentException.class
+    })
+    public ResponseEntity<ErrorBody> invalid(Exception exception) {
+        for (StackTraceElement frame : exception.getStackTrace()) {
+            if (frame.getClassName().startsWith("dev.principalwater.bank.")) {
+                LOG.debug(
+                        "Invalid request category={} location={}.{}",
+                        exception.getClass().getSimpleName(),
+                        frame.getClassName(),
+                        frame.getMethodName());
+                break;
+            }
+        }
+        return response(BankError.INVALID_REQUEST);
+    }
 
     @ExceptionHandler(DataAccessException.class)
     public ResponseEntity<ErrorBody> storage(DataAccessException exception) {
@@ -29,8 +47,9 @@ public class ApiErrors {
     }
 
     private ResponseEntity<ErrorBody> response(BankError error) {
-        return ResponseEntity.status(error.getStatus()).body(new ErrorBody(error.name(), error.getMessage()));
+        return ResponseEntity.status(error.getStatus())
+                .body(new ErrorBody(error.name(), error.getMessage()));
     }
 
-    public record ErrorBody(String code, String message) { }
+    public record ErrorBody(String code, String message) {}
 }

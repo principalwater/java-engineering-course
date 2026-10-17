@@ -1,0 +1,20 @@
+apply plugin: 'org.springframework.boot'
+
+configurations {
+    accountsContractStubs {
+        canBeConsumed = false
+        canBeResolved = true
+    }
+}
+dependencies {
+    implementation project(':bank-runtime')
+    testImplementation project(':bank-test-support')
+    testImplementation 'org.springframework.cloud:spring-cloud-contract-stub-runner:4.3.4'
+    accountsContractStubs project(path: ':accounts', configuration: 'verifiedContractStubs')
+    testRuntimeOnly files(configurations.accountsContractStubs)
+}
+tasks.named('test') {
+    dependsOn ':accounts:contractTest'
+    dependsOn configurations.accountsContractStubs
+    inputs.files(configurations.accountsContractStubs).withPropertyName('verifiedAccountsStubs')
+}

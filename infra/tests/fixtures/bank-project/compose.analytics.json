@@ -15,7 +15,18 @@
         "args": {
           "SERVICE": "analytics"
         }
-      }
+      },
+      "depends_on": {
+        "kafka-init": {
+          "condition": "service_completed_successfully"
+        }
+      },
+      "secrets": [
+        {
+          "source": "kafka_analytics_password",
+          "target": "bank.analytics.kafka-password"
+        }
+      ]
     },
     "cassandra": {
       "image": "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
@@ -77,6 +88,46 @@
       "environment": {
         "BANK_ANALYTICS_ENABLED": "true"
       }
+    },
+    "kafka": {
+      "image": "apache/kafka:4.2.2@sha256:1213eb3943d551e5ed1fca7a4e109001cee35770b66a02a0c37a8964efe09b69",
+      "user": "${BANK_UID:-10001}:0",
+      "mem_limit": "768m",
+      "memswap_limit": "768m",
+      "cpus": 1.0,
+      "restart": "unless-stopped",
+      "read_only": true,
+      "environment": {
+        "KAFKA_HEAP_OPTS": "-Xms256m -Xmx256m"
+      },
+      "secrets": [
+        "kafka_admin_password",
+        "kafka_analytics_password"
+      ],
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=64m,mode=1777"
+      ],
+      "volumes": [
+        "kafka-data:/var/lib/kafka/data"
+      ]
+    },
+    "kafka-init": {
+      "image": "apache/kafka:4.2.2@sha256:1213eb3943d551e5ed1fca7a4e109001cee35770b66a02a0c37a8964efe09b69",
+      "user": "${BANK_UID:-10001}:${BANK_GID:-10001}",
+      "mem_limit": "384m",
+      "memswap_limit": "384m",
+      "cpus": 0.5,
+      "restart": "no",
+      "read_only": true,
+      "depends_on": [
+        "kafka"
+      ],
+      "secrets": [
+        "kafka_admin_password"
+      ],
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ]
     }
   }
 }

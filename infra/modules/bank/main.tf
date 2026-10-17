@@ -15,9 +15,9 @@ locals {
   ) }
   application_names = toset(concat(["accounts", "cash", "transfer", "notifications", "gateway", "front"], var.analytics_enabled ? ["analytics"] : []))
   applications      = { for name in local.application_names : name => local.services[name] }
-  platform          = { for name in concat(["database", "discovery"], var.analytics_enabled ? ["cassandra", "clickhouse"] : []) : name => local.services[name] }
-  initializers      = { for name in concat(["config-seed"], var.analytics_enabled ? ["cassandra-init", "clickhouse-init"] : []) : name => local.services[name] }
-  base_images       = { for name in concat(["database", "discovery"], var.analytics_enabled ? ["cassandra", "clickhouse"] : []) : name => local.services[name].image }
+  platform          = { for name in concat(["database", "discovery"], var.analytics_enabled ? ["cassandra", "clickhouse", "kafka"] : []) : name => local.services[name] }
+  initializers      = { for name in concat(["config-seed"], var.analytics_enabled ? ["cassandra-init", "clickhouse-init", "kafka-init"] : []) : name => local.services[name] }
+  base_images       = { for name in concat(["database", "discovery"], var.analytics_enabled ? ["cassandra", "clickhouse", "kafka"] : []) : name => local.services[name].image }
   # Read declarations only; no Compose subprocess or second source of application settings.
   dependency_stage   = merge({ for name in keys(local.platform) : name => 0 }, { authorization = 1 }, { for name in keys(local.initializers) : name => 2 }, { for name in local.application_names : name => 3 }, { edge = 4 })
   dependencies       = { for name, service in local.services : name => try(tolist(service.depends_on), keys(service.depends_on), []) }
@@ -70,7 +70,7 @@ resource "docker_network" "application" {
     }
     precondition {
       condition = alltrue([for document in [local.core, local.optional] : alltrue([
-        for name, declaration in try(document.volumes, {}) : contains(["bank-data", "discovery-data", "discovery-transactions", "cassandra-data", "analytics-hot", "analytics-cold"], name) && (declaration == null || try(length(keys(declaration)) == 0, false))
+        for name, declaration in try(document.volumes, {}) : contains(["bank-data", "discovery-data", "discovery-transactions", "cassandra-data", "analytics-hot", "analytics-cold", "kafka-data"], name) && (declaration == null || try(length(keys(declaration)) == 0, false))
         ])]) && alltrue([for name, declaration in try(local.core.networks, {}) : name == "default" && try(
         toset(keys(declaration)) == toset(["ipam"]) && toset(keys(declaration.ipam)) == toset(["config"]) && length(declaration.ipam.config) == 1 && toset(keys(declaration.ipam.config[0])) == toset(["subnet"]), false
       )])
@@ -114,7 +114,7 @@ resource "docker_network" "application" {
         service.mem_limit == service.memswap_limit &&
         (name == "edge" || length(try(service.ports, [])) == 0) &&
         alltrue([for mount in try(service.volumes, []) : startswith(mount, "./") ? length(split(":", mount)) == 3 && endswith(mount, ":ro") && !contains(split("/", split(":", mount)[0]), "..") : length(split(":", mount)) == 2]) &&
-        alltrue([for setting in keys(try(service.environment, {})) : !can(regex("(PASSWORD|SECRET|TOKEN)$", setting))]) &&
+        alltrue([for setting in keys(try(service.environment, {})) : !can(regex("(PASSWORD|SECRET|TOKEN|SASL_JAAS_CONFIG)$", setting))]) &&
         length(setsubtract(toset(try(keys(service.build), [])), toset(["context", "args"]))) == 0 &&
         length(setsubtract(toset(keys(try(service.ulimits, {}))), toset(["nofile"]))) == 0 && alltrue([
           for limit in values(try(service.ulimits, {})) : toset(keys(limit)) == toset(["soft", "hard"])
@@ -127,7 +127,7 @@ resource "docker_network" "application" {
 
 resource "docker_volume" "data" {
   # Volume identity is stable when the optional analytics processes are disabled.
-  for_each = toset(["bank-data", "discovery-data", "discovery-transactions", "cassandra-data", "analytics-hot", "analytics-cold"])
+  for_each = toset(["bank-data", "discovery-data", "discovery-transactions", "cassandra-data", "analytics-hot", "analytics-cold", "kafka-data"])
   name     = "${var.stack_name}-${each.key}"
   lifecycle { prevent_destroy = true }
 }

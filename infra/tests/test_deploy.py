@@ -179,8 +179,10 @@ class DeploymentPlanTest(unittest.TestCase):
             for name, unsafe in [
                 ("secret copied into a label", plan(labels=[{"label": "note", "value": "0123456789abcdef0123456789abcdef"}])),
                 ("secret copied into a command", plan(command=["--client-secret=0123456789abcdef0123456789abcdef"])),
+                ("secret copied into Kafka JAAS configuration", plan(env=['SASL_JAAS_CONFIG=PlainLoginModule required password="0123456789abcdef0123456789abcdef";'])),
                 ("client secret variable", plan(env=["STOREFRONT_CLIENT_SECRET=from-a-file"])),
                 ("database password variable", plan(env=["KC_DB_PASSWORD=from-a-file"])),
+                ("inline Kafka JAAS environment variable", plan(env=["SPRING_KAFKA_PROPERTIES_SASL_JAAS_CONFIG=not-a-real-secret"])),
             ]:
                 with self.subTest(name=name), self.assertRaisesRegex(ValueError, "[Ss]ecret"):
                     deploy.check_plan(unsafe, "sprint08-h2", known)

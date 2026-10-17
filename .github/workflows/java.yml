@@ -973,7 +973,7 @@ jobs:
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: Route the bank TLS names to the isolated runner
         run: printf '127.0.0.1 bank.valgrind-home.localhost auth-bank.valgrind-home.localhost\n' | sudo tee -a /etc/hosts > /dev/null
-      - name: Verify native OAuth flows, balances, recovery, discovery and optional analytics
+      - name: Verify native OAuth, balances, recovery and optional Kafka analytics
         working-directory: .
         run: python3 projects/sprint09-bank/scripts/verify-runtime.py --analytics
       - name: Upload executable JARs and producer and consumer test evidence

@@ -16,7 +16,7 @@ INFRA = Path(__file__).resolve().parent
 REPOSITORY = INFRA.parent
 # Multi-service Gradle projects share executable hashes and the documentation exclusion below.
 JAR_PREFIXES = ("sprint07-", "sprint08-", "sprint09")
-SECRET_NAME = re.compile(r"(PASSWORD|SECRET|TOKEN)$")
+SECRET_NAME = re.compile(r"(PASSWORD|SECRET|TOKEN|SASL_JAAS_CONFIG)$")
 MIN_SECRET_LENGTH = 16
 STACKS = {
     "sprint03": "projects/sprint03-spring-blog",

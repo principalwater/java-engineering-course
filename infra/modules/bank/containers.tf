@@ -5,7 +5,7 @@ resource "docker_container" "platform" {
   image         = docker_image.base[each.key].image_id
   entrypoint    = try(each.value.entrypoint, null)
   command       = try(each.value.command, null)
-  user          = contains(["authorization", "edge", "accounts", "cash", "transfer", "notifications", "gateway", "front", "analytics"], each.key) ? var.runtime_user : try(each.value.user, null)
+  user          = each.key == "kafka" ? "${split(":", var.runtime_user)[0]}:0" : try(each.value.user, null)
   memory        = local.memory_mb[each.key]
   memory_swap   = local.memory_mb[each.key]
   cpus          = format("%.1f", each.value.cpus)
@@ -118,7 +118,7 @@ resource "docker_container" "initializer" {
   image         = docker_image.base[each.key == "config-seed" ? "discovery" : trimsuffix(each.key, "-init")].image_id
   entrypoint    = try(each.value.entrypoint, null)
   command       = try(each.value.command, null)
-  user          = contains(["authorization", "edge", "accounts", "cash", "transfer", "notifications", "gateway", "front", "analytics"], each.key) ? var.runtime_user : try(each.value.user, null)
+  user          = each.key == "kafka-init" ? var.runtime_user : try(each.value.user, null)
   memory        = local.memory_mb[each.key]
   memory_swap   = local.memory_mb[each.key]
   cpus          = format("%.1f", each.value.cpus)

@@ -131,7 +131,7 @@ tofu -chdir=infra output -json deployment
 
 Селектор `sprint09` создаёт отдельные Docker-ресурсы для Front, Gateway, Accounts, Cash, Transfer, Notifications, PostgreSQL, ZooKeeper, Keycloak и Caddy. Аналитика включается через `--analytics`: добавляются Java-сервис Analytics, Cassandra с парольной аутентификацией и ClickHouse с отдельными hot/cold-томами. Шесть постоянных томов создаются независимо от этого флага и защищены `prevent_destroy`; отключение аналитики сохраняет её данные.
 
-При лимите Docker VM `8 GiB` запускайте полные Compose- и native-стенды последовательно: совместный запуск вызвал OOM и перезапуски Cassandra. Перед переключением остановите контейнеры предыдущего стенда, сохранив его тома и state.
+При лимите Docker VM `8 GiB` совместный запуск полных Compose- и native-стендов вызвал OOM и перезапуски Cassandra. После увеличения лимита OrbStack до `12 GiB` оба стенда прошли одновременную проверку без новых OOM; использованы все 8 ядер хоста. Для повседневной работы запускайте один стенд, сохраняя тома и state остановленного. Лимит задаётся командой `orb config set memory_mib 12288` и требует перезапуска OrbStack; перед ним остановите рабочие стенды, поскольку `orb stop` затрагивает всю VM.
 
 У стенда префикс `java-tofu-sprint09`, подсеть `10.251.9.96/27` и единственный опубликованный порт `127.0.0.1:28450`. Адрес банка — `https://bank.valgrind-home.localhost:28450`, issuer — `https://auth-bank.valgrind-home.localhost:28450/realms/bank`. Compose использует другие имена ресурсов, подсеть и порт; его контейнеры и данные не подключаются к native state.
 

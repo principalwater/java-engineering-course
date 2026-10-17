@@ -1,0 +1,66 @@
+services:
+  authorization-db:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    environment:
+      POSTGRES_DB: authorization
+      POSTGRES_USER: authorization
+      POSTGRES_PASSWORD_FILE: /run/secrets/authorization_db_password
+    secrets: [authorization_db_password]
+    volumes: [authorization-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -h 127.0.0.1 -U authorization -d authorization']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 1.0
+  authorization:
+    image: java-sprint08-authorization:local
+    build: ./authorization
+    user: "${STORE_UID:-10001}:${STORE_GID:-10001}"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_HOSTNAME: "${AUTH_PUBLIC_URL:-https://auth.valgrind-home.localhost:8448}"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: 'true'
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://authorization-db:5432/authorization
+      KC_DB_USERNAME: authorization
+      KC_CACHE: local
+      JAVA_OPTS_APPEND: -XX:ActiveProcessorCount=2
+    secrets: [authorization_db_password, authorization_admin_password, oauth_client_secret]
+    volumes:
+      - ./authorization/start-authorization.sh:/setup/start-authorization.sh:ro
+      - ./authorization/storefront-api-realm.json:/opt/keycloak/data/import/storefront-api-realm.json:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+      - /opt/keycloak/data:rw,noexec,nosuid,size=32m,mode=1777
+    ports: ['127.0.0.1:${AUTH_PORT:-18381}:8080']
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          bash -ec 'exec 3<>/dev/tcp/127.0.0.1/9000; printf "GET /health/ready HTTP/1.0\r\n\r\n" >&3; read -r first <&3; [[ "$$first" == *" 200 "* ]]'
+      interval: 3s
+      timeout: 3s
+      retries: 60
+      start_period: 30s
+    depends_on:
+      authorization-db: {condition: service_healthy}
+    restart: unless-stopped
+    stop_grace_period: 30s
+    mem_limit: 768m
+    memswap_limit: 768m
+    cpus: 2.0
+volumes:
+  authorization-data:
+secrets:
+  authorization_db_password:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/authorization_db_password
+  authorization_admin_password:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/authorization_admin_password
+  oauth_client_secret:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/oauth_client_secret

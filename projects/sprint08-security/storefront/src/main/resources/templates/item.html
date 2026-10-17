@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head(${item.title})}"></head>
+<body>
+<header th:replace="~{fragments :: header('items')}"></header>
+<main id="main">
+<a class="back-link" th:href="@{/items}">В коллекцию</a>
+<article class="item-detail" th:attr="data-product-id=${item.id},data-price=${item.price}">
+<div class="detail-art"><img th:src="@{${item.imgPath}}" th:alt="${item.title}" width="640" height="480"></div>
+<div class="detail-info">
+<h1 th:text="${item.title}"></h1>
+<p class="lead" th:text="${item.description}"></p>
+<p class="detail-price" th:text="${@display.money(item.price)}"></p>
+<div th:replace="~{fragments :: quantity(${item}, @{/items/{id}(id=${item.id})}, ${null})}"></div>
+<a class="button secondary" th:if="${account == null}" th:href="@{/account/login}">Войти для покупки</a>
+<p class="quiet-note">Цена указана за один предмет. Проверьте состав и доступный баланс в корзине перед покупкой.</p>
+</div>
+</article>
+</main>
+<footer th:replace="~{fragments :: footer}"></footer>
+</body>
+</html>

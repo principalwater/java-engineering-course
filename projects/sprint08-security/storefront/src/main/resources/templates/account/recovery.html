@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('Восстановление доступа')}"></head>
+<body>
+<header th:replace="~{fragments :: header('profile')}"></header>
+<main id="main" class="account-page">
+<div class="page-heading"><h1>Восстановление доступа</h1><p class="lead">Укажите почту, которую вы оставили при регистрации. Мы отправим одноразовую ссылку для нового пароля.</p></div>
+<p class="account-error" role="alert" th:unless="${recoveryAvailable}">Восстановление пароля сейчас недоступно: отправка писем не настроена. Войти можно со своим текущим паролем.</p>
+<p class="account-error" role="alert" th:if="${recoveryError != null}" th:text="${recoveryError}"></p>
+<div class="notice" role="status" th:if="${sent}">Если эта почта зарегистрирована, мы отправили на неё письмо со ссылкой. Ссылка действует 15 минут и срабатывает один раз. Проверьте также папку «Спам».</div>
+<form class="account-form" method="post" th:action="@{/account/recovery}" th:if="${recoveryAvailable}">
+<div class="account-field"><label for="email">Почта</label><input id="email" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" spellcheck="false" required th:maxlength="${emailMaxLength}"></div>
+<button class="button primary" type="submit">Отправить ссылку</button>
+</form>
+<p class="account-switch"><a th:href="@{/account/login}">Вернуться ко входу</a></p>
+<p class="account-explanation">Ответ одинаков для любого адреса, поэтому по нему нельзя узнать, есть ли такой аккаунт. Аккаунты, созданные до появления восстановления, не имеют почты и восстановить доступ таким способом не могут.</p>
+</main>
+<footer th:replace="~{fragments :: footer}"></footer>
+</body></html>

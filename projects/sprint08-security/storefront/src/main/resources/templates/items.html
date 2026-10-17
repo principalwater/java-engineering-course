@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('Витрина')}"></head>
+<body>
+<header th:replace="~{fragments :: header('items')}"></header>
+<main id="main">
+<section class="hero" th:classappend="${!query.search.isBlank() or query.pageNumber > 1} ? 'hero-compact'">
+<div class="hero-copy">
+<h1>Хорошие вещи.<br> <span>Ясные мысли.</span></h1>
+<p class="lead">Предметы, которые помогают сосредоточиться, создавать и чувствовать себя на своём месте.</p>
+</div>
+<div class="hero-mark" aria-hidden="true"><span>м</span><small>собрать своё</small></div>
+</section>
+<div th:replace="~{fragments :: notice}"></div>
+<form class="filters" method="get" th:action="@{/items}" role="search">
+<label class="field field-search"><span>Найти вещь</span><input type="search" name="search" th:value="${query.search}" maxlength="200" placeholder="Название или описание"></label>
+<label class="field"><span>Сортировка</span><select name="sort"><option value="NO" th:selected="${query.sort.name() == 'NO'}">Как в каталоге</option><option value="ALPHA" th:selected="${query.sort.name() == 'ALPHA'}">По названию</option><option value="PRICE" th:selected="${query.sort.name() == 'PRICE'}">Сначала дешевле</option></select></label>
+<label class="field"><span>На странице</span><select name="pageSize"><option th:each="size : ${pageSizes}" th:value="${size}" th:text="${size}" th:selected="${size == paging.pageSize}"></option></select></label>
+<input type="hidden" name="pageNumber" value="1">
+<button class="button primary" type="submit">Показать</button>
+</form>
+<div class="section-heading"><h2>Коллекция мастерской</h2><p th:text="|Найдено: ${totalItems}|">Найдено: 0</p></div>
+<ul class="product-grid" aria-label="Товары" th:if="${!items.isEmpty()}">
+<li th:each="item : ${items}">
+<article class="product-card" th:attr="data-product-id=${item.id},data-price=${item.price}">
+<a class="product-link" th:href="@{/items/{id}(id=${item.id})}"><span class="product-art"><img th:src="@{${item.imgPath}}" alt="" width="320" height="240" loading="lazy"></span><h3 th:text="${item.title}"></h3></a>
+<p class="product-description" th:text="${item.description}"></p>
+<div class="product-buy">
+<p class="price" th:text="${@display.money(item.price)}"></p>
+<div th:replace="~{fragments :: quantity(${item}, @{/items}, ${query})}"></div>
+<a class="button secondary" th:if="${account == null}" th:href="@{/account/login}">Войти для покупки</a>
+</div>
+</article>
+</li>
+</ul>
+<section class="empty-state" th:if="${items.isEmpty()}">
+<th:block th:if="${totalItems > 0}">
+<h2>На этой странице пусто</h2>
+<p>Вещи есть, но на других страницах.</p>
+<a class="button primary" th:href="@{/items(search=${query.search},sort=${query.sort},pageNumber=1,pageSize=${paging.pageSize})}">К первой странице</a>
+</th:block>
+<th:block th:if="${totalItems == 0 and query.search.isEmpty()}">
+<h2>Коллекция пока пуста</h2>
+<p>Новые вещи скоро появятся здесь. Если вы управляете магазином, откройте кабинет продавца.</p>
+<a class="button primary" th:if="${account != null and account.seller}" th:href="@{/catalog}">Загрузить каталог</a>
+</th:block>
+<th:block th:if="${totalItems == 0 and !query.search.isEmpty()}">
+<h2>Ничего не нашлось</h2>
+<p>Попробуйте другую часть названия или описания.</p>
+<a class="button secondary" th:href="@{/items}">Сбросить поиск</a>
+</th:block>
+</section>
+<nav class="pagination" aria-label="Страницы каталога" th:if="${totalItems > 0}" th:with="pages=${(totalItems + paging.pageSize - 1) / paging.pageSize}">
+<a class="button secondary" th:if="${paging.hasPrevious}" th:href="@{/items(search=${query.search},sort=${query.sort},pageNumber=${paging.pageNumber - 1},pageSize=${paging.pageSize})}">Назад</a>
+<span class="page-indicator" th:text="|Страница ${paging.pageNumber} из ${pages}|">Страница 1</span>
+<a class="button secondary" th:if="${paging.hasNext}" th:href="@{/items(search=${query.search},sort=${query.sort},pageNumber=${paging.pageNumber + 1},pageSize=${paging.pageSize})}">Далее</a>
+</nav>
+</main>
+<footer th:replace="~{fragments :: footer}"></footer>
+</body>
+</html>

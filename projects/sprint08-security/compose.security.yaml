@@ -1,0 +1,67 @@
+services:
+  sessions:
+    image: redis@sha256:fbdbaea47b9ae4ecc2082ecdb4e1cea81e32176ffb1dcf643d422ad07427e5d9
+    entrypoint: [sh, /setup/start-sessions.sh]
+    environment:
+      SESSION_RUNTIME_USER: "${STORE_UID:-10001}:${STORE_GID:-10001}"
+    secrets: [session_redis_users.acl, session_redis_password]
+    volumes:
+      - session-data:/data
+      - ./sessions/redis.conf:/etc/redis/sessions.conf:ro
+      - ./sessions/start-sessions.sh:/setup/start-sessions.sh:ro
+    read_only: true
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=1m,mode=1777']
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$(cat /run/secrets/session_redis_password)" redis-cli --user sessions --no-auth-warning ping | grep -qx PONG']
+      interval: 3s
+      timeout: 2s
+      retries: 20
+    restart: unless-stopped
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 1.0
+  mailpit:
+    image: axllent/mailpit:v1.31.6@sha256:23fe39e81bde596a918000b3135c0f85dc8bb4c9ea6be274b051143f3e300387
+    user: "${STORE_UID:-10001}:${STORE_GID:-10001}"
+    environment:
+      MP_DATABASE: /tmp/mailpit.db
+      MP_MAX_MESSAGES: '500'
+      MP_MAX_MESSAGE_SIZE: '1'
+      MP_ALLOWED_HOSTS: localhost,127.0.0.1,[::1]
+      MP_DISABLE_VERSION_CHECK: 'true'
+    read_only: true
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=32m,mode=1777']
+    ports: ['127.0.0.1:${MAIL_PORT:-18028}:8025']
+    restart: unless-stopped
+    mem_limit: 96m
+    memswap_limit: 96m
+    cpus: 0.5
+  gateway:
+    image: caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+    user: "${STORE_UID:-10001}:${STORE_GID:-10001}"
+    environment:
+      TLS_PORT: "${TLS_PORT:-8448}"
+    command: [caddy, run, --config, /etc/caddy/Caddyfile, --adapter, caddyfile]
+    secrets: [tls_certificate.pem, tls_private_key.pem]
+    volumes: [./gateway/Caddyfile:/etc/caddy/Caddyfile:ro]
+    ports: ['127.0.0.1:${TLS_PORT:-8448}:8443']
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=1m,mode=1777
+      - /config:rw,noexec,nosuid,size=1m,mode=1777
+      - /data:rw,noexec,nosuid,size=1m,mode=1777
+    restart: unless-stopped
+    mem_limit: 96m
+    memswap_limit: 96m
+    cpus: 0.5
+volumes:
+  session-data:
+secrets:
+  session_redis_password:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/session_redis_password
+  session_redis_users.acl:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/session_redis_users.acl
+  tls_certificate.pem:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/tls_certificate.pem
+  tls_private_key.pem:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/tls_private_key.pem

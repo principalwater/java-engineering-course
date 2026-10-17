@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('Новый пароль')}"></head>
+<body>
+<header th:replace="~{fragments :: header('profile')}"></header>
+<main id="main" class="account-page">
+<div class="page-heading"><h1>Новый пароль</h1><p class="lead" th:unless="${invalidLink}">Задайте пароль для аккаунта. После смены все прежние входы будут завершены.</p></div>
+<th:block th:if="${invalidLink}">
+<p class="account-error" role="alert">Ссылка недействительна, устарела или уже использована. Запросите новую.</p>
+<p class="account-switch"><a th:href="@{/account/recovery}">Запросить новую ссылку</a></p>
+</th:block>
+<th:block th:unless="${invalidLink}">
+<p class="account-error" role="alert" th:if="${recoveryError != null}" th:text="${recoveryError}"></p>
+<form class="account-form" method="post" th:action="@{/account/recovery/reset}">
+<input type="hidden" name="token" th:value="${reset.token}">
+<div class="account-field"><label for="password">Новый пароль</label><div class="password-field"><input id="password" name="password" type="password" autocomplete="new-password" required th:minlength="${passwordMinLength}" th:maxlength="${passwordMaxLength}" aria-describedby="password-hint"><button class="password-toggle" type="button" data-password-toggle aria-controls="password" aria-pressed="false" hidden>Показать пароль</button></div><p id="password-hint" th:text="|От ${passwordMinLength} символов, не более ${passwordMaxLength} байт в UTF-8.|"></p></div>
+<button class="button primary" type="submit">Сменить пароль</button>
+</form>
+<p class="account-explanation">Вход после смены пароля выполняется вручную: ссылка не входит в аккаунт сама.</p>
+</th:block>
+</main>
+<footer th:replace="~{fragments :: footer}"></footer>
+</body></html>

@@ -1,0 +1,98 @@
+name: sprint08-security-memory
+include:
+  - path: compose.oauth.yaml
+    env_file: compose.h2.defaults
+  - path: compose.security.yaml
+    env_file: compose.h2.defaults
+x-java: &java
+  user: "${STORE_UID:-10001}:${STORE_GID:-10001}"
+  healthcheck:
+    test: [CMD, curl, -fsS, http://localhost:8080/actuator/health/readiness]
+    interval: 5s
+    timeout: 3s
+    retries: 30
+    start_period: 30s
+  restart: unless-stopped
+  stop_grace_period: 30s
+  mem_limit: 384m
+  memswap_limit: 384m
+  cpus: 1.0
+services:
+  redis:
+    image: redis@sha256:fbdbaea47b9ae4ecc2082ecdb4e1cea81e32176ffb1dcf643d422ad07427e5d9
+    user: "${STORE_UID:-10001}:${STORE_GID:-10001}"
+    entrypoint: [redis-server]
+    command: [--bind, 0.0.0.0, --protected-mode, 'yes', --aclfile, /run/secrets/redis_users.acl, --maxmemory, 32mb, --maxmemory-policy, allkeys-lfu, --save, '', --appendonly, 'no', --dir, /tmp]
+    secrets: [redis_users.acl, redis_password]
+    read_only: true
+    tmpfs: ['/tmp:rw,noexec,nosuid,size=1m,mode=1777']
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$(cat /run/secrets/redis_password)" redis-cli --user storefront --no-auth-warning ping | grep -qx PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 1.0
+  storefront:
+    <<: *java
+    mem_limit: 512m
+    memswap_limit: 512m
+    build:
+      context: .
+      args: {JAR_FILE: build/deployment/storefront.jar}
+    environment:
+      SERVER_PORT: '8080'
+      SPRING_PROFILES_ACTIVE: h2
+      SPRING_PROFILES_INCLUDE: shared-sessions
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+      SERVER_REACTIVE_SESSION_COOKIE_NAME: sprint08-h2-session
+      STORE_PAYMENTS_URL: http://payments:8080
+      PAYMENTS_OAUTH_TOKEN_URI: http://authorization:8080/realms/storefront-api/protocol/openid-connect/token
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: '6379'
+      SPRING_DATA_REDIS_USERNAME: storefront
+      STORE_CACHE_NAMESPACE: sprint08-compose-h2
+      STORE_SESSIONS_HOST: sessions
+      STORE_SESSIONS_PORT: '6379'
+      STORE_SESSIONS_USERNAME: sessions
+      STORE_SESSIONS_NAMESPACE: store:session:sprint08-compose-h2
+      SPRING_MAIL_HOST: mailpit
+      SPRING_MAIL_PORT: '1025'
+      STORE_RECOVERY_PUBLIC_BASE_URL: https://shop.valgrind-home.localhost:${TLS_PORT:-8449}
+      STORE_RECOVERY_SENDER: noreply@example.test
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+      SERVER_REACTIVE_SESSION_COOKIE_SECURE: 'true'
+    secrets:
+      - {source: oauth_client_secret, target: spring.security.oauth2.client.registration.payments.client-secret}
+      - {source: redis_password, target: spring.data.redis.password}
+      - {source: seller_password, target: store.seller.bootstrap-password}
+      - {source: session_redis_password, target: store.sessions.password}
+    ports: ['127.0.0.1:${WEB_PORT:-8089}:8080']
+    depends_on:
+      sessions: {condition: service_healthy}
+  payments:
+    <<: *java
+    build:
+      context: .
+      args: {JAR_FILE: build/deployment/payments.jar}
+    environment:
+      SERVER_PORT: '8080'
+      SPRING_PROFILES_ACTIVE: h2
+      PAYMENTS_OAUTH_ISSUER: ${AUTH_PUBLIC_URL:-https://auth.valgrind-home.localhost:8449}/realms/storefront-api
+      PAYMENTS_OAUTH_JWK_SET_URI: http://authorization:8080/realms/storefront-api/protocol/openid-connect/certs
+    ports: ['127.0.0.1:${PAYMENTS_PORT:-8099}:8080']
+secrets:
+  redis_password:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/redis_password
+  redis_users.acl:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/redis_users.acl
+  seller_password:
+    file: ${STORE_SECRETS_DIR:-${HOME}/.config/java-engineering-course/sprint08}/seller_password
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${STORE_NETWORK_SUBNET:-10.251.8.96/27}

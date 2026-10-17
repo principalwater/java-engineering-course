@@ -1,0 +1,159 @@
+openapi: 3.0.3
+info:
+  title: Сервис платежей витрины
+  version: 1.0.0
+  description: Точные суммы в копейках RUB. Списание и журнал атомарны; повтор ключа возвращает прежнее решение.
+servers:
+  - url: http://localhost:18098
+tags:
+  - name: Payments
+paths:
+  /api/v1/accounts/{accountId}/balance:
+    get:
+      tags: [Payments]
+      operationId: getBalance
+      summary: Получить доступный баланс без изменения счёта
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      security:
+        - storefrontClient: [payments.read]
+      responses:
+        '200':
+          description: Доступный баланс
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BalanceResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /api/v1/payments:
+    post:
+      tags: [Payments]
+      operationId: debit
+      summary: Атомарно списать сумму с защитой от повторной оплаты
+      description: Один ключ связан с одним неизменяемым запросом. Неопределённый HTTP-результат разрешается повтором того же запроса и ключа.
+      security:
+        - storefrontClient: [payments.write]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DebitRequest'}
+      responses:
+        '201':
+          description: Новое успешное списание
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentReceipt'}
+        '200':
+          description: Ранее принятое успешное решение для того же ключа
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentReceipt'}
+        '402':
+          description: Недостаточно средств; отрицательного баланса и проводок списания нет
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentReceipt'}
+        '400': {$ref: '#/components/responses/InvalidRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409':
+          description: Ключ уже связан с другой суммой, валютой, счётом или основанием
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+components:
+  securitySchemes:
+    storefrontClient:
+      type: oauth2
+      description: Access token клиента storefront; сервис проверяет RS256-подпись, issuer, audience payments и срок действия.
+      flows:
+        clientCredentials:
+          tokenUrl: http://localhost:18381/realms/storefront-api/protocol/openid-connect/token
+          scopes:
+            payments.read: Чтение баланса счёта
+            payments.write: Списание с идемпотентным ключом
+  schemas:
+    MinorAmount:
+      type: integer
+      format: int64
+      minimum: 0
+      maximum: 1000000000000000
+      description: Копейки RUB; целое значение также точно представимо в JavaScript Number.
+    BalanceResponse:
+      type: object
+      additionalProperties: false
+      required: [accountId, balanceMinor, currency]
+      properties:
+        accountId: {type: string, format: uuid}
+        balanceMinor: {$ref: '#/components/schemas/MinorAmount'}
+        currency: {type: string, enum: [RUB]}
+    DebitRequest:
+      type: object
+      additionalProperties: false
+      required: [accountId, referenceId, amountMinor, currency]
+      properties:
+        accountId: {type: string, format: uuid}
+        referenceId: {type: string, format: uuid}
+        amountMinor: {type: integer, format: int64, minimum: 1, maximum: 1000000000000000}
+        currency: {type: string, enum: [RUB]}
+    PaymentReceipt:
+      type: object
+      additionalProperties: false
+      required: [paymentId, accountId, referenceId, amountMinor, balanceMinor, currency, status]
+      properties:
+        paymentId: {type: string, format: uuid}
+        accountId: {type: string, format: uuid}
+        referenceId: {type: string, format: uuid}
+        amountMinor: {$ref: '#/components/schemas/MinorAmount'}
+        balanceMinor: {$ref: '#/components/schemas/MinorAmount'}
+        currency: {type: string, enum: [RUB]}
+        status: {type: string, enum: [SUCCEEDED, DECLINED]}
+    Problem:
+      type: object
+      required: [type, title, status, detail]
+      properties:
+        type: {type: string, format: uri}
+        title: {type: string}
+        status: {type: integer, format: int32}
+        detail: {type: string}
+        instance: {type: string, format: uri}
+  responses:
+    InvalidRequest:
+      description: Некорректные параметры
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Unauthorized:
+      description: Access token отсутствует, повреждён или не прошёл проверку подписи, issuer, audience либо срока
+      headers:
+        WWW-Authenticate:
+          description: Bearer-challenge по RFC 6750
+          schema: {type: string}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Forbidden:
+      description: Токен действителен, но не содержит scope, требуемый операцией
+      headers:
+        WWW-Authenticate:
+          description: Bearer-challenge с error="insufficient_scope"
+          schema: {type: string}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Unavailable:
+      description: Сервис временно не может обработать запрос
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}

@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('Регистрация')}"></head>
+<body>
+<header th:replace="~{fragments :: header('profile')}"></header>
+<main id="main" class="account-page">
+<div class="page-heading"><h1>Ваш аккаунт</h1><p class="lead">Одна корзина и история заказов во всех браузерах, где вы вошли.</p></div>
+<p class="account-error" role="alert" th:if="${accountError != null}" th:text="${accountError}"></p>
+<form class="account-form" method="post" th:action="@{/account/register}">
+<div class="account-field"><label for="displayName">Как к вам обращаться</label><input id="displayName" name="displayName" type="text" autocomplete="nickname" required th:maxlength="${displayNameMaxLength}" th:value="${registration.displayName}"></div>
+<div class="account-field"><label for="username">Логин</label><input id="username" name="username" inputmode="text" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required th:pattern="${usernamePattern}" th:maxlength="${usernameMaxLength}" th:value="${registration.username}" aria-describedby="username-hint"><p id="username-hint" th:text="|От ${usernameMinLength} до ${usernameMaxLength} латинских букв, цифр, точек, дефисов или подчёркиваний. Первый символ — буква или цифра. Регистр букв не важен.|"></p></div>
+<div class="account-field"><label for="email">Почта для восстановления доступа</label><input id="email" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" spellcheck="false" required th:maxlength="${emailMaxLength}" th:value="${registration.email}" aria-describedby="email-hint"><p id="email-hint" th:text="${recoveryAvailable} ? 'На этот адрес придёт одноразовая ссылка, если вы забудете пароль. Другим пользователям адрес не показывается.' : 'Адрес сохраняется как контакт аккаунта. Сейчас отправка писем не настроена, поэтому восстановить пароль нельзя.'"></p></div>
+<div class="account-field"><label for="password">Пароль</label><div class="password-field"><input id="password" name="password" type="password" autocomplete="new-password" required th:minlength="${passwordMinLength}" th:maxlength="${passwordMaxLength}" aria-describedby="password-hint"><button class="password-toggle" type="button" data-password-toggle aria-controls="password" aria-pressed="false" hidden>Показать пароль</button></div><p id="password-hint" th:text="|От ${passwordMinLength} символов, не более ${passwordMaxLength} байт в UTF-8.|"></p></div>
+<button class="button primary" type="submit">Создать аккаунт</button>
+</form>
+<p class="account-switch">Уже есть аккаунт? <a th:href="@{/account/login}">Войти</a></p>
+<p class="account-explanation">Новый аккаунт получает отдельную корзину. Регистрация не даёт прав на управление магазином.</p>
+</main>
+<footer th:replace="~{fragments :: footer}"></footer>
+</body></html>

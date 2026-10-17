@@ -1,0 +1,21 @@
+.account-page { max-width: 640px; }
+.account-page .page-heading { margin-bottom: 28px; }
+.account-form { display: grid; gap: 24px; padding: clamp(20px, 4vw, 36px); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); }
+.account-field { display: grid; gap: 8px; }
+.account-field label { font-weight: 600; }
+.account-field input { width: 100%; min-height: 48px; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--ink); font: inherit; }
+.account-field input:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.account-field p, .account-explanation { margin: 0; color: var(--muted); font-size: .875rem; line-height: 1.6; }
+.account-form .button { justify-self: start; }
+.account-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 20px; }
+.account-switch { margin: 24px 0 16px; }
+.account-switch a { color: var(--accent); }
+.account-error { padding: 16px; border: 1px solid currentColor; border-radius: var(--radius-control); color: var(--ink); }
+@media (prefers-contrast: more) { .account-field input { border-color: var(--ink); } }
+@media (forced-colors: active) { .account-field input { border: 1px solid ButtonText; } }
+
+.password-field { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.password-field input { flex: 1 1 230px; min-width: 0; }
+.password-toggle { flex: 0 0 auto; min-height: 44px; padding: 8px 4px; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: .875rem; cursor: pointer; }
+.password-toggle:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+.password-toggle[hidden] { display: none; }

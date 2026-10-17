@@ -245,7 +245,7 @@ async function sendPending(): Promise<void> {
     if (result.status === 'PENDING') { message('payment-message', 'Операция ещё выполняется. Проверьте результат через некоторое время.'); return; }
     ++accountRequest;
     if (result.accountId === account.accountId && result.balanceMinor !== null) showAccount({ ...account, balanceMinor: result.balanceMinor }, false);
-    if (result.status === 'SUCCEEDED') { amountInput.value = ''; message('payment-message', `${typeLabels[pending.command.type || 'TRANSFER']} выполнено. ${formatMoney(pending.command.amountMinor)}`, 'success'); }
+    if (result.status === 'SUCCEEDED') { amountInput.value = ''; message('payment-message', `Операция выполнена: ${typeLabels[pending.command.type || 'TRANSFER'].toLowerCase()}. ${formatMoney(pending.command.amountMinor)}`, 'success'); }
     else message('payment-message', rejectionMessage(result.error), 'error');
     await refreshData();
   } catch (error) {

@@ -22,7 +22,7 @@ docker compose -p java-sprint11-coffee -f compose.yml exec -T kafka \
   --create --if-not-exists --topic coffee-logs --partitions 1 --replication-factor 1
 ```
 
-`init.py` сохраняет случайные пароли в `target/` с правами 0600 и не заменяет существующие. Elasticsearch проверяет пароль; писатель и читатель имеют разные права. Пользователь `study` настраивает интерфейс Kibana и читает только `coffee-logs-*`; `kibana_system` используется сервером Kibana. Пароль `study` находится в `target/credentials.json`.
+`init.py` сохраняет случайные пароли в `target/` с правами 0600 и не заменяет существующие. Только каталог обезличенного вывода `target/output/` получает режим 1777 для записи от UID контейнера на Linux. Elasticsearch проверяет пароль; писатель и читатель имеют разные права. Пользователь `study` настраивает интерфейс Kibana и читает только `coffee-logs-*`; `kibana_system` используется сервером Kibana. Пароль `study` находится в `target/credentials.json`.
 
 Опубликованы только loopback-порты: Elasticsearch `19200`, Kibana `19601`. HTTP внутри локального стенда без TLS, Kafka доступна только контейнерам его сети. Для удалённой эксплуатации нужны TLS, аутентификация Kafka и внешнее управление секретами. Подсеть по умолчанию `10.251.11.32/28` меняется через `COFFEE_NETWORK_SUBNET` при конфликте.
 

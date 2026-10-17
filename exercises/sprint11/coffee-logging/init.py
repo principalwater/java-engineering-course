@@ -40,6 +40,8 @@ def initialize():
             output.writelines(f"{key}={value}\n" for key, value in data.items())
     for name in ("logs", "output"):
         (TARGET / name).mkdir(exist_ok=True)
+    # UID Logstash отличается от UID хоста Linux; здесь только обезличенные результаты, не секреты.
+    (TARGET / "output").chmod(0o1777)
     (TARGET / "logs/coffee.log").touch(exist_ok=True)
     print("Local credentials and directories ready")
 

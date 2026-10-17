@@ -1,0 +1,11 @@
+groups:
+  - name: orders
+    rules:
+      - alert: LowOrderRate
+        expr: sum(rate(orders_total{job="orders"}[1m])) < 10
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Снизилась скорость создания заказов"
+          description: "Создаётся меньше 10 заказов/с непрерывно в течение минуты. Проверьте входной поток и ошибки POST /orders."

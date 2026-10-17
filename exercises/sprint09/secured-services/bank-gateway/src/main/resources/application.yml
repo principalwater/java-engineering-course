@@ -1,0 +1,22 @@
+server:
+  address: 127.0.0.1
+  port: 19931
+spring:
+  application:
+    name: bank-gateway
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://127.0.0.1:19934/realms/bank-realm
+          jwk-set-uri: http://127.0.0.1:19934/realms/bank-realm/protocol/openid-connect/certs
+          audiences: bank-api
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true

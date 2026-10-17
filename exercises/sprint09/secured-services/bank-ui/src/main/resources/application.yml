@@ -1,0 +1,27 @@
+server:
+  address: 127.0.0.1
+  port: 19930
+  servlet:
+    session:
+      timeout: 15m
+spring:
+  application:
+    name: bank-ui
+  security:
+    oauth2:
+      client:
+        registration:
+          keycloak:
+            provider: keycloak
+            client-id: bank-ui
+            client-secret: ${UI_CLIENT_SECRET}
+            authorization-grant-type: authorization_code
+            scope: openid,profile
+        provider:
+          keycloak:
+            issuer-uri: http://127.0.0.1:19934/realms/bank-realm
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

@@ -1,0 +1,28 @@
+server:
+  address: 127.0.0.1
+  port: 19932
+spring:
+  application:
+    name: transfer-service
+  security:
+    oauth2:
+      client:
+        registration:
+          accounts:
+            provider: keycloak
+            client-id: transfer-service
+            client-secret: ${TRANSFER_CLIENT_SECRET}
+            authorization-grant-type: client_credentials
+        provider:
+          keycloak:
+            token-uri: http://127.0.0.1:19934/realms/bank-realm/protocol/openid-connect/token
+      resourceserver:
+        jwt:
+          issuer-uri: http://127.0.0.1:19934/realms/bank-realm
+          jwk-set-uri: http://127.0.0.1:19934/realms/bank-realm/protocol/openid-connect/certs
+          audiences: bank-api
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

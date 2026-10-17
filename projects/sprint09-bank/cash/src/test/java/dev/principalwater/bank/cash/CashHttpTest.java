@@ -10,47 +10,33 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import dev.principalwater.bank.contract.InternalOperation;
-import dev.principalwater.bank.contract.OperationResult;
-import dev.principalwater.bank.contract.OperationStatus;
 import dev.principalwater.bank.runtime.error.ApiErrors;
 import dev.principalwater.bank.runtime.security.ApiJwtConfiguration;
 import dev.principalwater.bank.runtime.workflow.MoneyWorkflow;
-import dev.principalwater.bank.testing.SecurityTestBase;
-import java.time.Instant;
+import dev.principalwater.bank.testing.BankFixtures;
+import dev.principalwater.bank.testing.ServletSecurityTestBase;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(
         controllers = CashController.class,
         properties = {
             "spring.config.import=classpath:bank-common.properties",
-            "spring.cloud.zookeeper.enabled=false",
             "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.security.oauth2.client.servlet.OAuth2ClientAutoConfiguration"
         })
 @Import({CashSecurity.class, CashService.class, ApiJwtConfiguration.class, ApiErrors.class})
-class CashHttpTest extends SecurityTestBase {
-    @Autowired private MockMvc http;
+class CashHttpTest extends ServletSecurityTestBase {
     @MockitoBean private MoneyWorkflow workflow;
 
     @Test
     void verifiedUserOwnsCommandAndSuccessfulResultPreservesOriginalRequestId() throws Exception {
         UUID id = UUID.randomUUID();
-        when(workflow.execute(any()))
-                .thenReturn(
-                        new OperationResult(
-                                id,
-                                OperationStatus.SUCCEEDED,
-                                null,
-                                UUID.randomUUID(),
-                                400L,
-                                Instant.parse("2026-10-17T12:00:00Z")));
+        when(workflow.execute(any())).thenReturn(BankFixtures.succeeded(id, 400));
         http.perform(
                         post("/api/cash")
                                 .header(
@@ -89,9 +75,7 @@ class CashHttpTest extends SecurityTestBase {
     @Test
     void pendingResultHasAcceptedStatusAndNoInventedBalance() throws Exception {
         UUID id = UUID.randomUUID();
-        when(workflow.execute(any()))
-                .thenReturn(
-                        new OperationResult(id, OperationStatus.PENDING, null, null, null, null));
+        when(workflow.execute(any())).thenReturn(BankFixtures.pending(id));
         http.perform(
                         post("/api/cash")
                                 .header(

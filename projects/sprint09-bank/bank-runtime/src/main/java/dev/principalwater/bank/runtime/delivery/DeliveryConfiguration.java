@@ -34,7 +34,6 @@ public class DeliveryConfiguration {
 
     static final class DeliveryWorkers implements AutoCloseable {
         private static final Logger LOG = LoggerFactory.getLogger(DeliveryWorkers.class);
-        private static final int BATCH_SIZE = 16;
         private final ScheduledThreadPoolExecutor scheduler =
                 new ScheduledThreadPoolExecutor(
                         1, Thread.ofPlatform().name("bank-recovery-timer-", 0).factory());
@@ -44,7 +43,7 @@ public class DeliveryConfiguration {
                         2,
                         0,
                         TimeUnit.SECONDS,
-                        new ArrayBlockingQueue<>(BATCH_SIZE),
+                        new ArrayBlockingQueue<>(DeliveryPolicy.BATCH_SIZE),
                         Thread.ofPlatform().name("bank-recovery-", 0).factory(),
                         new ThreadPoolExecutor.AbortPolicy());
         private final RestOutbox outbox;
@@ -68,7 +67,7 @@ public class DeliveryConfiguration {
             List<UUID> commands = money == null ? List.of() : money.pendingIds();
             // Общие два worker и очередь из 16; чередование не даёт outbox вытеснить money
             // recovery.
-            for (int index = 0; index < BATCH_SIZE; index++) {
+            for (int index = 0; index < DeliveryPolicy.BATCH_SIZE; index++) {
                 if (index < commands.size()) {
                     UUID id = commands.get(index);
                     if (!submit(() -> money.recover(id))) {

@@ -4,6 +4,7 @@ public final class AnalyticsUnavailable extends RuntimeException {
     public enum Category {
         CASSANDRA,
         WAREHOUSE,
+        BROKER,
         PROJECTION_PENDING,
         PROJECTION_LIMIT,
         INVALID_RESPONSE,

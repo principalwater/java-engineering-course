@@ -7,7 +7,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.principalwater.bank.accounts.AccountsTestBase;
 import dev.principalwater.bank.accounts.service.MoneyService;
@@ -30,13 +29,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 
 class AccountsSecurityHttpTest extends AccountsTestBase {
-    @Autowired private ObjectMapper mapper;
     @Autowired private MoneyService money;
     @Autowired private ProfileService profiles;
 
     @Test
     void anonymousCannotProvisionAccount() throws Exception {
-        mvc.perform(get("/api/accounts/me")).andExpect(status().isUnauthorized());
+        http.perform(get("/api/accounts/me")).andExpect(status().isUnauthorized());
         assertThat(count("account")).isZero();
     }
 
@@ -44,7 +42,7 @@ class AccountsSecurityHttpTest extends AccountsTestBase {
     @MethodSource("invalidTokens")
     void realDecoderRejectsInvalidSignedTokenBeforeAccountAccess(String reason, String token)
             throws Exception {
-        mvc.perform(get("/api/accounts/me").header("Authorization", "Bearer " + token))
+        http.perform(get("/api/accounts/me").header("Authorization", "Bearer " + token))
                 .andExpect(status().isUnauthorized());
         assertThat(count("account")).isZero();
     }
@@ -60,7 +58,7 @@ class AccountsSecurityHttpTest extends AccountsTestBase {
                         type,
                         100L,
                         type == OperationType.TRANSFER ? UUID.randomUUID() : null);
-        mvc.perform(
+        http.perform(
                         post("/internal/accounts/operations")
                                 .header("Authorization", "Bearer " + token)
                                 .contentType(MediaType.APPLICATION_JSON)
@@ -80,7 +78,7 @@ class AccountsSecurityHttpTest extends AccountsTestBase {
         } else {
             body.set("amountMinor", mapper.readTree(value));
         }
-        mvc.perform(
+        http.perform(
                         post("/internal/accounts/operations")
                                 .header(
                                         "Authorization",
@@ -109,16 +107,16 @@ class AccountsSecurityHttpTest extends AccountsTestBase {
                 "Bearer "
                         + JWT.user(alice.subject(), alice.login(), "accounts.read accounts.write");
 
-        mvc.perform(
+        http.perform(
                         get("/api/accounts/me")
                                 .param("ownerId", bobId.toString())
                                 .header("Authorization", token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("accountId").value(aliceId.toString()))
                 .andExpect(jsonPath("balanceMinor").value(111));
-        mvc.perform(get("/api/accounts/" + bobId).header("Authorization", token))
+        http.perform(get("/api/accounts/" + bobId).header("Authorization", token))
                 .andExpect(status().isNotFound());
-        mvc.perform(
+        http.perform(
                         get("/api/accounts/history")
                                 .param("ownerId", bobId.toString())
                                 .header("Authorization", token))
@@ -126,7 +124,7 @@ class AccountsSecurityHttpTest extends AccountsTestBase {
                 .andExpect(jsonPath("items.length()").value(1))
                 .andExpect(jsonPath("items[0].amountMinor").value(111))
                 .andExpect(jsonPath("items[0].balanceMinor").value(111));
-        mvc.perform(get("/api/accounts/recipients").header("Authorization", token))
+        http.perform(get("/api/accounts/recipients").header("Authorization", token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("items.length()").value(1))
                 .andExpect(jsonPath("items[0].accountId").value(bobId.toString()))
@@ -136,7 +134,7 @@ class AccountsSecurityHttpTest extends AccountsTestBase {
         ObjectNode profile = mapper.valueToTree(BankFixtures.profile("Changed Alice"));
         profile.put("version", profiles.own(alice).version());
         profile.put("ownerId", bobId.toString());
-        mvc.perform(
+        http.perform(
                         put("/api/accounts/me")
                                 .header("Authorization", token)
                                 .contentType(MediaType.APPLICATION_JSON)
@@ -144,7 +142,7 @@ class AccountsSecurityHttpTest extends AccountsTestBase {
                 .andExpect(status().isBadRequest());
         assertThat(profiles.own(bob).fullName()).isEqualTo("bob Example");
         profile.remove("ownerId");
-        mvc.perform(
+        http.perform(
                         put("/api/accounts/me")
                                 .header("Authorization", token)
                                 .contentType(MediaType.APPLICATION_JSON)

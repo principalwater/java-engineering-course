@@ -4,9 +4,11 @@ import dev.principalwater.bank.accounts.service.MoneyService;
 import dev.principalwater.bank.contract.InternalOperation;
 import dev.principalwater.bank.contract.OperationResult;
 import dev.principalwater.bank.contract.OperationType;
+import dev.principalwater.bank.contract.security.BankTokenProfile;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.core.oidc.IdTokenClaimNames;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -24,7 +26,9 @@ public class MoneyController {
     @PostMapping("/internal/accounts/operations")
     public OperationResult execute(
             @AuthenticationPrincipal Jwt jwt, @Valid @RequestBody InternalOperation command) {
-        boolean transferCaller = "transfer-service".equals(jwt.getClaimAsString("azp"));
+        boolean transferCaller =
+                BankTokenProfile.TRANSFER_CLIENT_ID.equals(
+                        jwt.getClaimAsString(IdTokenClaimNames.AZP));
         if ((command.type() == OperationType.TRANSFER) != transferCaller) {
             throw new ResponseStatusException(
                     HttpStatus.FORBIDDEN, "Caller cannot perform this operation");

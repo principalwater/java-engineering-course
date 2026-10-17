@@ -14,7 +14,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 public class RestOutbox {
     private static final Logger LOG = LoggerFactory.getLogger(RestOutbox.class);
-    private static final int BATCH_SIZE = 16;
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
     private final ServiceClient client;
@@ -27,6 +26,7 @@ public class RestOutbox {
 
     // JdbcTemplate использует локальную транзакцию владельца вместе с его business-записью.
     public void enqueue(String target, String path, BankEvent event) {
+        // Повтор сохраняет первый payload события и не создаёт вторую доставку получателю.
         jdbc.update(
                 """
                 INSERT INTO bank_outbox(id, event_id, target, path, payload)
@@ -47,7 +47,7 @@ public class RestOutbox {
                 AND (lease_until IS NULL OR lease_until < now()) ORDER BY next_attempt_at, id LIMIT ?
                 """,
                         (row, number) -> row.getObject("id", UUID.class),
-                        BATCH_SIZE);
+                        DeliveryPolicy.BATCH_SIZE);
         return due;
     }
 
@@ -56,7 +56,7 @@ public class RestOutbox {
         List<Delivery> claimed =
                 jdbc.query(
                         """
-                UPDATE bank_outbox SET lease_token = ?, lease_until = now() + interval '30 seconds'
+                UPDATE bank_outbox SET lease_token = ?, lease_until = now() + make_interval(secs => ?)
                 WHERE id = ? AND status = 'PENDING' AND next_attempt_at <= now()
                 AND (lease_until IS NULL OR lease_until < now()) RETURNING target, path, payload::text
                 """,
@@ -66,6 +66,7 @@ public class RestOutbox {
                                         row.getString("path"),
                                         decode(row.getString("payload"))),
                         lease,
+                        DeliveryPolicy.LEASE_SECONDS,
                         id);
         if (claimed.isEmpty()) {
             return;
@@ -81,9 +82,10 @@ public class RestOutbox {
             jdbc.update(
                     """
                     UPDATE bank_outbox SET lease_token = NULL, lease_until = NULL,
-                    next_attempt_at = now() + interval '5 seconds', attempts = attempts + 1
+                    next_attempt_at = now() + make_interval(secs => ?), attempts = attempts + 1
                     WHERE id = ? AND lease_token = ? AND status = 'PENDING'
                     """,
+                    DeliveryPolicy.RETRY_DELAY_SECONDS,
                     id,
                     lease);
         }

@@ -5,6 +5,7 @@ import dev.principalwater.bank.contract.CashRequest;
 import dev.principalwater.bank.contract.ProfileRequest;
 import dev.principalwater.bank.contract.TransferRequest;
 import dev.principalwater.bank.front.client.GatewayClient;
+import dev.principalwater.bank.front.config.FrontOAuth;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -34,22 +35,26 @@ public class BankController {
 
     @GetMapping("/ui/account")
     public ResponseEntity<byte[]> account(
-            @RegisteredOAuth2AuthorizedClient("bank") OAuth2AuthorizedClient client) {
+            @RegisteredOAuth2AuthorizedClient(FrontOAuth.REGISTRATION_ID)
+                    OAuth2AuthorizedClient client) {
         return gateway.exchange(HttpMethod.GET, "/api/accounts/me", null, token(client));
     }
 
     @PutMapping("/ui/account")
     public ResponseEntity<byte[]> profile(
-            @RegisteredOAuth2AuthorizedClient("bank") OAuth2AuthorizedClient client,
+            @RegisteredOAuth2AuthorizedClient(FrontOAuth.REGISTRATION_ID)
+                    OAuth2AuthorizedClient client,
             @Valid @RequestBody ProfileRequest request) {
         return gateway.exchange(HttpMethod.PUT, "/api/accounts/me", request, token(client));
     }
 
     @GetMapping("/ui/recipients")
     public ResponseEntity<byte[]> recipients(
-            @RegisteredOAuth2AuthorizedClient("bank") OAuth2AuthorizedClient client,
+            @RegisteredOAuth2AuthorizedClient(FrontOAuth.REGISTRATION_ID)
+                    OAuth2AuthorizedClient client,
             @RequestParam(required = false) UUID after,
-            @RequestParam(defaultValue = "") @Size(max = 80) String search,
+            @RequestParam(defaultValue = "") @Size(max = BankLimits.MAX_RECIPIENT_SEARCH_LENGTH)
+                    String search,
             @RequestParam(defaultValue = BankLimits.DEFAULT_PAGE_SIZE)
                     @Min(1)
                     @Max(BankLimits.MAX_PAGE_SIZE)
@@ -67,7 +72,8 @@ public class BankController {
 
     @GetMapping("/ui/history")
     public ResponseEntity<byte[]> history(
-            @RegisteredOAuth2AuthorizedClient("bank") OAuth2AuthorizedClient client,
+            @RegisteredOAuth2AuthorizedClient(FrontOAuth.REGISTRATION_ID)
+                    OAuth2AuthorizedClient client,
             @RequestParam(required = false) @Min(1) Long before,
             @RequestParam(defaultValue = BankLimits.DEFAULT_PAGE_SIZE)
                     @Min(1)
@@ -85,33 +91,38 @@ public class BankController {
 
     @PostMapping("/ui/cash")
     public ResponseEntity<byte[]> cash(
-            @RegisteredOAuth2AuthorizedClient("bank") OAuth2AuthorizedClient client,
+            @RegisteredOAuth2AuthorizedClient(FrontOAuth.REGISTRATION_ID)
+                    OAuth2AuthorizedClient client,
             @Valid @RequestBody CashRequest request) {
         return gateway.exchange(HttpMethod.POST, "/api/cash", request, token(client));
     }
 
     @PostMapping("/ui/transfers")
     public ResponseEntity<byte[]> transfer(
-            @RegisteredOAuth2AuthorizedClient("bank") OAuth2AuthorizedClient client,
+            @RegisteredOAuth2AuthorizedClient(FrontOAuth.REGISTRATION_ID)
+                    OAuth2AuthorizedClient client,
             @Valid @RequestBody TransferRequest request) {
         return gateway.exchange(HttpMethod.POST, "/api/transfers", request, token(client));
     }
 
     @GetMapping("/ui/analytics")
     public ResponseEntity<byte[]> analytics(
-            @RegisteredOAuth2AuthorizedClient("bank") OAuth2AuthorizedClient client) {
+            @RegisteredOAuth2AuthorizedClient(FrontOAuth.REGISTRATION_ID)
+                    OAuth2AuthorizedClient client) {
         return gateway.exchange(HttpMethod.GET, "/api/analytics", null, token(client));
     }
 
     @GetMapping("/ui/analytics/business")
     public ResponseEntity<byte[]> business(
-            @RegisteredOAuth2AuthorizedClient("bank") OAuth2AuthorizedClient client) {
+            @RegisteredOAuth2AuthorizedClient(FrontOAuth.REGISTRATION_ID)
+                    OAuth2AuthorizedClient client) {
         return gateway.exchange(HttpMethod.GET, "/api/analytics/business", null, token(client));
     }
 
     @PostMapping("/ui/analytics/views")
     public ResponseEntity<byte[]> view(
-            @RegisteredOAuth2AuthorizedClient("bank") OAuth2AuthorizedClient client,
+            @RegisteredOAuth2AuthorizedClient(FrontOAuth.REGISTRATION_ID)
+                    OAuth2AuthorizedClient client,
             @Valid @RequestBody ViewEvent request) {
         return gateway.exchange(HttpMethod.POST, "/api/analytics/views", request, token(client));
     }

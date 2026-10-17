@@ -22,13 +22,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
-@SpringBootTest(
-        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {
-            "spring.cloud.zookeeper.enabled=false",
-            "spring.cloud.zookeeper.config.enabled=false",
-            "spring.cloud.zookeeper.discovery.enabled=false"
-        })
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient
 class GatewayIntegrationTest extends SecurityTestBase {
     private static final AtomicReference<String> RECEIVED_TOKEN = new AtomicReference<>();

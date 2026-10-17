@@ -5,6 +5,7 @@ import dev.principalwater.bank.notifications.service.NotificationService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.core.oidc.IdTokenClaimNames;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -22,6 +23,6 @@ public class NotificationController {
     @PostMapping("/internal/notifications")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void receive(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody BankEvent event) {
-        notifications.receive(jwt.getClaimAsString("azp"), event);
+        notifications.receive(jwt.getClaimAsString(IdTokenClaimNames.AZP), event);
     }
 }

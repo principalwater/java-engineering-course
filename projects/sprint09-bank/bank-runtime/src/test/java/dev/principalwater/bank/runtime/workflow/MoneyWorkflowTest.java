@@ -9,7 +9,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.principalwater.bank.contract.Actor;
 import dev.principalwater.bank.contract.BankEvent;
 import dev.principalwater.bank.contract.InternalOperation;
@@ -42,7 +41,6 @@ import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataAccessException;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -52,23 +50,24 @@ import org.springframework.transaction.support.TransactionTemplate;
         properties = {
             "spring.application.name=workflow_test",
             "spring.config.import=classpath:bank-common.properties",
-            "spring.cloud.zookeeper.enabled=false",
             "spring.flyway.locations=classpath:db/workflow,classpath:db/delivery"
         })
 class MoneyWorkflowTest extends PostgresTestBase {
     private static final Instant NOW = Instant.parse("2026-10-17T12:00:00Z");
     private static final UUID ACCOUNT = UUID.fromString("0e3cd699-67b1-48a1-b60a-fae32a67ce42");
-    @Autowired private JdbcTemplate jdbc;
-    @Autowired private ObjectMapper mapper;
     @Autowired private PlatformTransactionManager transactions;
     private ServiceClient client;
     private IntentRepository intents;
     private RestOutbox outbox;
     private MoneyWorkflow workflow;
 
+    @Override
+    protected void resetDatabase() {
+        jdbc.execute("TRUNCATE bank_intent, bank_outbox");
+    }
+
     @BeforeEach
     void reset() {
-        jdbc.execute("TRUNCATE bank_intent, bank_outbox");
         client = mock(ServiceClient.class);
         intents = new IntentRepository(jdbc, mapper);
         outbox = new RestOutbox(jdbc, mapper, client);

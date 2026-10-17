@@ -1,13 +1,14 @@
 package dev.principalwater.bank.runtime.security;
 
-import java.net.http.HttpClient;
-import java.time.Duration;
+import dev.principalwater.bank.contract.security.BankTokenProfile;
+import java.util.List;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2Error;
+import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
@@ -22,26 +23,24 @@ import org.springframework.web.client.RestTemplate;
 public class ApiJwtConfiguration {
     @Bean
     JwtDecoder jwtDecoder(JwtProperties properties) {
-        JdkClientHttpRequestFactory requests =
-                new JdkClientHttpRequestFactory(
-                        HttpClient.newBuilder()
-                                .version(HttpClient.Version.HTTP_1_1)
-                                .connectTimeout(Duration.ofSeconds(1))
-                                .followRedirects(HttpClient.Redirect.NEVER)
-                                .build());
-        requests.setReadTimeout(Duration.ofSeconds(3));
+        JdkClientHttpRequestFactory requests = OAuthHttpRequests.create();
         NimbusJwtDecoder decoder =
                 NimbusJwtDecoder.withJwkSetUri(properties.jwkSetUri().toString())
                         .jwsAlgorithm(SignatureAlgorithm.RS256)
                         .restOperations(new RestTemplate(requests))
                         .build();
         OAuth2TokenValidator<Jwt> audience =
-                jwt ->
-                        jwt.getAudience().contains("bank-api")
-                                        || jwt.getAudience().contains(properties.audience())
-                                ? OAuth2TokenValidatorResult.success()
-                                : OAuth2TokenValidatorResult.failure(
-                                        new OAuth2Error("invalid_token", "Invalid audience", null));
+                jwt -> {
+                    List<String> audiences = jwt.getAudience();
+                    return audiences.contains(BankTokenProfile.USER_AUDIENCE)
+                                    || audiences.contains(properties.audience())
+                            ? OAuth2TokenValidatorResult.success()
+                            : OAuth2TokenValidatorResult.failure(
+                                    new OAuth2Error(
+                                            OAuth2ErrorCodes.INVALID_TOKEN,
+                                            "Invalid audience",
+                                            null));
+                };
         decoder.setJwtValidator(
                 new DelegatingOAuth2TokenValidator<>(
                         JwtValidators.createDefaultWithIssuer(properties.issuer().toString()),

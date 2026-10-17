@@ -5,6 +5,8 @@ import java.util.Set;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.server.reactive.ServerHttpRequest;
 
 @Configuration(proxyBeanMethods = false)
 public class UntrustedHeadersFilter {
@@ -22,22 +24,14 @@ public class UntrustedHeadersFilter {
     @Bean
     GlobalFilter stripUntrustedIdentity() {
         // Authorization остаётся исходным user access token; заголовки не выбирают владельца счёта.
-        return (exchange, chain) ->
-                chain.filter(
-                        exchange.mutate()
-                                .request(
-                                        request ->
-                                                request.headers(
-                                                        headers ->
-                                                                headers.keySet()
-                                                                        .removeIf(
-                                                                                name ->
-                                                                                        REMOVED
-                                                                                                .contains(
-                                                                                                        name
-                                                                                                                .toLowerCase(
-                                                                                                                        Locale
-                                                                                                                                .ROOT)))))
-                                .build());
+        return (exchange, chain) -> {
+            ServerHttpRequest request =
+                    exchange.getRequest().mutate().headers(this::removeUntrustedHeaders).build();
+            return chain.filter(exchange.mutate().request(request).build());
+        };
+    }
+
+    private void removeUntrustedHeaders(HttpHeaders headers) {
+        headers.keySet().removeIf(name -> REMOVED.contains(name.toLowerCase(Locale.ROOT)));
     }
 }

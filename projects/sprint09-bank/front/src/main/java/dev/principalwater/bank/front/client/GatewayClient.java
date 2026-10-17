@@ -2,9 +2,9 @@ package dev.principalwater.bank.front.client;
 
 import dev.principalwater.bank.runtime.error.BankError;
 import dev.principalwater.bank.runtime.error.BankException;
+import dev.principalwater.bank.runtime.security.OAuthHttpRequests;
 import java.io.IOException;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.Semaphore;
@@ -30,17 +30,14 @@ public class GatewayClient {
 
     public GatewayClient(
             DiscoveryClient discovery,
-            @Value("${bank.client.connect-timeout:1s}") Duration connect,
+            @Value(
+                            "${bank.client.connect-timeout:"
+                                    + OAuthHttpRequests.DEFAULT_CONNECT_TIMEOUT
+                                    + "}")
+                    Duration connect,
             @Value("${bank.front.gateway-timeout:8s}") Duration read) {
         this.discovery = discovery;
-        JdkClientHttpRequestFactory requests =
-                new JdkClientHttpRequestFactory(
-                        HttpClient.newBuilder()
-                                .connectTimeout(connect)
-                                .version(HttpClient.Version.HTTP_1_1)
-                                .followRedirects(HttpClient.Redirect.NEVER)
-                                .build());
-        requests.setReadTimeout(read);
+        JdkClientHttpRequestFactory requests = OAuthHttpRequests.create(connect, read);
         http = RestClient.builder().requestFactory(requests).build();
     }
 

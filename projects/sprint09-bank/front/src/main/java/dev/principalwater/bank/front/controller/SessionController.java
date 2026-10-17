@@ -1,7 +1,7 @@
 package dev.principalwater.bank.front.controller;
 
-import java.util.List;
-import java.util.Map;
+import dev.principalwater.bank.contract.security.BankTokenProfile;
+import dev.principalwater.bank.runtime.security.JwtAccess;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
@@ -19,11 +19,7 @@ public class SessionController {
 
     @GetMapping("/ui/session")
     public SessionView session(@AuthenticationPrincipal OidcUser user, CsrfToken csrf) {
-        Map<String, Object> realm = user.getClaimAsMap("realm_access");
-        boolean analyst =
-                realm != null
-                        && realm.get("roles") instanceof List<?> roles
-                        && roles.contains("analyst");
+        boolean analyst = JwtAccess.hasRealmRole(user, BankTokenProfile.ANALYST_ROLE);
         return new SessionView(
                 user.getPreferredUsername(),
                 csrf.getToken(),

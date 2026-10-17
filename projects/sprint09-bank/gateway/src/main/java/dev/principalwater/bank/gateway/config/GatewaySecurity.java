@@ -1,7 +1,9 @@
 package dev.principalwater.bank.gateway.config;
 
+import dev.principalwater.bank.contract.security.BankTokenProfile;
 import io.netty.channel.ChannelOption;
 import java.time.Duration;
+import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,8 +14,10 @@ import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2Error;
+import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
+import org.springframework.security.oauth2.core.oidc.IdTokenClaimNames;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtValidators;
@@ -27,6 +31,9 @@ import reactor.netty.http.client.HttpClient;
 
 @Configuration(proxyBeanMethods = false)
 public class GatewaySecurity {
+    private static final int JWK_CONNECT_TIMEOUT_MILLIS = 1000;
+    private static final Duration JWK_READ_TIMEOUT = Duration.ofSeconds(3);
+
     @Bean
     ReactiveJwtDecoder gatewayDecoder(
             @Value("${bank.security.issuer}") String issuer,
@@ -34,25 +41,19 @@ public class GatewaySecurity {
         NimbusReactiveJwtDecoder decoder =
                 NimbusReactiveJwtDecoder.withJwkSetUri(jwks)
                         .jwsAlgorithm(SignatureAlgorithm.RS256)
-                        .webClient(
-                                WebClient.builder()
-                                        .clientConnector(
-                                                new ReactorClientHttpConnector(
-                                                        HttpClient.create()
-                                                                .option(
-                                                                        ChannelOption
-                                                                                .CONNECT_TIMEOUT_MILLIS,
-                                                                        1000)
-                                                                .responseTimeout(
-                                                                        Duration.ofSeconds(3))))
-                                        .build())
+                        .webClient(jwkClient())
                         .build();
         OAuth2TokenValidator<Jwt> userAudience =
-                jwt ->
-                        jwt.getAudience().contains("bank-api")
-                                ? OAuth2TokenValidatorResult.success()
-                                : OAuth2TokenValidatorResult.failure(
-                                        new OAuth2Error("invalid_token", "Invalid audience", null));
+                jwt -> {
+                    List<String> audiences = jwt.getAudience();
+                    return audiences.contains(BankTokenProfile.USER_AUDIENCE)
+                            ? OAuth2TokenValidatorResult.success()
+                            : OAuth2TokenValidatorResult.failure(
+                                    new OAuth2Error(
+                                            OAuth2ErrorCodes.INVALID_TOKEN,
+                                            "Invalid audience",
+                                            null));
+                };
         decoder.setJwtValidator(
                 new DelegatingOAuth2TokenValidator<>(
                         JwtValidators.createDefaultWithIssuer(issuer), userAudience));
@@ -78,8 +79,17 @@ public class GatewaySecurity {
                 .build();
     }
 
+    private WebClient jwkClient() {
+        HttpClient http =
+                HttpClient.create()
+                        .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, JWK_CONNECT_TIMEOUT_MILLIS)
+                        .responseTimeout(JWK_READ_TIMEOUT);
+        return WebClient.builder().clientConnector(new ReactorClientHttpConnector(http)).build();
+    }
+
     private boolean isBankFront(Authentication authentication) {
         return authentication instanceof JwtAuthenticationToken token
-                && "bank-front".equals(token.getToken().getClaimAsString("azp"));
+                && BankTokenProfile.FRONT_CLIENT_ID.equals(
+                        token.getToken().getClaimAsString(IdTokenClaimNames.AZP));
     }
 }

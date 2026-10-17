@@ -1,9 +1,8 @@
 package dev.principalwater.bank.analytics.config;
 
 import dev.principalwater.bank.analytics.dao.AnalyticsInbox;
-import dev.principalwater.bank.analytics.dao.CassandraActivityStore;
-import dev.principalwater.bank.analytics.dao.ClickHouseWarehouse;
 import dev.principalwater.bank.analytics.model.AnalyticsUnavailable;
+import dev.principalwater.bank.analytics.service.AnalyticsPublisher;
 import java.util.UUID;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -23,19 +22,19 @@ public class AnalyticsRelay {
             name = "bank.analytics.delivery-enabled",
             havingValue = "true",
             matchIfMissing = true)
-    Workers analyticsWorkers(
-            AnalyticsInbox inbox, CassandraActivityStore cassandra, ClickHouseWarehouse warehouse) {
-        return new Workers(inbox, cassandra, warehouse);
+    Workers analyticsWorkers(AnalyticsInbox inbox, AnalyticsPublisher publisher) {
+        return new Workers(inbox, publisher);
     }
 
     static final class Workers implements AutoCloseable {
         private static final Logger LOG = LoggerFactory.getLogger(Workers.class);
         private final AnalyticsInbox inbox;
-        private final CassandraActivityStore cassandra;
-        private final ClickHouseWarehouse warehouse;
+        private final AnalyticsPublisher publisher;
         private final ScheduledThreadPoolExecutor timer =
                 new ScheduledThreadPoolExecutor(
                         1, Thread.ofPlatform().name("analytics-relay-timer-", 0).factory());
+        // Два одновременных publish и очередь нулевой длины ограничивают память и нагрузку при
+        // отказе Kafka.
         private final ThreadPoolExecutor workers =
                 new ThreadPoolExecutor(
                         2,
@@ -46,13 +45,9 @@ public class AnalyticsRelay {
                         Thread.ofPlatform().name("analytics-relay-", 0).factory(),
                         new ThreadPoolExecutor.AbortPolicy());
 
-        Workers(
-                AnalyticsInbox inbox,
-                CassandraActivityStore cassandra,
-                ClickHouseWarehouse warehouse) {
+        Workers(AnalyticsInbox inbox, AnalyticsPublisher publisher) {
             this.inbox = inbox;
-            this.cassandra = cassandra;
-            this.warehouse = warehouse;
+            this.publisher = publisher;
             timer.setRemoveOnCancelPolicy(true);
             timer.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
             timer.setContinueExistingPeriodicTasksAfterShutdownPolicy(false);
@@ -79,31 +74,19 @@ public class AnalyticsRelay {
             }
             boolean failed = false;
             try {
-                if (!delivery.cassandraDone()) {
-                    try {
-                        cassandra.insert(delivery.event());
-                        inbox.acknowledgeCassandra(delivery);
-                    } catch (AnalyticsUnavailable exception) {
-                        failed = true;
-                        log(exception);
-                    }
-                }
-                if (!delivery.warehouseDone()) {
-                    try {
-                        warehouse.insert(delivery.event());
-                        inbox.acknowledgeWarehouse(delivery);
-                    } catch (AnalyticsUnavailable exception) {
-                        failed = true;
-                        log(exception);
-                    }
-                }
+                publisher.publish(delivery.event());
+            } catch (AnalyticsUnavailable exception) {
+                failed = true;
+                log(exception);
             } finally {
+                // Broker ACK не завершает доставку: до обоих sink ACK inbox повторит тот же
+                // eventId.
                 inbox.release(delivery, failed);
             }
         }
 
         private void log(AnalyticsUnavailable failure) {
-            LOG.warn("Analytics projection delivery unavailable: {}", failure.getCategory());
+            LOG.warn("Analytics Kafka delivery unavailable: {}", failure.getCategory());
         }
 
         private void safely(Runnable task) {

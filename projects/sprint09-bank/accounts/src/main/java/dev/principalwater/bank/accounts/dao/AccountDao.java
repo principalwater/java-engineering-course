@@ -28,6 +28,8 @@ public class AccountDao {
     }
 
     public Account provision(Actor actor) {
+        // Конкурентное создание сохраняет первую связь issuer/sub/login; SELECT не подменяет
+        // владельца.
         jdbc.update(
                 "INSERT INTO account(id,issuer,subject,login) VALUES (?,?,?,?) ON CONFLICT DO NOTHING",
                 UUID.randomUUID(),
@@ -71,7 +73,7 @@ public class AccountDao {
 
     public Page<Recipient> recipients(UUID owner, String after, String search, int limit) {
         checkLimit(limit);
-        if (search.length() > 80) {
+        if (search.length() > BankLimits.MAX_RECIPIENT_SEARCH_LENGTH) {
             throw new BankException(BankError.INVALID_REQUEST);
         }
         UUID cursor = after == null ? new UUID(0, 0) : UUID.fromString(after);

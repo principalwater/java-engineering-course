@@ -25,6 +25,7 @@ public class NotificationDao {
         } catch (JsonProcessingException exception) {
             throw new IllegalArgumentException("Invalid notification payload");
         }
+        // Конкурентный повтор сохраняет первый receipt; ниже сверяем payload перед ответом.
         int inserted =
                 jdbc.update(
                         """

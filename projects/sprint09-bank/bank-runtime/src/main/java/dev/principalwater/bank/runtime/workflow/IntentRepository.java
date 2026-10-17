@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.principalwater.bank.contract.InternalOperation;
 import dev.principalwater.bank.contract.OperationResult;
+import dev.principalwater.bank.runtime.delivery.DeliveryPolicy;
 import dev.principalwater.bank.runtime.error.BankError;
 import dev.principalwater.bank.runtime.error.BankException;
 import java.sql.ResultSet;
@@ -14,7 +15,6 @@ import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 public class IntentRepository {
-    private static final int BATCH_SIZE = 16;
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
 
@@ -24,6 +24,8 @@ public class IntentRepository {
     }
 
     public Intent reserve(InternalOperation operation) {
+        // Конкурентный повтор сохраняет первый payload; ниже сверяем неизменяемые параметры
+        // команды.
         jdbc.update(
                 """
                 INSERT INTO bank_intent(id, issuer, subject, operation_type, request_id, payload)
@@ -70,20 +72,21 @@ public class IntentRepository {
                 AND (lease_until IS NULL OR lease_until < now()) ORDER BY next_attempt_at, id LIMIT ?
                 """,
                 (row, number) -> row.getObject("id", UUID.class),
-                BATCH_SIZE);
+                DeliveryPolicy.BATCH_SIZE);
     }
 
     public Intent claim(UUID id) {
         List<Intent> claimed =
                 jdbc.query(
                         """
-                UPDATE bank_intent SET lease_token = ?, lease_until = now() + interval '30 seconds'
+                UPDATE bank_intent SET lease_token = ?, lease_until = now() + make_interval(secs => ?)
                 WHERE id = ? AND result IS NULL AND next_attempt_at <= now()
                 AND (lease_until IS NULL OR lease_until < now())
                 RETURNING id, payload::text, result::text, lease_token
                 """,
                         this::read,
                         UUID.randomUUID(),
+                        DeliveryPolicy.LEASE_SECONDS,
                         id);
         return claimed.isEmpty() ? null : claimed.getFirst();
     }
@@ -104,9 +107,10 @@ public class IntentRepository {
         jdbc.update(
                 """
                 UPDATE bank_intent SET lease_token = NULL, lease_until = NULL,
-                next_attempt_at = now() + interval '5 seconds', attempts = attempts + 1
+                next_attempt_at = now() + make_interval(secs => ?), attempts = attempts + 1
                 WHERE id = ? AND lease_token = ? AND result IS NULL
                 """,
+                DeliveryPolicy.RETRY_DELAY_SECONDS,
                 intent.id(),
                 intent.lease());
     }

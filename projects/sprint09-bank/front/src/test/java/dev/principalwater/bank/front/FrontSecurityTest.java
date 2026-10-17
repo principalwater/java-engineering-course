@@ -17,12 +17,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import dev.principalwater.bank.front.client.GatewayClient;
-import dev.principalwater.bank.testing.SecurityTestBase;
+import dev.principalwater.bank.testing.ServletSecurityTestBase;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -35,19 +34,13 @@ import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest(
         properties = {
             "spring.config.import=classpath:bank-common.properties",
-            "spring.cloud.zookeeper.enabled=false",
-            "spring.cloud.zookeeper.config.enabled=false",
-            "spring.cloud.zookeeper.discovery.enabled=false",
             "bank.login.client-secret=fixture-secret"
         })
-@AutoConfigureMockMvc
-class FrontSecurityTest extends SecurityTestBase {
-    @Autowired private MockMvc mvc;
+class FrontSecurityTest extends ServletSecurityTestBase {
     @Autowired private ClientRegistrationRepository registrations;
     @Autowired private JwtDecoderFactory<ClientRegistration> decoders;
     @MockitoBean private GatewayClient gateway;
@@ -60,17 +53,17 @@ class FrontSecurityTest extends SecurityTestBase {
 
     @Test
     void authenticatedCabinetAndApiCannotBeReadWithoutLogin() throws Exception {
-        mvc.perform(get("/cabinet"))
+        http.perform(get("/cabinet"))
                 .andExpect(status().is3xxRedirection())
                 .andExpect(redirectedUrlPattern("**/login"));
-        mvc.perform(get("/ui/account")).andExpect(status().isUnauthorized());
+        http.perform(get("/ui/account")).andExpect(status().isUnauthorized());
         verifyNoInteractions(gateway);
     }
 
     @Test
     void browserLogoutPolicyPermitsOnlyTheConfiguredIdentityProvider() throws Exception {
         String policy =
-                mvc.perform(get("/login"))
+                http.perform(get("/login"))
                         .andReturn()
                         .getResponse()
                         .getHeader("Content-Security-Policy");
@@ -84,7 +77,7 @@ class FrontSecurityTest extends SecurityTestBase {
     void missingAuthorizedClientReturnsApiStatusInsteadOfAnIdpRedirect() throws Exception {
         when(gateway.exchange(eq(HttpMethod.GET), eq("/api/accounts/me"), eq(null), any()))
                 .thenThrow(new ClientAuthorizationRequiredException("bank"));
-        mvc.perform(
+        http.perform(
                         get("/ui/account")
                                 .with(
                                         oidcLogin()
@@ -98,7 +91,7 @@ class FrontSecurityTest extends SecurityTestBase {
     @Test
     void authorizationCodeRequestUsesPkceAndRetainsCanonicalIssuer() throws Exception {
         String location =
-                mvc.perform(get("/oauth2/authorization/bank"))
+                http.perform(get("/oauth2/authorization/bank"))
                         .andExpect(status().is3xxRedirection())
                         .andReturn()
                         .getResponse()
@@ -152,13 +145,13 @@ class FrontSecurityTest extends SecurityTestBase {
         ClientRegistration bank = registrations.findByRegistrationId("bank");
         String profile =
                 "{\"fullName\":\"Alice Example\",\"birthDate\":\"1990-06-15\",\"version\":0}";
-        mvc.perform(
+        http.perform(
                         put("/ui/account")
                                 .with(oidcLogin().clientRegistration(bank))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(profile))
                 .andExpect(status().isForbidden());
-        mvc.perform(post("/logout").with(oidcLogin().clientRegistration(bank)))
+        http.perform(post("/logout").with(oidcLogin().clientRegistration(bank)))
                 .andExpect(status().isForbidden());
         verifyNoInteractions(gateway);
     }
@@ -171,7 +164,7 @@ class FrontSecurityTest extends SecurityTestBase {
                         ResponseEntity.ok(
                                 "{\"login\":\"alice\"}"
                                         .getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-        mvc.perform(get("/ui/account").with(oidcLogin().clientRegistration(bank)))
+        http.perform(get("/ui/account").with(oidcLogin().clientRegistration(bank)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.login").value("alice"));
         org.mockito.Mockito.verify(gateway)
@@ -186,7 +179,7 @@ class FrontSecurityTest extends SecurityTestBase {
                         ResponseEntity.ok(
                                 "{\"version\":1}"
                                         .getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-        mvc.perform(
+        http.perform(
                         put("/ui/account")
                                 .with(oidcLogin().clientRegistration(bank))
                                 .with(csrf())

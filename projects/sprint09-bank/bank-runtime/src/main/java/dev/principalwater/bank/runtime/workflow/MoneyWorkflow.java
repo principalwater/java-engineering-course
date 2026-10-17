@@ -10,6 +10,7 @@ import dev.principalwater.bank.runtime.delivery.RestOutbox;
 import dev.principalwater.bank.runtime.error.BankException;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -94,31 +95,38 @@ public class MoneyWorkflow {
                     if (intents.complete(intent, completed)
                             && completed.accountId() != null
                             && completed.balanceMinor() != null) {
-                        InternalOperation command = intent.operation();
-                        String key =
-                                command.actor().issuer().length()
-                                        + ":"
-                                        + command.actor().issuer()
-                                        + command.actor().subject().length()
-                                        + ":"
-                                        + command.actor().subject()
-                                        + ":"
-                                        + command.type()
-                                        + ":"
-                                        + command.operationId();
-                        UUID eventId = UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8));
-                        BankEvent event =
-                                new BankEvent(
-                                        eventId,
-                                        completed.accountId(),
-                                        command.type().name() + "_" + completed.status().name(),
-                                        command.amountMinor(),
-                                        completed.balanceMinor(),
-                                        completed.occurredAt() == null
-                                                ? clock.instant()
-                                                : completed.occurredAt());
-                        outbox.enqueue("notifications", "/internal/notifications", event);
+                        Instant occurredAt =
+                                completed.occurredAt() == null
+                                        ? clock.instant()
+                                        : completed.occurredAt();
+                        outbox.enqueue(
+                                "notifications",
+                                "/internal/notifications",
+                                completionEvent(intent.operation(), completed, occurredAt));
                     }
                 });
+    }
+
+    private BankEvent completionEvent(
+            InternalOperation command, OperationResult result, Instant occurredAt) {
+        String key =
+                command.actor().issuer().length()
+                        + ":"
+                        + command.actor().issuer()
+                        + command.actor().subject().length()
+                        + ":"
+                        + command.actor().subject()
+                        + ":"
+                        + command.type()
+                        + ":"
+                        + command.operationId();
+        UUID eventId = UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8));
+        return new BankEvent(
+                eventId,
+                result.accountId(),
+                command.type().name() + "_" + result.status().name(),
+                command.amountMinor(),
+                result.balanceMinor(),
+                occurredAt);
     }
 }

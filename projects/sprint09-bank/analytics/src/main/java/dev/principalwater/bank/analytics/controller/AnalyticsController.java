@@ -2,7 +2,8 @@ package dev.principalwater.bank.analytics.controller;
 
 import dev.principalwater.bank.analytics.dao.AnalyticsInbox;
 import dev.principalwater.bank.analytics.model.AnalyticsView;
-import dev.principalwater.bank.analytics.service.AnalyticsService;
+import dev.principalwater.bank.analytics.service.BusinessAnalyticsService;
+import dev.principalwater.bank.analytics.service.PersonalAnalyticsService;
 import dev.principalwater.bank.contract.BankEvent;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
@@ -17,28 +18,33 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 public class AnalyticsController {
-    private final AnalyticsService analytics;
+    private final PersonalAnalyticsService personal;
+    private final BusinessAnalyticsService business;
     private final AnalyticsInbox inbox;
 
-    public AnalyticsController(AnalyticsService analytics, AnalyticsInbox inbox) {
-        this.analytics = analytics;
+    public AnalyticsController(
+            PersonalAnalyticsService personal,
+            BusinessAnalyticsService business,
+            AnalyticsInbox inbox) {
+        this.personal = personal;
+        this.business = business;
         this.inbox = inbox;
     }
 
     @GetMapping("/api/analytics")
     public AnalyticsView personal(@AuthenticationPrincipal Jwt jwt) {
-        return analytics.personal(jwt);
+        return personal.personal(jwt);
     }
 
     @GetMapping("/api/analytics/business")
     public AnalyticsView business() {
-        return analytics.business();
+        return business.business();
     }
 
     @PostMapping("/api/analytics/views")
     public ResponseEntity<Void> view(
             @AuthenticationPrincipal Jwt jwt, @Valid @RequestBody ViewRequest view) {
-        analytics.view(jwt, view.eventId());
+        personal.view(jwt, view.eventId());
         return ResponseEntity.noContent().build();
     }
 

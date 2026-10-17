@@ -5,47 +5,26 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.principalwater.bank.contract.BankEvent;
+import dev.principalwater.bank.notifications.NotificationsTestBase;
 import dev.principalwater.bank.runtime.client.ServiceClient;
-import dev.principalwater.bank.testing.PostgresTestBase;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.ApplicationContext;
 import org.springframework.http.MediaType;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.web.servlet.MockMvc;
 
-@SpringBootTest(
-        properties = {
-            "spring.config.import=classpath:bank-common.properties",
-            "spring.cloud.zookeeper.enabled=false",
-            "bank.delivery.enabled=false"
-        })
-@AutoConfigureMockMvc
 @ExtendWith(OutputCaptureExtension.class)
-class NotificationHttpTest extends PostgresTestBase {
-    @Autowired private MockMvc http;
-    @Autowired private ObjectMapper mapper;
-    @Autowired private JdbcTemplate jdbc;
+class NotificationHttpTest extends NotificationsTestBase {
     @Autowired private ApplicationContext context;
-
-    @BeforeEach
-    void reset() {
-        jdbc.execute("TRUNCATE bank_notification");
-    }
 
     @Test
     void receiptIsDurableDeduplicatedPerCallerAndRejectsChangedPayload(CapturedOutput output)

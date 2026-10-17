@@ -1,0 +1,6 @@
+apiVersion: v2
+name: study-kafka
+description: Одноброкерный KRaft-стенд с постоянным хранилищем
+type: application
+version: 0.1.0
+appVersion: "4.0.0"

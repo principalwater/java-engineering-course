@@ -1,8 +1,8 @@
 package dev.principalwater.bank.analytics.service;
 
 import dev.principalwater.bank.analytics.dao.CassandraActivityStore;
-import dev.principalwater.bank.analytics.model.AnalyticsEventType;
 import dev.principalwater.bank.analytics.model.AnalyticsView;
+import dev.principalwater.bank.contract.AnalyticsEventType;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;

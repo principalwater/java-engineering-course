@@ -1,5 +1,6 @@
 package dev.principalwater.bank.analytics.config;
 
+import java.time.Duration;
 import java.util.Map;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
@@ -18,7 +19,9 @@ import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
+import org.springframework.kafka.event.ConsumerRetryAuthEvent;
 import org.springframework.kafka.event.ConsumerStoppedEvent;
+import org.springframework.kafka.event.KafkaEvent;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.listener.RetryListener;
@@ -37,6 +40,7 @@ public class AnalyticsKafka {
     // 4s delivery deadline должен завершиться внутри 5s close, не съедая стандартные 30s graceful
     // shutdown.
     private static final int PRODUCER_CLOSE_SECONDS = 5;
+    private static final Duration AUTHENTICATION_RETRY = Duration.ofSeconds(10);
     private final KafkaProperties properties;
     private final String jaas;
 
@@ -90,10 +94,13 @@ public class AnalyticsKafka {
     }
 
     @Bean
-    ApplicationListener<ConsumerStoppedEvent> analyticsConsumerFailureLogger() {
+    ApplicationListener<KafkaEvent> analyticsConsumerFailureLogger() {
         return event -> {
-            if (event.getReason() != ConsumerStoppedEvent.Reason.NORMAL) {
-                LOG.warn("Analytics consumer stopped: {}", event.getReason());
+            if (event instanceof ConsumerStoppedEvent stopped
+                    && stopped.getReason() != ConsumerStoppedEvent.Reason.NORMAL) {
+                LOG.warn("Analytics consumer stopped: {}", stopped.getReason());
+            } else if (event instanceof ConsumerRetryAuthEvent retry) {
+                LOG.warn("Analytics consumer authorization retry: {}", retry.getReason());
             }
         };
     }
@@ -107,6 +114,8 @@ public class AnalyticsKafka {
         listeners.setConcurrency(CONSUMERS_PER_GROUP);
         listeners.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
         listeners.getContainerProperties().setPollTimeout(POLL_TIMEOUT_MS);
+        // При восстановлении ACL/брокера consumer продолжает работу, а не останавливается навсегда.
+        listeners.getContainerProperties().setAuthExceptionRetryInterval(AUTHENTICATION_RETRY);
         // Штатная пауза потока 5s меньше max.poll.interval 60s; seekAfterError=false удерживает
         // только одну запись.
         DefaultErrorHandler errors =

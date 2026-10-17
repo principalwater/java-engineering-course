@@ -7,8 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import dev.principalwater.bank.analytics.dao.CassandraActivityStore;
-import dev.principalwater.bank.analytics.model.AnalyticsEventType;
 import dev.principalwater.bank.analytics.model.AnalyticsView;
+import dev.principalwater.bank.contract.AnalyticsEventType;
 import dev.principalwater.bank.contract.BankEvent;
 import dev.principalwater.bank.contract.BankLimits;
 import java.time.Instant;

@@ -4,6 +4,7 @@ import dev.principalwater.bank.accounts.dao.AccountDao;
 import dev.principalwater.bank.accounts.dao.OperationDao;
 import dev.principalwater.bank.accounts.model.Account;
 import dev.principalwater.bank.accounts.model.MoneyRules;
+import dev.principalwater.bank.contract.AnalyticsEventType;
 import dev.principalwater.bank.contract.BankEvent;
 import dev.principalwater.bank.contract.InternalOperation;
 import dev.principalwater.bank.contract.OperationResult;
@@ -66,14 +67,16 @@ public class MoneyService {
                         : -command.amountMinor();
         long balance = Math.addExact(source.balanceMinor(), delta);
         String type =
-                command.type() == OperationType.TRANSFER ? "TRANSFER_OUT" : command.type().name();
+                command.type() == OperationType.TRANSFER
+                        ? AnalyticsEventType.TRANSFER_OUT.name()
+                        : command.type().name();
         apply(source.id(), source.id(), command, type, delta, balance, command.recipientId(), now);
         if (recipient != null) {
             apply(
                     recipient.id(),
                     source.id(),
                     command,
-                    "TRANSFER_IN",
+                    AnalyticsEventType.TRANSFER_IN.name(),
                     command.amountMinor(),
                     Math.addExact(recipient.balanceMinor(), command.amountMinor()),
                     source.id(),

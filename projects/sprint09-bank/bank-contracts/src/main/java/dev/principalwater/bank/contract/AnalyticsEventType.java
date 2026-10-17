@@ -1,7 +1,5 @@
-package dev.principalwater.bank.analytics.model;
+package dev.principalwater.bank.contract;
 
-import dev.principalwater.bank.contract.BankEvent;
-import dev.principalwater.bank.contract.BankLimits;
 import java.time.Instant;
 
 public enum AnalyticsEventType {

@@ -2,9 +2,9 @@ package dev.principalwater.bank.analytics.dao;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.principalwater.bank.analytics.model.AnalyticsEventType;
 import dev.principalwater.bank.analytics.model.AnalyticsProjection;
 import dev.principalwater.bank.analytics.model.InvalidAnalyticsRecord;
+import dev.principalwater.bank.contract.AnalyticsEventType;
 import dev.principalwater.bank.contract.BankEvent;
 import dev.principalwater.bank.runtime.error.BankError;
 import dev.principalwater.bank.runtime.error.BankException;
@@ -23,6 +23,9 @@ public class AnalyticsInbox {
     private static final int BATCH_SIZE = 16;
     private static final int LEASE_SECONDS = 30;
     private static final int REPUBLISH_SECONDS = 30;
+    private static final int MAX_REPUBLISH_SECONDS = 900;
+    // 30 * 2^5 уже достигает предела 15 минут; bounded shift исключает overflow на старом backlog.
+    private static final int MAX_REPUBLISH_SHIFT = 5;
     private static final int RETRY_STEP_SECONDS = 2;
     private static final int MAX_RETRY_SECONDS = 60;
     private static final int MAX_RECORDED_ATTEMPTS = 1_000_000;
@@ -91,7 +94,8 @@ public class AnalyticsInbox {
                 """
                 SELECT event_id FROM analytics_inbox
                 WHERE NOT (cassandra_done AND warehouse_done) AND next_attempt_at <= now()
-                AND (lease_until IS NULL OR lease_until < now()) ORDER BY next_attempt_at, event_id LIMIT ?
+                AND (lease_until IS NULL OR lease_until < now())
+                ORDER BY (attempts > 0), next_attempt_at, event_id LIMIT ?
                 """,
                 (row, number) -> row.getObject(1, UUID.class),
                 BATCH_SIZE);
@@ -168,13 +172,14 @@ public class AnalyticsInbox {
     }
 
     public void release(Delivery delivery, boolean failed) {
-        // Через 30s повторяем неподтверждённый факт даже после broker ACK/retention; сбои отступают
-        // до 60s.
+        // Успешный publish без sink ACK отступает от 30s до 15min, чтобы outage одной витрины не
+        // вытеснял свежие факты дублями. Сбой брокера повторяем раньше, с пределом 60s.
         jdbc.update(
                 """
                 UPDATE analytics_inbox SET lease_token = NULL, lease_until = NULL,
                 attempts = least(attempts + 1, ?),
-                next_attempt_at = now() + make_interval(secs => CASE WHEN ? THEN least(?, ? + attempts * ?) ELSE ? END)
+                next_attempt_at = now() + make_interval(secs => CASE WHEN ? THEN least(?, ? + attempts * ?)
+                    ELSE least(?, ? * (1 << least(attempts, ?))) END)
                 WHERE event_id = ? AND lease_token = ?
                 """,
                 MAX_RECORDED_ATTEMPTS,
@@ -182,7 +187,9 @@ public class AnalyticsInbox {
                 MAX_RETRY_SECONDS,
                 RETRY_STEP_SECONDS,
                 RETRY_STEP_SECONDS,
+                MAX_REPUBLISH_SECONDS,
                 REPUBLISH_SECONDS,
+                MAX_REPUBLISH_SHIFT,
                 delivery.event().eventId(),
                 delivery.lease());
     }

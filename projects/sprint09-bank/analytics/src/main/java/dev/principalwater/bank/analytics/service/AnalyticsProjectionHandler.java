@@ -20,8 +20,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class AnalyticsProjectionHandler {
     private static final Logger LOG = LoggerFactory.getLogger(AnalyticsProjectionHandler.class);
-    // Полный BankEvent меньше 1KiB; запас 4KiB не допускает разбор произвольно большого JSON из
-    // брокера.
+    // Фиксированный BankEvent меньше 1KiB; 4KiB оставляют запас ниже broker limit 32KiB и
+    // ограничивают JSON parsing.
     private static final int MAX_EVENT_CHARACTERS = 4096;
     private final AnalyticsInbox inbox;
     private final ObjectMapper mapper;

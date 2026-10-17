@@ -2,6 +2,7 @@ package dev.principalwater.bank.analytics;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -15,6 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.principalwater.bank.analytics.controller.AnalyticsController;
+import dev.principalwater.bank.analytics.dao.AnalyticsInbox;
 import dev.principalwater.bank.analytics.model.AnalyticsView;
 import dev.principalwater.bank.contract.BankEvent;
 import java.time.YearMonth;
@@ -25,8 +27,42 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.springframework.beans.factory.annotation.Autowired;
 
 class AnalyticsIntegrationTest extends AnalyticsTestBase {
+    @Autowired private AnalyticsInbox inbox;
+
+    @Test
+    void freshFactsPrecedeDueRetriesAndSuccessfulRepublishBackoffIsBounded() {
+        BankEvent retry = event();
+        inbox.acceptFinancial(retry);
+        inbox.release(inbox.claim(retry.eventId()), false);
+        jdbc.update(
+                "UPDATE analytics_inbox SET next_attempt_at = now() - interval '1 day' WHERE event_id = ?",
+                retry.eventId());
+        BankEvent fresh = event();
+        inbox.acceptFinancial(fresh);
+        assertEquals(fresh.eventId(), inbox.pendingIds().getFirst());
+
+        inbox.release(inbox.claim(retry.eventId()), false);
+        double secondDelay =
+                jdbc.queryForObject(
+                        "SELECT extract(epoch FROM next_attempt_at - now()) FROM analytics_inbox WHERE event_id = ?",
+                        Double.class,
+                        retry.eventId());
+        assertTrue(secondDelay > 59 && secondDelay <= 60);
+        jdbc.update(
+                "UPDATE analytics_inbox SET attempts = 1000000, next_attempt_at = now() - interval '1 second' WHERE event_id = ?",
+                retry.eventId());
+        inbox.release(inbox.claim(retry.eventId()), false);
+        double cappedDelay =
+                jdbc.queryForObject(
+                        "SELECT extract(epoch FROM next_attempt_at - now()) FROM analytics_inbox WHERE event_id = ?",
+                        Double.class,
+                        retry.eventId());
+        assertTrue(cappedDelay > 899 && cappedDelay <= 900);
+    }
+
     @Test
     void inboxAcknowledgesOnlyDurableImmutableEventsAndPreservesNanosecondPayloadOnReplay()
             throws Exception {

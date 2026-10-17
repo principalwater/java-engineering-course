@@ -1,4 +1,4 @@
-package dev.principalwater.bank.analytics;
+package dev.principalwater.bank.analytics.config;
 
 import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -9,6 +9,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import dev.principalwater.bank.analytics.AnalyticsTestBase;
 import dev.principalwater.bank.analytics.dao.AnalyticsInbox;
 import dev.principalwater.bank.analytics.model.AnalyticsProjection;
 import dev.principalwater.bank.analytics.service.AnalyticsPublisher;
@@ -78,6 +79,81 @@ class KafkaAnalyticsIntegrationTest extends AnalyticsTestBase {
     }
 
     @Test
+    void relayDrainsTwoHundredDurableEventsWithinFiniteDeadline() {
+        for (int number = 0; number < 200; number++) {
+            inbox.acceptFinancial(event());
+        }
+        startConsumers();
+        long started = System.nanoTime();
+        try (AnalyticsRelay.Workers relay = new AnalyticsRelay.Workers(inbox, publisher)) {
+            relay.start();
+            await().atMost(WAIT)
+                    .untilAsserted(
+                            () ->
+                                    assertEquals(
+                                            200,
+                                            jdbc.queryForObject(
+                                                    "SELECT count(*) FROM analytics_inbox WHERE cassandra_done AND warehouse_done",
+                                                    Integer.class)));
+            awaitCommitted(endOffset());
+        }
+        long elapsedMillis = Duration.ofNanos(System.nanoTime() - started).toMillis();
+        assertTrue(elapsedMillis < WAIT.toMillis());
+        System.out.println("Relay drained 200 durable events in " + elapsedMillis + "ms");
+    }
+
+    @Test
+    void relayRepublishesDurablePendingFactAfterKafkaRecordsAreDeleted() throws Exception {
+        BankEvent event = event();
+        inbox.acceptFinancial(event);
+        long firstOffset = endOffset();
+        try (AnalyticsRelay.Workers relay = new AnalyticsRelay.Workers(inbox, publisher)) {
+            relay.start();
+            await().atMost(WAIT)
+                    .untilAsserted(
+                            () -> {
+                                assertTrue(endOffset() > firstOffset);
+                                assertTrue(
+                                        jdbc.queryForObject(
+                                                "SELECT attempts > 0 AND lease_token IS NULL FROM analytics_inbox WHERE event_id = ?",
+                                                Boolean.class,
+                                                event.eventId()));
+                            });
+        }
+        assertFalse(done(event, true));
+        assertFalse(done(event, false));
+        long removedUntil = endOffset();
+        long lowWatermark =
+                admin.deleteRecords(Map.of(PARTITION, RecordsToDelete.beforeOffset(removedUntil)))
+                        .lowWatermarks()
+                        .get(PARTITION)
+                        .get(WAIT.toSeconds(), TimeUnit.SECONDS)
+                        .lowWatermark();
+        assertTrue(lowWatermark >= removedUntil);
+        // Сдвигаем только retry-clock строки fixture: неизменный payload/ID обязан пережить потерю
+        // записи Kafka.
+        jdbc.update(
+                "UPDATE analytics_inbox SET next_attempt_at = now() - interval '1 second' WHERE event_id = ?",
+                event.eventId());
+        startConsumers();
+        try (AnalyticsRelay.Workers relay = new AnalyticsRelay.Workers(inbox, publisher)) {
+            relay.start();
+            awaitAcknowledged(event);
+            awaitCommitted(endOffset());
+        }
+        verify(cassandra, times(1)).insert(event);
+        verify(warehouse, times(1)).insert(event);
+        assertEquals(
+                event,
+                mapper.readValue(
+                        jdbc.queryForObject(
+                                "SELECT payload::text FROM analytics_inbox WHERE event_id = ?",
+                                String.class,
+                                event.eventId()),
+                        BankEvent.class));
+    }
+
+    @Test
     void logicalRedeliveryAndConsumerRestartSkipAlreadyAcknowledgedSinks() {
         BankEvent event = event();
         inbox.acceptFinancial(event);
@@ -124,7 +200,7 @@ class KafkaAnalyticsIntegrationTest extends AnalyticsTestBase {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"malformed", "key", "payload"})
+    @ValueSource(strings = {"malformed", "key", "payload", "unknown", "null", "oversize"})
     void poisonIsDurablyQuarantinedAndDoesNotBlockTheNextValidFact(String kind) throws Exception {
         BankEvent event = event();
         inbox.acceptFinancial(event);
@@ -145,6 +221,21 @@ class KafkaAnalyticsIntegrationTest extends AnalyticsTestBase {
                         mapper.writeValueAsString(
                                 new BankEvent(event.eventId(), ALICE, "DEPOSIT", 30, 100, NOW));
                 reason = "PAYLOAD_MISMATCH";
+            }
+            case "unknown" -> {
+                value = mapper.writeValueAsString(event());
+                reason = "UNKNOWN_EVENT";
+            }
+            case "null" -> {
+                value = null;
+                reason = "MALFORMED";
+            }
+            case "oversize" -> {
+                value =
+                        mapper.writeValueAsString(
+                                new BankEvent(
+                                        event.eventId(), ALICE, "A".repeat(5000), 29, 100, NOW));
+                reason = "MALFORMED";
             }
             default -> throw new IllegalArgumentException("Unknown Kafka fixture");
         }

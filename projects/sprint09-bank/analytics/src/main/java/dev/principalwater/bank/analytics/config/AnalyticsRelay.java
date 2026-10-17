@@ -3,8 +3,9 @@ package dev.principalwater.bank.analytics.config;
 import dev.principalwater.bank.analytics.dao.AnalyticsInbox;
 import dev.principalwater.bank.analytics.model.AnalyticsUnavailable;
 import dev.principalwater.bank.analytics.service.AnalyticsPublisher;
+import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -28,22 +29,25 @@ public class AnalyticsRelay {
 
     static final class Workers implements AutoCloseable {
         private static final Logger LOG = LoggerFactory.getLogger(Workers.class);
+        // Два worker и сканирующий поток ограничивают публикации тремя без очереди в памяти.
+        private static final int PUBLISH_WORKERS = 2;
+        private static final int SCAN_INTERVAL_SECONDS = 1;
+        private static final Duration SHUTDOWN_TIMEOUT = Duration.ofSeconds(10);
         private final AnalyticsInbox inbox;
         private final AnalyticsPublisher publisher;
         private final ScheduledThreadPoolExecutor timer =
                 new ScheduledThreadPoolExecutor(
                         1, Thread.ofPlatform().name("analytics-relay-timer-", 0).factory());
-        // Два одновременных publish и очередь нулевой длины ограничивают память и нагрузку при
-        // отказе Kafka.
+        // Заполненный пул замедляет сканирование вместо переноса остатка партии на следующий тик.
         private final ThreadPoolExecutor workers =
                 new ThreadPoolExecutor(
-                        2,
-                        2,
+                        PUBLISH_WORKERS,
+                        PUBLISH_WORKERS,
                         0,
                         TimeUnit.SECONDS,
                         new SynchronousQueue<>(),
                         Thread.ofPlatform().name("analytics-relay-", 0).factory(),
-                        new ThreadPoolExecutor.AbortPolicy());
+                        new ThreadPoolExecutor.CallerRunsPolicy());
 
         Workers(AnalyticsInbox inbox, AnalyticsPublisher publisher) {
             this.inbox = inbox;
@@ -54,17 +58,30 @@ public class AnalyticsRelay {
         }
 
         public void start() {
-            timer.scheduleWithFixedDelay(() -> safely(this::dispatch), 1, 1, TimeUnit.SECONDS);
+            timer.scheduleWithFixedDelay(
+                    () -> safely(this::dispatch),
+                    SCAN_INTERVAL_SECONDS,
+                    SCAN_INTERVAL_SECONDS,
+                    TimeUnit.SECONDS);
         }
 
         private void dispatch() {
-            for (UUID id : inbox.pendingIds()) {
-                try {
-                    workers.execute(() -> safely(() -> deliver(id)));
-                } catch (RejectedExecutionException exception) {
+            while (!stopping()) {
+                List<UUID> batch = inbox.pendingIds();
+                if (batch.isEmpty()) {
                     return;
                 }
+                for (UUID id : batch) {
+                    if (stopping()) {
+                        return;
+                    }
+                    workers.execute(() -> safely(() -> deliver(id)));
+                }
             }
+        }
+
+        private boolean stopping() {
+            return Thread.currentThread().isInterrupted() || workers.isShutdown();
         }
 
         private void deliver(UUID id) {
@@ -99,10 +116,22 @@ public class AnalyticsRelay {
 
         @Override
         public void close() {
+            long deadline = System.nanoTime() + SHUTDOWN_TIMEOUT.toNanos();
             timer.shutdownNow();
             workers.shutdownNow();
             try {
-                workers.awaitTermination(10, TimeUnit.SECONDS);
+                // CallerRuns исполняет I/O на timer: оба executor входят в один конечный shutdown
+                // budget.
+                boolean timerStopped =
+                        timer.awaitTermination(SHUTDOWN_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+                long remaining = deadline - System.nanoTime();
+                boolean workersStopped =
+                        remaining > 0
+                                ? workers.awaitTermination(remaining, TimeUnit.NANOSECONDS)
+                                : workers.isTerminated();
+                if (!timerStopped || !workersStopped) {
+                    LOG.warn("Analytics relay shutdown timed out");
+                }
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
             }

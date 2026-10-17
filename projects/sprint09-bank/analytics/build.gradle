@@ -1,0 +1,15 @@
+plugins { id 'org.springframework.boot' }
+dependencies {
+    implementation project(':bank-runtime')
+    implementation 'org.springframework.boot:spring-boot-starter-data-cassandra'
+    testImplementation project(':bank-test-support')
+}
+tasks.named('test') { exclude '**/*IntegrationTest.class' }
+tasks.register('integrationTest', Test) {
+    group = 'verification'
+    description = 'Verify analytics inbox and JWT contracts against PostgreSQL'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    include '**/*IntegrationTest.class'
+    shouldRunAfter tasks.named('test')
+}

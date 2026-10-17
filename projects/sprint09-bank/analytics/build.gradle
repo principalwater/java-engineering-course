@@ -13,3 +13,4 @@ tasks.register('integrationTest', Test) {
     include '**/*IntegrationTest.class'
     shouldRunAfter tasks.named('test')
 }
+tasks.named('check') { dependsOn tasks.named('integrationTest') }

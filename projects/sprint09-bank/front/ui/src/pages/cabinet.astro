@@ -1,0 +1,77 @@
+---
+import Page from '../layouts/Page.astro';
+import Icon from '../components/Icon.astro';
+---
+<Page title="Личный кабинет">
+  <a class="skip-link" href="#main">Перейти к содержимому</a>
+  <header class="site-header shell">
+    <a class="brand" href="#overview" aria-label="Берег — на главную"><span class="brand-mark" aria-hidden="true">б</span><span>берег<span class="brand-caption">личный банк</span></span></a>
+    <nav class="glass-nav" aria-label="Личный кабинет">
+      <a href="#overview" aria-current="page">Обзор</a><a href="#history">История</a><a href="#analytics">Аналитика</a><a href="#profile">Профиль</a>
+    </nav>
+    <form id="logout-form" action="/logout" method="post"><input id="logout-csrf" type="hidden" name="_csrf" /><button class="logout" type="submit" disabled><span>Выйти</span><Icon name="logout" /></button></form>
+  </header>
+  <main id="main" class="shell">
+    <noscript><p class="notice error">Для работы личного кабинета включите JavaScript в браузере.</p></noscript>
+    <div id="session-notice" class="notice" role="status"><span class="loading-dot" aria-hidden="true"></span>Подключаем личный кабинет…</div>
+    <div id="session-error" class="notice error" role="alert" hidden><span id="session-error-text"></span><button id="session-retry" class="text-button" type="button">Попробовать ещё раз</button><a href="/oauth2/authorization/bank">Войти заново</a></div>
+    <section id="overview" aria-labelledby="welcome-title">
+      <div class="welcome"><div><p class="eyebrow">ВСЁ ПОД КОНТРОЛЕМ</p><h1 id="welcome-title">Ваш день. Ваши планы.</h1><p class="intro">Деньги для того, что действительно важно.</p></div><span class="quiet-badge"><span></span>Личный кабинет</span></div>
+      <div class="overview-grid">
+        <div class="account-column">
+          <article class="balance-card" aria-labelledby="balance-label" aria-busy="true" id="account-card">
+            <div class="card-heading"><span id="balance-label">Текущий счёт</span><span class="currency-pill">RUB</span></div>
+            <p id="balance" class="balance" aria-live="polite">—<span class="balance-currency"> ₽</span></p>
+            <p class="balance-caption" id="balance-caption">Загружаем доступный остаток</p>
+            <div class="account-card-bottom"><span id="account-owner">Ваш личный счёт</span><span class="account-symbol" aria-hidden="true">↗</span></div>
+          </article>
+          <div class="quick-actions" aria-label="Операции со счётом">
+            <button type="button" data-quick="TRANSFER" disabled><span class="action-icon"><Icon name="arrow" /></span><span>Перевести</span></button>
+            <button type="button" data-quick="DEPOSIT" disabled><span class="action-icon"><Icon name="plus" /></span><span>Пополнить</span></button>
+            <button type="button" data-quick="WITHDRAW" disabled><span class="action-icon"><Icon name="minus" /></span><span>Снять</span></button>
+          </div>
+          <div class="small-note"><Icon name="shield" /><p>Перед переводом вы проверите получателя и сумму. Все операции сохраняются в истории.</p></div>
+        </div>
+        <article class="panel operation-panel" id="payments" aria-labelledby="payment-title">
+          <div class="section-heading"><div><p class="eyebrow">БЕЗ ЛИШНИХ ШАГОВ</p><h2 id="payment-title">Движение денег</h2></div><span class="section-number" aria-hidden="true">01</span></div>
+          <form id="payment-form">
+            <fieldset id="payment-fields" disabled>
+              <legend class="sr-only">Новая операция</legend>
+              <div class="segmented" aria-label="Тип операции">
+                <label><input type="radio" name="operation-type" value="TRANSFER" checked /><span>Перевести</span></label>
+                <label><input type="radio" name="operation-type" value="DEPOSIT" /><span>Пополнить</span></label>
+                <label><input type="radio" name="operation-type" value="WITHDRAW" /><span>Снять</span></label>
+              </div>
+              <div id="recipient-fields" class="recipient-fields">
+                <label for="recipient-search">Получатель</label>
+                <div class="search-row"><input id="recipient-search" type="search" maxlength="80" placeholder="Имя или логин" autocomplete="off" /><button id="recipient-search-button" class="secondary small" type="button">Найти</button></div>
+                <label class="sr-only" for="recipient">Выберите получателя</label>
+                <select id="recipient" name="recipient" required><option value="">Выберите получателя</option></select>
+                <div class="field-meta"><span id="recipient-status" role="status">Загружаем получателей…</span><button id="recipient-more" class="text-button" type="button" hidden>Ещё получатели</button></div>
+              </div>
+              <label for="amount" id="amount-label">Сумма перевода</label>
+              <div class="amount-input"><input id="amount" name="amount" type="text" inputmode="decimal" autocomplete="off" maxlength="17" placeholder="0,00" aria-describedby="amount-hint payment-message" required /><span>₽</span></div>
+              <p class="field-hint" id="amount-hint">Рубли и копейки. Например, 1 250,50.</p>
+              <button class="primary full-width" id="review-payment" type="submit"><span>Проверить перевод</span><Icon name="arrow" /></button>
+            </fieldset>
+          </form>
+          <div id="payment-message" class="form-message" role="status" aria-live="polite"></div>
+          <div id="pending-operation" class="pending-box" hidden><p class="eyebrow">ОПЕРАЦИЯ НА КОНТРОЛЕ</p><h3>Проверяем результат</h3><p id="pending-summary"></p><p id="pending-description">Ответ ещё не получен. Не создавайте новый перевод: проверка использует ту же операцию.</p><code id="pending-id"></code><button id="retry-payment" class="secondary full-width" type="button"><Icon name="refresh" />Проверить результат</button></div>
+        </article>
+      </div>
+    </section>
+    <section class="activity-section" aria-labelledby="activity-title">
+      <div class="section-heading outside"><div><p class="eyebrow">ФИНАНСЫ В РИТМЕ ЖИЗНИ</p><h2 id="activity-title">Картина по счёту</h2></div><button id="refresh-data" type="button" class="secondary small" disabled><Icon name="refresh" />Обновить</button></div>
+      <div class="activity-grid">
+        <article class="panel chart-panel" aria-labelledby="balance-chart-title"><div class="section-heading"><div><h3 id="balance-chart-title">Как менялся остаток</h3><p class="muted compact">После выполненных операций</p></div><Icon name="chart" /></div><div id="balance-chart" class="chart-container"><p class="chart-state">Загружаем историю счёта…</p></div><p id="balance-chart-caption" class="chart-caption">График строится по загруженной истории, без расчётных значений.</p></article>
+        <article class="panel history-panel" id="history" aria-labelledby="history-title"><div class="section-heading"><div><h3 id="history-title">История операций</h3><p class="muted compact">Последние движения по счёту</p></div><span class="tiny-pill" id="history-count">—</span></div><div id="history-state" class="empty-state" role="status">Загружаем операции…</div><ol id="history-list" class="history-list"></ol><button id="history-more" class="secondary full-width" type="button" hidden>Показать ещё</button><button id="history-retry" class="text-button" type="button" hidden>Повторить загрузку</button></article>
+      </div>
+    </section>
+    <section class="panel analytics-section" id="analytics" aria-labelledby="analytics-title"><div class="section-heading"><div><p class="eyebrow">ПОЛЕЗНЫЙ ВЗГЛЯД</p><h2 id="analytics-title">Приходы и расходы</h2></div><span class="tiny-pill">Месяц · UTC</span></div><div id="analytics-state" class="analytics-unavailable" role="status"><span class="analytics-icon"><Icon name="chart" /></span><div><h3>Загружаем аналитику</h3><p>Здесь появится движение средств за текущий месяц по UTC.</p></div></div><div id="analytics-content" hidden><div class="analytics-totals"><div><span>Поступления</span><strong id="analytics-incoming">—</strong></div><div><span>Списания</span><strong id="analytics-outgoing">—</strong></div><div><span>Выполнено операций</span><strong id="analytics-count">—</strong></div></div><div id="analytics-chart" class="chart-container analytics-chart"></div><p id="analytics-updated" class="chart-caption"></p></div><button id="analytics-retry" type="button" class="text-button" hidden>Повторить загрузку</button></section>
+    <section id="business" class="panel business-section" aria-labelledby="business-title" hidden><div class="section-heading"><div><p class="eyebrow">ВНУТРЕННЯЯ АНАЛИТИКА</p><h2 id="business-title">Обзор банка</h2></div><span class="tiny-pill">Роль аналитика</span></div><div id="business-state" role="status" class="muted">Загружаем сводку…</div><div id="business-content" hidden><div class="analytics-totals"><div><span>Поступления</span><strong id="business-incoming">—</strong></div><div><span>Списания</span><strong id="business-outgoing">—</strong></div><div><span>Операции</span><strong id="business-count">—</strong></div><div><span>Активные счета</span><strong id="business-accounts">—</strong></div></div><div id="business-chart" class="chart-container analytics-chart"></div><p id="business-updated" class="chart-caption"></p></div><button id="business-retry" type="button" class="text-button" hidden>Повторить загрузку</button></section>
+    <section class="profile-section" id="profile" aria-labelledby="profile-title"><div class="profile-intro"><p class="eyebrow">ДАВАЙТЕ ПОЗНАКОМИМСЯ</p><h2 id="profile-title">Ваш профиль</h2><p class="muted">Имя и дата рождения —<br />небольшие детали большого знакомства.</p><div class="profile-login"><span class="avatar" id="profile-avatar" aria-hidden="true">б</span><div><span class="muted compact">Логин</span><strong id="profile-login">—</strong></div></div></div><form id="profile-form" class="panel profile-form"><fieldset id="profile-fields" disabled><legend class="sr-only">Личные данные</legend><label for="full-name">Фамилия, имя и отчество</label><input id="full-name" name="fullName" type="text" autocomplete="name" maxlength="160" required placeholder="Как к вам обращаться" /><label for="birth-date">Дата рождения</label><input id="birth-date" name="birthDate" type="date" autocomplete="bday" required /><div class="profile-buttons"><button class="primary" type="submit" id="save-profile">Сохранить изменения</button><button class="text-button" id="profile-reload" type="button" hidden>Загрузить актуальные данные</button></div></fieldset><p id="profile-message" class="form-message" role="status"></p></form></section>
+  </main>
+  <footer class="site-footer shell"><a class="footer-brand" href="#overview">берег</a><p>Спокойнее, когда всё на своём месте.</p><span>Учебный банк · RUB</span></footer>
+  <dialog id="confirmation" aria-labelledby="confirmation-title"><div class="dialog-heading"><span class="eyebrow">ПОСЛЕДНИЙ ШАГ</span><button class="icon-button" id="close-confirmation" type="button" aria-label="Закрыть подтверждение"><Icon name="close" /></button></div><h2 id="confirmation-title">Проверим детали</h2><p class="confirm-amount" id="confirm-amount"></p><dl class="confirmation-details"><div><dt>Операция</dt><dd id="confirm-type"></dd></div><div id="confirm-recipient-row"><dt>Получатель</dt><dd id="confirm-recipient"></dd></div><div><dt>Со счёта</dt><dd id="confirm-account">Текущий счёт · RUB</dd></div></dl><p class="muted compact" id="confirm-note">После подтверждения мы отправим операцию и покажем её результат.</p><div class="dialog-actions"><button id="confirm-payment" class="primary full-width" type="button">Подтвердить перевод</button><button id="cancel-confirmation" class="text-button" type="button">Вернуться к редактированию</button></div></dialog>
+  <script>import '../scripts/cabinet.ts';</script>
+</Page>

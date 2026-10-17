@@ -1,0 +1,14 @@
+spring:
+  application.name: orders
+  datasource.url: jdbc:h2:mem:orders;DB_CLOSE_DELAY=-1
+  jpa:
+    open-in-view: false
+    hibernate.ddl-auto: create-drop
+management:
+  endpoints.web.exposure.include: health,prometheus
+  endpoint.health.probes.enabled: true
+  metrics:
+    tags.application: ${spring.application.name}
+    distribution:
+      percentiles-histogram.http.server.requests: true
+      slo.http.server.requests: 100ms,200ms,500ms,1s,2s

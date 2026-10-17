@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+    <Appenders>
+        <File name="Coffee" fileName="${sys:coffee.log:-target/logs/coffee.log}">
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} %-5level: %msg%n"/>
+        </File>
+    </Appenders>
+    <Loggers><Root level="info"><AppenderRef ref="Coffee"/></Root></Loggers>
+</Configuration>

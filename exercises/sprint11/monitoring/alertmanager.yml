@@ -1,0 +1,17 @@
+global:
+  smtp_smarthost: mailpit:1025
+  smtp_from: monitoring@example.invalid
+  smtp_require_tls: false
+route:
+  receiver: local-mail
+  group_by: [alertname]
+  group_wait: 1s
+  group_interval: 5s
+  repeat_interval: 1h
+receivers:
+  - name: local-mail
+    email_configs:
+      - to: study@example.invalid
+        send_resolved: true
+        headers:
+          Subject: '{{ .Status | toUpper }}: {{ .GroupLabels.alertname }}'

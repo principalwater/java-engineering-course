@@ -1,0 +1,82 @@
+services:
+  kafka:
+    image: apache/kafka:4.0.0@sha256:3f7b939115cd4872e9cee9369d80bd69712fde55f9902f46d793f64848dedc75
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx256m
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: [CMD, /opt/kafka/bin/kafka-topics.sh, --bootstrap-server, kafka:9092, --list]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.0.0@sha256:5856b2c77263336792b80fc0e03df42922b2f86a816a4daf23397fb02ef7b138
+    env_file: target/elasticsearch.env
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "false"
+      xpack.security.autoconfiguration.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    volumes:
+      - elastic-data:/usr/share/elasticsearch/data
+    ports:
+      - "127.0.0.1:19200:9200"
+  kibana:
+    image: docker.elastic.co/kibana/kibana:9.0.0@sha256:2aceda91f87c1cd35886d5699a920daaf656f4078f40a31494c1950d8f5cfea7
+    env_file: target/kibana.env
+    environment:
+      ELASTICSEARCH_HOSTS: '["http://elasticsearch:9200"]'
+      ELASTICSEARCH_USERNAME: kibana_system
+      SERVER_HOST: 0.0.0.0
+      TELEMETRY_ENABLED: "false"
+      TELEMETRY_OPTIN: "false"
+      XPACK_SECURITY_SECURECOOKIES: "false"
+    ports:
+      - "127.0.0.1:19601:5601"
+  logstash:
+    image: docker.elastic.co/logstash/logstash:9.0.0@sha256:1f4a0478d687c87ec18fd75620e30bcd7cbfa34014753c4c78a5defa11ff3ca6
+    env_file: target/logstash.env
+    environment:
+      LS_JAVA_OPTS: -Xms256m -Xmx256m
+      OUTPUT_MODE: ${OUTPUT_MODE:-files}
+      REPLAY_ID: ${REPLAY_ID:-main}
+    volumes:
+      - ./logstash/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+      # Перекрываем штатный файл образа, чтобы его Beats input и stdout не остались вторым маршрутом.
+      - ./logstash/coffee.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+      - logstash-data:/usr/share/logstash/data
+      - ./target/output:/output
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:9.0.0@sha256:e6bffae01fa983a94acea4e3f0142afcf4ca3101d4f54dc7ecd8f8aefebb0d69
+    user: root
+    command: [filebeat, -e, --strict.perms=false]
+    volumes:
+      - ./filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ./target/logs:/logs:ro
+      - filebeat-data:/usr/share/filebeat/data
+volumes:
+  kafka-data:
+  elastic-data:
+  logstash-data:
+  filebeat-data:
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${COFFEE_NETWORK_SUBNET:-10.251.11.32/28}

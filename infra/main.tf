@@ -120,3 +120,16 @@ module "sprint08" {
   secrets_directory  = var.secrets_directory
   runtime_user       = var.runtime_user
 }
+
+module "sprint09" {
+  source = "./modules/bank"
+  count  = var.deployment == "sprint09" ? 1 : 0
+
+  project_directory = coalesce(var.bank_project_directory, "${local.repository}/projects/sprint09-bank")
+  runtime_directory = var.bank_runtime_directory
+  stack_name        = local.stack_name
+  artifact_hashes   = var.deployment_artifact_hashes
+  analytics_enabled = var.analytics_enabled
+  secrets_directory = var.secrets_directory
+  runtime_user      = var.runtime_user
+}

@@ -1,0 +1,82 @@
+{
+  "services": {
+    "analytics": {
+      "image": "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+      "mem_limit": "384m",
+      "memswap_limit": "384m",
+      "cpus": 1.0,
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ],
+      "build": {
+        "context": ".",
+        "args": {
+          "SERVICE": "analytics"
+        }
+      }
+    },
+    "cassandra": {
+      "image": "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+      "mem_limit": "1g",
+      "memswap_limit": "1g",
+      "cpus": 1.0,
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ],
+      "volumes": [
+        "cassandra-data:/var/lib/cassandra"
+      ]
+    },
+    "cassandra-init": {
+      "image": "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+      "mem_limit": "384m",
+      "memswap_limit": "384m",
+      "cpus": 1.0,
+      "restart": "no",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ]
+    },
+    "clickhouse": {
+      "image": "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+      "mem_limit": "384m",
+      "memswap_limit": "384m",
+      "cpus": 1.0,
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ],
+      "volumes": [
+        "analytics-hot:/var/lib/clickhouse",
+        "analytics-cold:/var/lib/clickhouse-cold"
+      ]
+    },
+    "clickhouse-init": {
+      "image": "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+      "mem_limit": "384m",
+      "memswap_limit": "384m",
+      "cpus": 1.0,
+      "restart": "no",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ]
+    },
+    "accounts": {
+      "environment": {
+        "BANK_ANALYTICS_ENABLED": "true"
+      }
+    },
+    "front": {
+      "environment": {
+        "BANK_ANALYTICS_ENABLED": "true"
+      }
+    }
+  }
+}

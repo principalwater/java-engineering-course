@@ -2,7 +2,6 @@
 
 import copy
 import importlib.util
-import itertools
 import os
 from pathlib import Path
 import tempfile
@@ -16,10 +15,11 @@ specification.loader.exec_module(deploy)
 
 
 class DeploymentPlanTest(unittest.TestCase):
-    def test_saved_plan_requires_the_same_two_artifacts_and_sources(self):
-        cases = ["unchanged", "storefront artifact", "payments artifact", "source",
-                 "documentation", "packaged Markdown", "infrastructure runtime config", "authorization mount"]
-        for stack, case in itertools.product(["sprint07-h2", "sprint08-h2"], cases):
+    def test_saved_plan_requires_the_same_artifacts_and_sources(self):
+        common = ["unchanged", "source", "documentation", "packaged Markdown", "infrastructure runtime config", "authorization mount", "rendered runtime config"]
+        services = {"sprint07-h2": ["storefront", "payments"], "sprint08-h2": ["storefront", "payments"],
+                    "sprint09": ["accounts", "cash", "transfer", "notifications", "front", "gateway", "analytics"]}
+        for stack, case in [(stack, case) for stack, names in services.items() for case in common + [name + " artifact" for name in names]]:
             with self.subTest(stack=stack, case=case), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 repository = root / "repository"
@@ -28,7 +28,7 @@ class DeploymentPlanTest(unittest.TestCase):
                 (infrastructure / ".terraform.lock.hcl").write_text("locked")
                 (infrastructure / "deploy.py").write_text("driver")
                 (infrastructure / "redis.conf").write_text("maxmemory 32mb")
-                project = repository / "project"
+                project = root / "bank-project" if stack == "sprint09" else repository / "project"
                 artifacts = project / "build/deployment"
                 artifacts.mkdir(parents=True)
                 (project / "build.gradle").write_text("project")
@@ -38,7 +38,7 @@ class DeploymentPlanTest(unittest.TestCase):
                 markdown = project / "storefront/src/main/resources/README.md"
                 markdown.parent.mkdir(parents=True)
                 markdown.write_text("packaged")
-                for service in ["storefront", "payments"]:
+                for service in services[stack]:
                     (artifacts / (service + ".jar")).write_bytes(service.encode())
                 calls = []
 
@@ -47,6 +47,11 @@ class DeploymentPlanTest(unittest.TestCase):
                     for option in command:
                         if option.startswith("-out="):
                             Path(option.removeprefix("-out=")).write_bytes(b"saved plan")
+                    if "apply" in command:
+                        for name in ["terraform.tfstate", "terraform.tfstate.backup"]:
+                            state_file = root / "state" / stack / name
+                            state_file.write_text('{"resources":[]}')
+                            state_file.chmod(0o644)
 
                 def output(command, **options):
                     if command[0] == "docker":
@@ -60,7 +65,8 @@ class DeploymentPlanTest(unittest.TestCase):
                      patch.dict(os.environ, environment), patch.object(deploy, "prepare") as prepare, \
                      patch.object(deploy.subprocess, "run", side_effect=execute), \
                      patch.object(deploy.subprocess, "check_output", side_effect=output):
-                    with patch.object(sys, "argv", ["deploy.py", stack, "plan"]):
+                    selected = ["--project-dir", str(project)] if stack == "sprint09" else []
+                    with patch.object(sys, "argv", ["deploy.py", stack, "plan"] + selected):
                         deploy.main()
                     prepare.assert_called_once()
                     receipt = root / "state" / stack / "plan-inputs.json"
@@ -76,11 +82,20 @@ class DeploymentPlanTest(unittest.TestCase):
                         (infrastructure / "redis.conf").write_text("maxmemory 64mb")
                     elif case == "authorization mount":
                         realm.write_text("changed realm")
-                    arguments = ["deploy.py", stack, "apply"]
+                    elif case == "rendered runtime config":
+                        if stack == "sprint09":
+                            runtime = root / "state" / stack / "runtime"
+                            runtime.mkdir()
+                            (runtime / "Caddyfile").write_text("changed rendered TLS settings")
+                        else:
+                            (infrastructure / "redis.conf").write_text("changed runtime settings")
+                    arguments = ["deploy.py", stack, "apply"] + selected
                     with patch.object(sys, "argv", arguments):
                         if case in {"unchanged", "documentation"}:
                             deploy.main()
                             self.assertFalse(receipt.exists())
+                            for name in ["terraform.tfstate", "terraform.tfstate.backup"]:
+                                self.assertEqual(0o600, (receipt.parent / name).stat().st_mode & 0o777)
                         else:
                             with self.assertRaisesRegex(ValueError, "inputs changed"):
                                 deploy.main()
@@ -88,6 +103,32 @@ class DeploymentPlanTest(unittest.TestCase):
                                      sum("apply" in command for command in calls))
                     # Applying the saved plan must never invoke the builder again.
                     prepare.assert_called_once()
+
+    def test_bank_yaml_merge_and_public_tls_templates_are_normalized_without_compose(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory) / "project"
+            (project / "edge").mkdir(parents=True)
+            (project / "authorization").mkdir()
+            (project / "edge/Caddyfile").write_text("https://bank.valgrind-home.localhost:8449 { header_up X-Forwarded-Port 8449 }")
+            (project / "authorization/bank-realm.json").write_text('{"redirectUris":["https://bank.valgrind-home.localhost:8449/login"],"secret":"__oauth_front_secret__"}')
+            (project / "compose.yaml").write_text("x-base: &base {ISSUER: canonical, TIMEOUT: 1s}\nx-extra: &extra {MODE: jdbc}\nservices:\n  accounts:\n    environment:\n      <<: [*base, *extra]\n      TIMEOUT: 3s\n")
+            (project / "compose.analytics.yaml").write_text("services: {}\n")
+            runtime = Path(directory) / "runtime"
+            deploy.prepare_bank_configuration(project, runtime)
+            import json
+            settings = json.loads((runtime / "compose.json").read_text())["services"]["accounts"]["environment"]
+            self.assertEqual({"ISSUER": "canonical", "TIMEOUT": "3s", "MODE": "jdbc"}, settings)
+            self.assertIn(":28450", (runtime / "Caddyfile").read_text())
+            self.assertIn("X-Forwarded-Port 28450", (runtime / "Caddyfile").read_text())
+            realm = json.loads((runtime / "bank-realm.json").read_text())
+            self.assertEqual(["https://bank.valgrind-home.localhost:28450/login"], realm["redirectUris"])
+            self.assertEqual("__oauth_front_secret__", realm["secret"])
+            (project / "authorization/bank-realm.json").write_text('{"secret":"synthetic-secret-value"}')
+            with self.assertRaisesRegex(ValueError, "secret file value"):
+                deploy.prepare_bank_configuration(project, runtime, {"synthetic-secret-value"})
+            (project / "compose.yaml").write_text("!!python/object:unsafe {}")
+            with self.assertRaisesRegex(ValueError, "safe YAML"):
+                deploy.prepare_bank_configuration(project, runtime)
 
     def test_plan_rejects_exposure_and_unowned_changes(self):
         plan = {"resource_changes": [{"type": "docker_container", "change": {
@@ -143,6 +184,8 @@ class DeploymentPlanTest(unittest.TestCase):
             ]:
                 with self.subTest(name=name), self.assertRaisesRegex(ValueError, "[Ss]ecret"):
                     deploy.check_plan(unsafe, "sprint08-h2", known)
+            with self.assertRaisesRegex(ValueError, "secret file value"):
+                deploy.check_secret_values({"pem": "BEGIN\nsynthetic-key-material\nEND"}, {"BEGIN\nsynthetic-key-material\nEND"})
 
     def test_oauth_stack_is_prepared_with_store_secrets_and_gradle_jars(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -174,6 +217,15 @@ class DeploymentPlanTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "outside the repository"):
             deploy.external_directory(destination)
         self.assertFalse(destination.exists())
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory) / "separate-bank-checkout"
+            project.mkdir()
+            state = project / "forbidden-state"
+            with patch.dict(os.environ, {"COURSE_DEPLOY_STATE": str(state)}), \
+                 patch.object(sys, "argv", ["deploy.py", "sprint09", "plan", "--project-dir", str(project)]), \
+                 self.assertRaisesRegex(ValueError, "outside its source checkout"):
+                deploy.main()
+            self.assertFalse(state.exists())
 
     def test_external_password_is_private_preserved_and_validated(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(deploy.subprocess, "run"):

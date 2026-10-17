@@ -8,13 +8,14 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shlex
 import subprocess
 import sys
 
 INFRA = Path(__file__).resolve().parent
 REPOSITORY = INFRA.parent
-# Two-JAR projects share Gradle packaging, executable hashes and the documentation exclusion below.
-JAR_PREFIXES = ("sprint07-", "sprint08-")
+# Multi-service Gradle projects share executable hashes and the documentation exclusion below.
+JAR_PREFIXES = ("sprint07-", "sprint08-", "sprint09")
 SECRET_NAME = re.compile(r"(PASSWORD|SECRET|TOKEN)$")
 MIN_SECRET_LENGTH = 16
 STACKS = {
@@ -28,6 +29,7 @@ STACKS = {
     "sprint07-h2": "projects/sprint07-rest-service",
     "sprint08-postgresql": "projects/sprint08-security",
     "sprint08-h2": "projects/sprint08-security",
+    "sprint09": "projects/sprint09-bank",
     "docker-exercise": "exercises/supplements/docker",
     "mvc-exercise": "exercises/sprint03/spring-mvc-jdbc",
 }
@@ -42,19 +44,27 @@ def external_directory(path):
     return path.resolve()
 
 
+def project_directory(stack, environment=None):
+    selected = (environment or {}).get("TF_VAR_bank_project_directory") if stack == "sprint09" else None
+    return Path(selected).resolve() if selected else REPOSITORY / STACKS[stack]
+
+
 def fingerprint(stack, environment):
-    files = list(INFRA.rglob("*.tf")) + list(INFRA.rglob("*.conf")) + [INFRA / ".terraform.lock.hcl", INFRA / "deploy.py"]
-    project = REPOSITORY / STACKS[stack]
+    files = list(INFRA.rglob("*.tf")) + list(INFRA.rglob("*.conf")) + [INFRA / ".terraform.lock.hcl", INFRA / "deploy.py", INFRA / "requirements.txt"]
+    project = project_directory(stack, environment)
     files += list(project.rglob("*"))
+    if stack == "sprint09":
+        files += list(Path(environment["TF_VAR_bank_runtime_directory"]).glob("*"))
     digest = hashlib.sha256(json.dumps(environment, sort_keys=True).encode())
     for path in sorted(files):
-        if path.is_file() and not any(part in {"target", "build", ".gradle", "__pycache__"} for part in path.parts):
+        if path.is_file() and not any(part in {"target", "build", ".gradle", "__pycache__", "node_modules"} for part in path.parts):
             # Human documentation is independent of executable inputs; packaged resources stay covered.
             if stack.startswith(JAR_PREFIXES) and path.is_relative_to(project) and path.relative_to(project).parts[0] in {
                 "README.md", "docs", "screenshots",
             }:
                 continue
-            digest.update(str(path.relative_to(REPOSITORY)).encode())
+            identity = "project/" + str(path.relative_to(project)) if path.is_relative_to(project) else str(path)
+            digest.update(identity.encode())
             digest.update(path.read_bytes())
     for name in ["target/docker-study.jar", "target/spring-web-demo.war"]:
         artifact = REPOSITORY / STACKS[stack] / name
@@ -63,12 +73,13 @@ def fingerprint(stack, environment):
     return digest.hexdigest()
 
 
-def artifact_hashes(stack):
+def artifact_hashes(stack, environment=None):
     if not stack.startswith(JAR_PREFIXES):
         return {}
     result = {}
-    for service in ["storefront", "payments"]:
-        path = REPOSITORY / STACKS[stack] / "build/deployment" / (service + ".jar")
+    services = ["accounts", "cash", "transfer", "notifications", "gateway", "front", "analytics"] if stack == "sprint09" else ["storefront", "payments"]
+    for service in services:
+        path = project_directory(stack, environment) / "build/deployment" / (service + ".jar")
         digest = hashlib.sha256()
         with path.open("rb") as artifact:
             for block in iter(lambda: artifact.read(1024 * 1024), b""):
@@ -89,12 +100,16 @@ def secret_values(directory):
     return values
 
 
+def check_secret_values(document, known_secrets):
+    serialized = json.dumps(document)
+    if any(value in serialized or json.dumps(value)[1:-1] in serialized for value in known_secrets):
+        raise ValueError("A secret file value must not appear in public configuration, plan or state")
+
+
 def check_plan(plan, stack, known_secrets=()):
     """Reject secret-bearing settings and changes outside this stack's ownership."""
     prefix = f"java-tofu-{stack}"
-    serialized = json.dumps(plan)
-    if any(value in serialized for value in known_secrets):
-        raise ValueError("A secret file value must not appear in the plan or state")
+    check_secret_values(plan, known_secrets)
     for change in plan.get("resource_changes", []):
         kind = change["type"]
         value = change["change"].get("after") or {}
@@ -117,11 +132,38 @@ def check_plan(plan, stack, known_secrets=()):
                     raise ValueError("Secret mounts must be read-only files outside the repository")
 
 
+def prepare_bank_configuration(project, runtime, known_secrets=()):
+    import yaml
+
+    runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for source, target in [("compose.yaml", "compose.json"), ("compose.analytics.yaml", "compose.analytics.json")]:
+        try:
+            configuration = yaml.safe_load((project / source).read_text())
+        except yaml.YAMLError as error:
+            raise ValueError("Bank deployment declarations must contain safe YAML") from error
+        if not isinstance(configuration, dict) or not isinstance(configuration.get("services"), dict):
+            raise ValueError("Bank deployment declarations require a service mapping")
+        check_secret_values(configuration, known_secrets)
+        if any(SECRET_NAME.search(key) for service in configuration["services"].values() for key in service.get("environment", {})):
+            raise ValueError("Bank public configuration must use external file-secret paths")
+        (runtime / target).write_text(json.dumps(configuration, sort_keys=True))
+    for source, target in [("edge/Caddyfile", "Caddyfile"), ("authorization/bank-realm.json", "bank-realm.json")]:
+        template = (project / source).read_text()
+        check_secret_values(template, known_secrets)
+        (runtime / target).write_text(template.replace(":8449", ":28450").replace("X-Forwarded-Port 8449", "X-Forwarded-Port 28450"))
+
+
 def prepare(stack, secrets_directory, environment):
-    project = REPOSITORY / STACKS[stack]
+    project = project_directory(stack, environment)
     if not project.is_dir():
         raise ValueError(f"Project sources for {stack} are unavailable in this checkout: {project}")
-    if stack.startswith("sprint"):
+    if stack == "sprint09":
+        selected = {**environment, "BANK_SECRETS_DIR": str(secrets_directory)}
+        subprocess.run([sys.executable, "scripts/init-secrets.py"], cwd=project, env=selected, check=True)
+        subprocess.run([sys.executable, "scripts/init-tls.py"], cwd=project, env=selected, check=True)
+        subprocess.run([str(project / "gradlew"), "--no-daemon", "--console=plain", "check", "packageDeployment"], cwd=project, env=selected, check=True)
+        prepare_bank_configuration(project, Path(environment["TF_VAR_bank_runtime_directory"]), secret_values(secrets_directory))
+    elif stack.startswith("sprint"):
         secret_variable = "STORE_SECRETS_DIR" if stack.startswith(("sprint05", "sprint06", "sprint07", "sprint08")) else "BLOG_SECRETS_DIR"
         subprocess.run([sys.executable, "scripts/init-secrets.py"], cwd=project,
                        env={**environment, secret_variable: str(secrets_directory)}, check=True)
@@ -155,15 +197,23 @@ def main():
     parser.add_argument("stack", choices=STACKS)
     parser.add_argument("action", choices=["plan", "apply", "status"])
     parser.add_argument("--analytics", action="store_true", help="Enable the selected project's optional analytics")
+    parser.add_argument("--project-dir", type=Path, help="Explicit Sprint 9 source directory from a separate checkout")
     parser.add_argument("--replace", action="append", default=[], help="Plan replacement of an exact resource address")
     args = parser.parse_args()
+    if args.project_dir and args.stack != "sprint09":
+        parser.error("--project-dir is supported only for the separately checked-out bank project")
     if args.analytics and not args.stack.startswith("sprint"):
         parser.error("Analytics is available only for project deployments")
     if args.replace and args.action != "plan":
         parser.error("--replace is valid only when preparing a plan")
 
-    state = external_directory(Path(os.environ.get("COURSE_DEPLOY_STATE", Path.home() / ".local/state/java-engineering-course")) / args.stack)
-    secrets_directory = external_directory(Path(os.environ.get("COURSE_DEPLOY_SECRETS", Path.home() / ".config/java-engineering-course/tofu")) / args.stack)
+    state_path = Path(os.environ.get("COURSE_DEPLOY_STATE", Path.home() / ".local/state/java-engineering-course")) / args.stack
+    secrets_path = Path(os.environ.get("COURSE_DEPLOY_SECRETS", Path.home() / ".config/java-engineering-course/tofu")) / args.stack
+    source = (args.project_dir or REPOSITORY / STACKS[args.stack]).expanduser().resolve()
+    if args.stack == "sprint09" and any(path.expanduser().resolve().is_relative_to(source) for path in [state_path, secrets_path]):
+        raise ValueError("Bank state and secrets must remain outside its source checkout")
+    state = external_directory(state_path)
+    secrets_directory = external_directory(secrets_path)
     docker_host = subprocess.check_output(["docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"], text=True).strip()
     variables = {
         "TF_VAR_deployment": args.stack,
@@ -172,6 +222,8 @@ def main():
         "TF_VAR_secrets_directory": str(secrets_directory),
         "TF_VAR_analytics_enabled": str(args.analytics).lower(),
     }
+    if args.stack == "sprint09":
+        variables.update({"TF_VAR_bank_project_directory": str(source), "TF_VAR_bank_runtime_directory": str(state / "runtime")})
     environment = {**os.environ, **variables, "TF_DATA_DIR": str(state / "providers")}
     environment.pop("DOCKER_CONTEXT", None)
     environment["DOCKER_HOST"] = docker_host
@@ -182,7 +234,7 @@ def main():
     if args.action == "plan":
         prepare(args.stack, secrets_directory, environment)
     if args.stack.startswith(JAR_PREFIXES) and args.action != "status":
-        variables["TF_VAR_deployment_artifact_hashes"] = json.dumps(artifact_hashes(args.stack), sort_keys=True)
+        variables["TF_VAR_deployment_artifact_hashes"] = json.dumps(artifact_hashes(args.stack, variables), sort_keys=True)
         environment.update(variables)
     subprocess.run(command + ["init", "-input=false", "-reconfigure", f"-backend-config=path={state / 'terraform.tfstate'}"], env=environment, check=True)
     if args.action == "plan":
@@ -195,7 +247,7 @@ def main():
         plan.chmod(0o600)
         receipt.chmod(0o600)
         print(f"Review the plan above, then run: python3 infra/deploy.py {args.stack} apply" +
-              (" --analytics" if args.analytics else ""))
+              (" --analytics" if args.analytics else "") + (f" --project-dir {shlex.quote(str(args.project_dir))}" if args.project_dir else ""))
     elif args.action == "apply":
         if not receipt.exists() or not plan.exists():
             raise ValueError("Prepare and review a plan before applying")
@@ -204,7 +256,13 @@ def main():
             raise ValueError("Deployment inputs changed after planning; prepare a new plan")
         check_plan(json.loads(subprocess.check_output(command + ["show", "-json", str(plan)], env=environment)), args.stack,
                    secret_values(secrets_directory))
-        subprocess.run(command + ["apply", "-input=false", str(plan)], env=environment, check=True)
+        try:
+            subprocess.run(command + ["apply", "-input=false", str(plan)], env=environment, check=True)
+        finally:
+            for name in ["terraform.tfstate", "terraform.tfstate.backup"]:
+                state_file = state / name
+                if state_file.is_file():
+                    state_file.chmod(0o600)
         receipt.unlink()
         plan.unlink()
     else:

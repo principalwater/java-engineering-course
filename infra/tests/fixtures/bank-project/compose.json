@@ -1,0 +1,231 @@
+{
+  "services": {
+    "accounts": {
+      "image": "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+      "mem_limit": "384m",
+      "memswap_limit": "384m",
+      "cpus": 1.0,
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ],
+      "build": {
+        "context": ".",
+        "args": {
+          "SERVICE": "accounts"
+        }
+      },
+      "environment": {
+        "SPRING_APPLICATION_NAME": "accounts",
+        "BANK_SECURITY_ISSUER": "https://auth-bank.valgrind-home.localhost:8449/realms/bank"
+      },
+      "secrets": [
+        {
+          "source": "fixture_password",
+          "target": "spring.datasource.password"
+        }
+      ]
+    },
+    "cash": {
+      "image": "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+      "mem_limit": "384m",
+      "memswap_limit": "384m",
+      "cpus": 1.0,
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ],
+      "build": {
+        "context": ".",
+        "args": {
+          "SERVICE": "cash"
+        }
+      },
+      "environment": {
+        "SPRING_APPLICATION_NAME": "cash",
+        "BANK_SECURITY_ISSUER": "https://auth-bank.valgrind-home.localhost:8449/realms/bank"
+      },
+      "secrets": [
+        {
+          "source": "fixture_password",
+          "target": "spring.datasource.password"
+        }
+      ]
+    },
+    "transfer": {
+      "image": "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+      "mem_limit": "384m",
+      "memswap_limit": "384m",
+      "cpus": 1.0,
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ],
+      "build": {
+        "context": ".",
+        "args": {
+          "SERVICE": "transfer"
+        }
+      },
+      "environment": {
+        "SPRING_APPLICATION_NAME": "transfer",
+        "BANK_SECURITY_ISSUER": "https://auth-bank.valgrind-home.localhost:8449/realms/bank"
+      },
+      "secrets": [
+        {
+          "source": "fixture_password",
+          "target": "spring.datasource.password"
+        }
+      ]
+    },
+    "notifications": {
+      "image": "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+      "mem_limit": "384m",
+      "memswap_limit": "384m",
+      "cpus": 1.0,
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ],
+      "build": {
+        "context": ".",
+        "args": {
+          "SERVICE": "notifications"
+        }
+      },
+      "environment": {
+        "SPRING_APPLICATION_NAME": "notifications",
+        "BANK_SECURITY_ISSUER": "https://auth-bank.valgrind-home.localhost:8449/realms/bank"
+      },
+      "secrets": [
+        {
+          "source": "fixture_password",
+          "target": "spring.datasource.password"
+        }
+      ]
+    },
+    "gateway": {
+      "image": "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+      "mem_limit": "384m",
+      "memswap_limit": "384m",
+      "cpus": 1.0,
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ],
+      "build": {
+        "context": ".",
+        "args": {
+          "SERVICE": "gateway"
+        }
+      },
+      "environment": {
+        "SPRING_APPLICATION_NAME": "gateway",
+        "BANK_SECURITY_ISSUER": "https://auth-bank.valgrind-home.localhost:8449/realms/bank"
+      },
+      "secrets": []
+    },
+    "front": {
+      "image": "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+      "mem_limit": "384m",
+      "memswap_limit": "384m",
+      "cpus": 1.0,
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ],
+      "build": {
+        "context": ".",
+        "args": {
+          "SERVICE": "front"
+        }
+      },
+      "environment": {
+        "SPRING_APPLICATION_NAME": "front",
+        "BANK_SECURITY_ISSUER": "https://auth-bank.valgrind-home.localhost:8449/realms/bank"
+      },
+      "secrets": [
+        {
+          "source": "fixture_password",
+          "target": "spring.datasource.password"
+        }
+      ]
+    },
+    "database": {
+      "image": "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+      "mem_limit": "384m",
+      "memswap_limit": "384m",
+      "cpus": 1.0,
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ],
+      "volumes": [
+        "bank-data:/var/lib/postgresql/data",
+        "./public.conf:/setup/public.conf:ro"
+      ]
+    },
+    "discovery": {
+      "image": "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+      "mem_limit": "384m",
+      "memswap_limit": "384m",
+      "cpus": 1.0,
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ],
+      "volumes": [
+        "discovery-data:/data",
+        "discovery-transactions:/datalog"
+      ]
+    },
+    "authorization": {
+      "image": "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+      "mem_limit": "384m",
+      "memswap_limit": "384m",
+      "cpus": 1.0,
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ],
+      "build": "./authorization"
+    },
+    "config-seed": {
+      "image": "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+      "mem_limit": "384m",
+      "memswap_limit": "384m",
+      "cpus": 1.0,
+      "restart": "no",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ]
+    },
+    "edge": {
+      "image": "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+      "mem_limit": "384m",
+      "memswap_limit": "384m",
+      "cpus": 1.0,
+      "restart": "unless-stopped",
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:rw,noexec,nosuid,size=8m,mode=1777"
+      ],
+      "ports": [
+        "127.0.0.1:8449:8449"
+      ],
+      "build": {
+        "context": "./edge"
+      }
+    }
+  }
+}

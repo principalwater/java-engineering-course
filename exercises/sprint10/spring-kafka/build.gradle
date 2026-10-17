@@ -1,0 +1,37 @@
+plugins {
+    id 'org.springframework.boot' version '3.5.8' apply false
+    id 'io.spring.dependency-management' version '1.1.7' apply false
+}
+subprojects {
+    apply plugin: 'java-library'
+    apply plugin: 'io.spring.dependency-management'
+    group = 'dev.principalwater.study.kafka'
+    version = '1.0-SNAPSHOT'
+    java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+    repositories { mavenCentral() }
+    dependencyManagement { imports { mavenBom 'org.springframework.boot:spring-boot-dependencies:3.5.8' } }
+}
+configure([project(':producer'), project(':consumer')]) {
+    apply plugin: 'org.springframework.boot'
+    dependencies {
+        implementation project(':api')
+        implementation 'org.springframework.boot:spring-boot-starter'
+        implementation 'org.springframework.kafka:spring-kafka'
+        implementation 'com.fasterxml.jackson.core:jackson-databind'
+        implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+    }
+    tasks.named('bootJar') { archiveFileName = "${project.name}.jar" }
+}
+project(':consumer') {
+    dependencies {
+        implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+        runtimeOnly 'com.h2database:h2'
+    }
+    tasks.register('exportDlq', JavaExec) {
+        classpath = sourceSets.main.runtimeClasspath
+        mainClass = 'org.h2.tools.RunScript'
+        workingDir = rootProject.projectDir
+        args '-url', "jdbc:h2:file:${rootProject.file('target/failures').absolutePath};IFEXISTS=TRUE",
+                '-user', 'sa', '-script', rootProject.file('export-dlq.sql').absolutePath
+    }
+}

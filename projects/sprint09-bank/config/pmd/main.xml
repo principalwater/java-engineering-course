@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="Bank production literals"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+    <description>Повторяемые строки production-кода, без тестовых fixtures и аннотаций.</description>
+    <rule ref="category/java/errorprone.xml/AvoidDuplicateLiterals">
+        <properties>
+            <property name="maxDuplicateLiterals" value="4"/>
+            <property name="minimumLength" value="5"/>
+            <property name="skipAnnotations" value="true"/>
+        </properties>
+    </rule>
+</ruleset>

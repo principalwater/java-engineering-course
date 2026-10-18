@@ -7,6 +7,7 @@ import io.lettuce.core.RedisConnectionException;
 import io.lettuce.core.RedisException;
 import io.lettuce.core.RedisLoadingException;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.QueryTimeoutException;
@@ -17,6 +18,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
+import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -56,5 +58,36 @@ class WebConfigTest extends ReactiveTestBase {
 
         assertFalse(exchange.getResponse().getCookies().isEmpty());
         assertEquals(null, exchange.getResponse().getStatusCode());
+    }
+
+    @Test
+    void unavailableBeforeCommitSaveStillCompletes503WithoutTheUnstoredSessionCookie() {
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/account/login"));
+        var saves = new AtomicInteger();
+        exchange.getResponse().beforeCommit(() -> {
+            saves.incrementAndGet();
+            exchange.getResponse().addCookie(ResponseCookie.from("SESSION", "never-stored").build());
+            return Mono.error(new RedisConnectionFailureException("handshake timed out"));
+        });
+
+        StepVerifier.create(new WebConfig().storageUnavailable().handle(exchange,
+                new QueryTimeoutException("initial session save failed"))).verifyComplete();
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, exchange.getResponse().getStatusCode());
+        assertEquals("1", exchange.getResponse().getHeaders().getFirst(HttpHeaders.RETRY_AFTER));
+        assertTrue(exchange.getResponse().isCommitted());
+        assertTrue(exchange.getResponse().getCookies().isEmpty());
+        assertEquals(1, saves.get(), "Completing the error response must not retry the session write");
+    }
+
+    @Test
+    void aNonAvailabilityFailureDuringCommitIsNotSwallowed() {
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/account/login"));
+        var denied = new RedisCommandExecutionException("NOPERM");
+        exchange.getResponse().beforeCommit(() -> Mono.error(denied));
+
+        StepVerifier.create(new WebConfig().storageUnavailable().handle(exchange,
+                new QueryTimeoutException("initial session save failed")))
+                .expectErrorMatches(failure -> failure == denied).verify(TIMEOUT);
     }
 }

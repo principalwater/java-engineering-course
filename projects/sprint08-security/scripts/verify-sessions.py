@@ -10,6 +10,10 @@ from runtime import PROJECT, applications, initialize, postgres, published_port,
 from smoke import CSRF_FIELD, MarketProbe
 
 
+# Лимит допускает краткое противодавление, но не позволяет скрыть длительный отказ хранилища.
+MAX_PRESSURE_REJECTIONS = 8
+
+
 def copy_browser(source, target):
     for cookie in source.cookies:
         target.cookies.set_cookie(copy.copy(cookie))
@@ -26,9 +30,19 @@ def restart_store(shared, *browsers):
 def memory_pressure(shared, buyer):
     probe_command = 'REDISCLI_AUTH="$(cat /run/secrets/session_redis_password)" redis-cli --user probe --no-auth-warning --raw INFO stats'
     evicted = 0
+    rejected = 0
     for index in range(4000):
         # Новый посетитель не возвращает cookie: каждый GET формы создаёт новый CSRF session.
-        MarketProbe(buyer.base, secrets_dir=buyer.secrets_dir).read("/account/login")
+        try:
+            MarketProbe(buyer.base, secrets_dir=buyer.secrets_dir).read("/account/login")
+        except HTTPError as error:
+            if error.code != 503:
+                raise
+            with error:
+                assert error.headers.get("Retry-After") == "1", "Anonymous backpressure must advertise Retry-After: 1"
+                assert error.headers.get("Set-Cookie") is None, "A rejected visitor must not receive a session cookie"
+                rejected += 1
+                assert rejected <= MAX_PRESSURE_REJECTIONS, "Session pressure became a sustained anonymous outage"
         if index % 8 == 0:
             assert urlparse(buyer.read("/cabinet").url).path == "/cabinet", "An active buyer lost access during the bounded flood"
         if index % 128 == 127:
@@ -38,7 +52,8 @@ def memory_pressure(shared, buyer):
                 break
     assert evicted > 0, "The pressure scenario never reached the real Redis memory limit"
     assert urlparse(buyer.read("/cabinet").url).path == "/cabinet", "Memory pressure blocked existing authenticated traffic"
-    print("Session memory pressure: bounded anonymous traffic reached eviction; active authenticated traffic passed")
+    print("Session memory pressure: bounded anonymous traffic reached eviction; active authenticated traffic passed; "
+          + str(rejected) + " explicit anonymous rejections")
 
 
 def main():

@@ -1,0 +1,38 @@
+<clickhouse>
+    <profiles>
+        <bank_writer>
+            <allow_ddl>0</allow_ddl>
+            <max_execution_time>5</max_execution_time>
+            <max_memory_usage>268435456</max_memory_usage>
+            <constraints><allow_ddl><const/></allow_ddl><max_execution_time><max>5</max></max_execution_time><max_memory_usage><max>268435456</max></max_memory_usage></constraints>
+        </bank_writer>
+        <bank_reader>
+            <readonly>1</readonly>
+            <max_execution_time>5</max_execution_time>
+            <max_memory_usage>268435456</max_memory_usage>
+            <max_result_rows>1000</max_result_rows>
+            <result_overflow_mode>throw</result_overflow_mode>
+            <constraints><readonly><const/></readonly><max_execution_time><const/></max_execution_time><max_memory_usage><const/></max_memory_usage><max_result_rows><const/></max_result_rows><result_overflow_mode><const/></result_overflow_mode></constraints>
+        </bank_reader>
+    </profiles>
+    <users>
+        <default remove="remove"/>
+        <bank_admin>
+            <password_sha256_hex>__admin_password_hash__</password_sha256_hex>
+            <networks><ip>::/0</ip></networks>
+            <profile>default</profile><quota>default</quota><access_management>1</access_management>
+        </bank_admin>
+        <bank_writer>
+            <password_sha256_hex>__writer_password_hash__</password_sha256_hex>
+            <networks><ip>::/0</ip></networks>
+            <profile>bank_writer</profile><quota>default</quota>
+            <grants><query>GRANT SELECT, INSERT ON bank_analytics.*</query></grants>
+        </bank_writer>
+        <bank_reader>
+            <password_sha256_hex>__reader_password_hash__</password_sha256_hex>
+            <networks><ip>::/0</ip></networks>
+            <profile>bank_reader</profile><quota>default</quota>
+            <grants><query>GRANT SELECT ON bank_analytics.*</query></grants>
+        </bank_reader>
+    </users>
+</clickhouse>

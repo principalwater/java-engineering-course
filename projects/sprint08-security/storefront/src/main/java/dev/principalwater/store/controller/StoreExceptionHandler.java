@@ -2,6 +2,7 @@ package dev.principalwater.store.controller;
 
 import dev.principalwater.store.model.StoreError;
 import dev.principalwater.store.model.StoreException;
+import dev.principalwater.store.util.StorageFailures;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.buffer.DataBufferLimitException;
@@ -18,6 +19,7 @@ import org.springframework.web.reactive.result.view.Rendering;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.ServerWebInputException;
+import reactor.core.publisher.Mono;
 
 @ControllerAdvice(basePackages = "dev.principalwater.store.controller")
 public class StoreExceptionHandler {
@@ -50,6 +52,10 @@ public class StoreExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public Object unexpected(Exception exception, ServerWebExchange exchange) {
+        // Сбой модели/контроллера получает тот же прямой 503, что и сбой сессии в фильтрах, без Thymeleaf.
+        if (StorageFailures.isUnavailable(exception)) {
+            return Mono.error(exception);
+        }
         LOG.error("Store request failed", exception);
         return error(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error", exchange);
     }

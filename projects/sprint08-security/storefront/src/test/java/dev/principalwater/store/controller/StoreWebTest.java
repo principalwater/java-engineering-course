@@ -35,6 +35,8 @@ import dev.principalwater.store.service.CheckoutService;
 import dev.principalwater.store.service.OrderService;
 import dev.principalwater.store.service.RecoveryService;
 import dev.principalwater.store.util.DisplayFormats;
+import io.lettuce.core.RedisCommandExecutionException;
+import io.lettuce.core.RedisCommandTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
@@ -53,7 +55,9 @@ import org.springframework.boot.test.autoconfigure.web.reactive.WebFluxTest;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -121,6 +125,32 @@ class StoreWebTest extends TestBase {
         var query = ArgumentCaptor.forClass(CatalogQuery.class);
         verify(catalog).list(query.capture(), any());
         assertEquals(new CatalogQuery("", SortMode.NO, 1, 5), query.getValue());
+    }
+
+    @Test
+    void controllerStorageTimeoutFailsClosedWithoutRenderingAnErrorPageOrIssuingACookie() {
+        when(catalog.list(any(), any())).thenReturn(Mono.error(new QueryTimeoutException("Redis command timed out",
+                new RedisCommandTimeoutException("EXPIRE timed out"))));
+
+        anonymous.get().uri("/").accept(MediaType.TEXT_HTML).exchange()
+                .expectStatus().isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
+                .expectHeader().valueEquals(HttpHeaders.RETRY_AFTER, "1")
+                .expectHeader().doesNotExist(HttpHeaders.SET_COOKIE)
+                .expectBody().isEmpty();
+    }
+
+    @ParameterizedTest
+    @MethodSource("redisCommandFailures")
+    void controllerCommandErrorsKeepTheirInternalErrorStatus(String message) {
+        when(catalog.list(any(), any())).thenReturn(Mono.error(new RedisCommandExecutionException(message)));
+
+        anonymous.get().uri("/").accept(MediaType.TEXT_HTML).exchange()
+                .expectStatus().isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR)
+                .expectHeader().doesNotExist(HttpHeaders.RETRY_AFTER);
+    }
+
+    static Stream<String> redisCommandFailures() {
+        return Stream.of("NOPERM command is forbidden", "WRONGTYPE key has an incompatible type");
     }
 
     @Test

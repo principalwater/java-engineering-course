@@ -89,6 +89,25 @@ public class BankController {
         return gateway.exchange(HttpMethod.GET, path, null, token(client));
     }
 
+    @GetMapping("/ui/notifications")
+    public ResponseEntity<byte[]> notifications(
+            @RegisteredOAuth2AuthorizedClient(FrontOAuth.REGISTRATION_ID)
+                    OAuth2AuthorizedClient client,
+            @RequestParam(required = false) @Min(1) Long before,
+            @RequestParam(defaultValue = BankLimits.DEFAULT_PAGE_SIZE)
+                    @Min(1)
+                    @Max(BankLimits.MAX_PAGE_SIZE)
+                    int limit) {
+        String path =
+                UriComponentsBuilder.fromPath("/api/accounts/notifications")
+                        .queryParam("limit", limit)
+                        .queryParamIfPresent("before", Optional.ofNullable(before))
+                        .build()
+                        .encode()
+                        .toUriString();
+        return gateway.exchange(HttpMethod.GET, path, null, token(client));
+    }
+
     @PostMapping("/ui/cash")
     public ResponseEntity<byte[]> cash(
             @RegisteredOAuth2AuthorizedClient(FrontOAuth.REGISTRATION_ID)

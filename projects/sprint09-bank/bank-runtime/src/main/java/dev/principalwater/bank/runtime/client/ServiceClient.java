@@ -16,6 +16,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.springframework.cloud.client.ServiceInstance;
 import org.springframework.cloud.client.discovery.DiscoveryClient;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.security.oauth2.client.OAuth2AuthorizeRequest;
@@ -59,10 +60,22 @@ public class ServiceClient {
     }
 
     public <T> T post(String service, String path, Object body, Class<T> responseType) {
-        return execute(service, () -> send(service, path, body, responseType, HttpMethod.POST));
+        return execute(
+                service,
+                () ->
+                        send(
+                                service,
+                                path,
+                                body,
+                                ParameterizedTypeReference.forType(responseType),
+                                HttpMethod.POST));
     }
 
     public <T> T get(String service, String path, Class<T> responseType) {
+        return get(service, path, ParameterizedTypeReference.forType(responseType));
+    }
+
+    public <T> T get(String service, String path, ParameterizedTypeReference<T> responseType) {
         return execute(service, () -> send(service, path, null, responseType, HttpMethod.GET));
     }
 
@@ -87,7 +100,11 @@ public class ServiceClient {
     }
 
     private <T> T send(
-            String service, String path, Object body, Class<T> responseType, HttpMethod method) {
+            String service,
+            String path,
+            Object body,
+            ParameterizedTypeReference<T> responseType,
+            HttpMethod method) {
         List<ServiceInstance> instances = discovery.getInstances(service);
         if (instances.size() != 1) {
             throw new RemoteUnavailable();
@@ -133,7 +150,7 @@ public class ServiceClient {
                                 status -> !status.is2xxSuccessful(),
                                 (outgoing, response) -> reject(response))
                         .body(responseType);
-        if (result == null && responseType != Void.class) {
+        if (result == null && responseType.getType() != Void.class) {
             throw new RemoteUnavailable();
         }
         return result;

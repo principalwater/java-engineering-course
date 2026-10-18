@@ -32,6 +32,9 @@ STORES = ("database", "discovery", "authorization", "edge")
 HTTP_TIMEOUT = 10
 WAIT_SECONDS = 120
 MAX_RESPONSE_BYTES = 2_000_000
+DIAGNOSTIC_TAIL_LINES = 40
+DIAGNOSTIC_MAX_CHARS = 8192
+INITIALIZERS = frozenset(("config-seed", "cassandra-init", "clickhouse-init", "kafka-init"))
 
 
 class VerificationError(RuntimeError):
@@ -47,9 +50,46 @@ def require(condition, message):
         raise VerificationError(message)
 
 
-def run(command, *, input_text=None, timeout=30, env=None):
-    result = subprocess.run(command, input=input_text, text=True, capture_output=True, timeout=timeout, env=env)
-    require(result.returncode == 0, "Command failed: " + command[0] + " " + command[1])
+def diagnostic_output(label, output, private_values):
+    if not output:
+        return
+    text = output.decode(errors="replace") if isinstance(output, bytes) else output
+    text = text.replace("\r\n", "\n")
+    redactions = set()
+    for value in private_values:
+        value = value.strip().replace("\r\n", "\n")
+        if value:
+            redactions.update((value, json.dumps(value)[1:-1], *value.splitlines()))
+    for value in sorted(redactions, key=len, reverse=True):
+        if value:
+            text = text.replace(value, "[redacted]")
+    # Сначала убираем секрет целиком и строки PEM, затем ограничиваем хвост.
+    text = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", text)
+    tail = "\n".join(text.splitlines()[-DIAGNOSTIC_TAIL_LINES:])[-DIAGNOSTIC_MAX_CHARS:]
+    for line in tail.splitlines():
+        print("DIAGNOSTIC " + label + ": " + line, file=sys.stderr)
+
+
+def run(command, *, input_text=None, timeout=30, env=None, label=None, private_values=None):
+    try:
+        result = subprocess.run(command, input=input_text, text=True, capture_output=True, timeout=timeout, env=env)
+    except subprocess.TimeoutExpired as failure:
+        if label is None:
+            raise
+        if private_values is not None:
+            diagnostic_output(label + " stdout", failure.stdout, private_values)
+            diagnostic_output(label + " stderr", failure.stderr, private_values)
+        raise VerificationError("Command timed out: " + label) from None
+    except OSError as failure:
+        if label is None:
+            raise
+        raise VerificationError("Could not start command: " + label + " (" + type(failure).__name__ + ")") from None
+    if result.returncode != 0:
+        if private_values is not None:
+            diagnostic_output((label or "command") + " stdout", result.stdout, private_values)
+            diagnostic_output((label or "command") + " stderr", result.stderr, private_values)
+        description = label or (command[0] + " " + command[1])
+        raise VerificationError("Command failed: " + description + " (exit " + str(result.returncode) + ")")
     return result.stdout
 
 
@@ -267,13 +307,29 @@ def assert_success(result):
     require(isinstance(result.get("balanceMinor"), int), "Successful operation has no own balance")
 
 
-def inspect_owned(name):
+def inspect_owned(name, *, timeout=30):
     require(re.fullmatch(r"[a-zA-Z0-9_.-]+", name) is not None, "Invalid container name")
-    labels = json.loads(run(["docker", "inspect", "--format", "{{json .Config.Labels}}", name]))
+    labels = json.loads(run(["docker", "inspect", "--format", "{{json .Config.Labels}}", name], timeout=timeout))
     compose = labels.get("com.docker.compose.project", "")
     native = labels.get("dev.principalwater.deployment", "")
     require((compose == "bank09" and name.startswith("bank09-"))
             or (native and name.startswith(native + "-")), "Container ownership does not match verification stack")
+
+
+def startup_diagnostics(containers, private_values):
+    state_format = ('{"status":{{json .State.Status}},"exitCode":{{.State.ExitCode}},'
+                    '"oomKilled":{{.State.OOMKilled}},"restarts":{{.RestartCount}}}')
+    for service, name in containers.items():
+        try:
+            inspect_owned(name, timeout=5)
+            state = run(["docker", "inspect", "--format", state_format, name], timeout=5)
+            diagnostic_output(name + " state", state, private_values)
+            if service in INITIALIZERS:
+                logs = subprocess.run(["docker", "logs", "--tail", str(DIAGNOSTIC_TAIL_LINES), name],
+                                      capture_output=True, text=True, timeout=5)
+                diagnostic_output(name + " initializer", logs.stdout + "\n" + logs.stderr, private_values)
+        except (VerificationError, OSError, subprocess.SubprocessError, ValueError) as failure:
+            print("DIAGNOSTIC " + name + ": unavailable (" + type(failure).__name__ + ")", file=sys.stderr)
 
 
 def change_state(containers, service, action):
@@ -366,6 +422,45 @@ def verify_money(alice, bob, containers):
     print("PASS cash/transfer immutable replay, terminal rejection, conservation and own history")
 
 
+def notification_id(containers, owner, kind, operation_id):
+    identity = json.loads(pg(containers, "SELECT json_build_array(issuer,subject)::text FROM accounts.account WHERE id='"
+                             + checked_uuid(owner) + "'"))
+    key = str(len(identity[0])) + ":" + identity[0] + str(len(identity[1])) + ":" + identity[1] + ":" + kind + ":" + checked_uuid(operation_id)
+    return str(uuid.UUID(bytes=hashlib.md5(key.encode("utf-8")).digest(), version=3))
+
+
+def delivered_notification(user, event_id, owner):
+    page = user.json("GET", "/ui/notifications?limit=20", expected=(200, 503))
+    if "notifications" not in page:
+        return None
+    require(page.get("accountId") == owner, "Notification response owner mismatch")
+    return next((entry for entry in page["notifications"]["items"] if entry["eventId"] == event_id), None)
+
+
+def verify_notifications(alice, bob, containers):
+    owner = alice.account()["accountId"]
+    command = cash(17)
+    result = alice.money("/ui/cash", command)
+    assert_success(result)
+    event_id = notification_id(containers, owner, "DEPOSIT", command["operationId"])
+    entry = wait_for("cabinet notification delivery", lambda: delivered_notification(alice, event_id, owner))
+    require(entry["type"] == "DEPOSIT_SUCCEEDED" and entry["amountMinor"] == 17
+            and entry["balanceMinor"] == result["balanceMinor"], "Cabinet notification is not the delivered operation")
+    require(set(entry) == {"eventId", "type", "amountMinor", "balanceMinor", "occurredAt"}, "Notification projection leaked internal identity")
+    foreign = bob.json("GET", "/ui/notifications?ownerId=" + checked_uuid(owner))["notifications"]["items"]
+    require(all(item["eventId"] != event_id for item in foreign), "Foreign notification leaked through owner parameter")
+    first = alice.json("GET", "/ui/notifications?limit=1")["notifications"]
+    require(first["nextCursor"] is not None, "Notification fixture has no next page")
+    older = alice.json("GET", "/ui/notifications?limit=1&before=" + first["nextCursor"])["notifications"]
+    require(len(older["items"]) == 1 and older["items"][0]["eventId"] != first["items"][0]["eventId"], "Notification keyset repeated a receipt")
+    require(alice.money("/ui/cash", command) == result, "Notification lookup changed immutable payment outcome")
+    require(scalar(containers, "SELECT count(*) FROM notifications.bank_notification WHERE caller='cash-service' AND event_id='"
+                   + event_id + "'") == 1, "Cabinet notification replay duplicated receipt")
+    alice.json("GET", "/ui/notifications?limit=51", expected=400)
+    alice.json("GET", "/ui/notifications?before=0", expected=400)
+    print("PASS actual outbox-to-cabinet notification delivery, owner isolation, stable pages and dedup")
+
+
 def verify_load(alice, containers):
     before = alice.account()
     commands = [cash(1) for _ in range(24)]
@@ -406,12 +501,10 @@ def verify_recovery(alice, bob, containers):
                    + "' AND request_id='" + checked_uuid(command["operationId"]) + "'") == 1, "Recovered ledger effect count mismatch")
     a, b = alice.account(), bob.account()
     command = transfer(b["accountId"], 31)
-    identity = json.loads(pg(containers, "SELECT json_build_array(issuer,subject)::text FROM accounts.account WHERE id='"
-                             + checked_uuid(a["accountId"]) + "'"))
-    key = str(len(identity[0])) + ":" + identity[0] + str(len(identity[1])) + ":" + identity[1] + ":TRANSFER:" + command["operationId"]
-    event_id = str(uuid.UUID(bytes=hashlib.md5(key.encode("utf-8")).digest(), version=3))
+    event_id = notification_id(containers, a["accountId"], "TRANSFER", command["operationId"])
     try:
         change_state(containers, "notifications", "stop")
+        alice.json("GET", "/ui/notifications", expected=503)
         original = alice.money("/ui/transfers", command)
         assert_success(original)
         require(alice.account()["balanceMinor"] == a["balanceMinor"] - 31
@@ -424,6 +517,10 @@ def verify_recovery(alice, bob, containers):
              + event_id + "'") == 1)
     wait_for("notification outbox completion", lambda: scalar(containers, "SELECT count(*) FROM transfer.bank_outbox WHERE event_id='"
              + event_id + "' AND status='DELIVERED'") == 1)
+    entry = wait_for("recovered cabinet notification", lambda: delivered_notification(alice, event_id, a["accountId"]))
+    require(entry["type"] == "TRANSFER_SUCCEEDED" and entry["amountMinor"] == 31
+            and entry["balanceMinor"] == original["balanceMinor"], "Recovered receipt was not delivered to cabinet")
+    require(all(item["eventId"] != event_id for item in bob.json("GET", "/ui/notifications")["notifications"]["items"]), "Recovered notification leaked to recipient")
     require(alice.money("/ui/transfers", command) == original, "Notification recovery changed transfer outcome")
     require(alice.account()["balanceMinor"] == a["balanceMinor"] - 31
             and bob.account()["balanceMinor"] == b["balanceMinor"] + 31, "Notification recovery repeated money effects")
@@ -455,6 +552,7 @@ def verify(base_url, secrets_dir, containers, analytics=False):
     anonymous = User(base_url, secrets_dir)
     ready("bank TLS/login readiness", lambda: anonymous.request("GET", "/login")[0] == 200)
     require(anonymous.request("GET", "/ui/account")[0] == 401, "Anonymous private API did not return 401")
+    require(anonymous.request("GET", "/ui/notifications")[0] == 401, "Anonymous notification API did not return 401")
     authority = base_url.replace("bank.valgrind-home.localhost", "auth-bank.valgrind-home.localhost")
     ready("OIDC provider readiness", lambda: anonymous.request("GET", authority + "/realms/bank/.well-known/openid-configuration")[0] == 200)
     forwarded = {"X-Forwarded-Proto": "http", "X-Forwarded-Host": "evil.example", "X-Forwarded-Port": "80", "X-Forwarded-Prefix": "/evil"}
@@ -473,6 +571,7 @@ def verify(base_url, secrets_dir, containers, analytics=False):
     ready("Accounts readiness", lambda: alice.json("GET", "/ui/account", expected=(200, 503)).get("accountId"))
     verify_profiles(alice, bob)
     verify_money(alice, bob, containers)
+    verify_notifications(alice, bob, containers)
     verify_load(alice, containers)
     analyst = User(base_url, secrets_dir).login("analyst") if analytics else None
     if analytics:
@@ -509,7 +608,8 @@ def main():
     parser = argparse.ArgumentParser(description="Verify the actual TLS/OIDC bank and bounded recovery flows")
     parser.add_argument("--external", action="store_true", help="Verify running native infrastructure without lifecycle changes")
     parser.add_argument("--base-url", default="https://bank.valgrind-home.localhost:8449")
-    parser.add_argument("--secrets-dir", type=Path, default=Path.home() / ".config/java-engineering-course/sprint09")
+    parser.add_argument("--secrets-dir", type=Path, default=Path(os.environ.get(
+        "BANK_SECRETS_DIR", Path.home() / ".config/java-engineering-course/sprint09")))
     parser.add_argument("--container-prefix", default="bank09")
     parser.add_argument("--analytics", action="store_true")
     parser.add_argument("--keep-running", action="store_true")
@@ -534,9 +634,17 @@ def main():
             compose = ["docker", "compose", "-p", "bank09", "-f", str(root / "compose.yaml")]
             if arguments.analytics:
                 compose += ["-f", str(root / "compose.analytics.yaml")]
-            run([*compose, "up", "-d", "--build"], timeout=300, env=environment)
-            # Обновляем Caddyfile и loopback mapping после остановки VM; остальные сервисы сохраняются.
-            run([*compose, "up", "-d", "--no-deps", "--force-recreate", "edge"], timeout=45, env=environment)
+            private_values = tuple(path.read_text(errors="replace").strip() for path in Path(directory).iterdir()
+                                   if path.is_file() and not path.is_symlink())
+            try:
+                run([*compose, "up", "-d", "--build"], timeout=300, env=environment,
+                    label="Compose stack startup", private_values=private_values)
+                # Перечитываем Caddyfile без смены контейнера и его loopback mapping.
+                run([*compose, "restart", "--no-deps", "edge"], timeout=45, env=environment,
+                    label="Compose edge restart", private_values=private_values)
+            except (VerificationError, OSError, subprocess.SubprocessError, ValueError):
+                startup_diagnostics(containers, private_values)
+                raise
         users = verify(arguments.base_url, arguments.secrets_dir, containers, arguments.analytics)
         if not arguments.external:
             verify_recovery(users["alice"], users["bob"], containers)

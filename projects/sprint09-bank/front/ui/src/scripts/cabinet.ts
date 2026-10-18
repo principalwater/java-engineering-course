@@ -1,9 +1,10 @@
 import { ApiError, errorMessage, parseAccount, parseAnalytics, parseHistoryItem, parseOperationResult, parsePage, parseRecipient, parseSession, request } from './api.ts';
-import type { Account, Analytics, HistoryItem, Recipient, Session } from './api.ts';
+import type { Account, Analytics, HistoryItem, NotificationItem, Recipient, Session } from './api.ts';
 import { renderAnalyticsChart, renderBalanceChart } from './charts.ts';
 import { formatMoney, MAX_AMOUNT_MINOR, parseAmount } from './money.ts';
 import { OperationQueue } from './operation.ts';
 import type { OperationType } from './operation.ts';
+import { NotificationFeed } from './notifications.ts';
 
 function el<T extends HTMLElement = HTMLElement>(id: string): T {
   const element = document.getElementById(id);
@@ -30,6 +31,8 @@ let accountRequest = 0;
 let historyRequest = 0;
 let historyCursor: string | null = null;
 let historyItems: HistoryItem[] = [];
+const notifications = new NotificationFeed();
+let renderedNotifications: NotificationItem[] | null = null;
 let recipients: Recipient[] = [];
 let recipientCursor: string | null = null;
 let recipientSearch = '';
@@ -39,6 +42,8 @@ let businessData: Analytics | null = null;
 let viewSubmitted = false;
 let reviewed: { type: OperationType; amountMinor: number; recipientId?: string } | null = null;
 const dateTime = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const notificationDateTime = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' });
+const notificationLabels: Record<NotificationItem['type'], string> = { PROFILE_UPDATED: 'Профиль обновлён', DEPOSIT_SUCCEEDED: 'Счёт пополнен', DEPOSIT_REJECTED: 'Пополнение отклонено', WITHDRAW_SUCCEEDED: 'Снятие выполнено', WITHDRAW_REJECTED: 'Снятие отклонено', TRANSFER_SUCCEEDED: 'Перевод выполнен', TRANSFER_REJECTED: 'Перевод отклонён' };
 const typeLabels: Record<string, string> = { TRANSFER: 'Перевод', DEPOSIT: 'Пополнение', WITHDRAW: 'Снятие', TRANSFER_IN: 'Входящий перевод', TRANSFER_OUT: 'Перевод получателю' };
 
 function operationType(): OperationType {
@@ -159,6 +164,53 @@ async function loadHistory(reset = true): Promise<void> {
   }
 }
 
+function renderNotifications(): void {
+  const list = el<HTMLOListElement>('notifications-list');
+  list.setAttribute('aria-busy', String(notifications.loading));
+  if (renderedNotifications !== notifications.items) {
+    list.replaceChildren();
+    for (const entry of notifications.items) {
+      const item = document.createElement('li'); item.className = 'notification-row';
+      const details = document.createElement('details');
+      const summary = document.createElement('summary');
+      const rejected = entry.type.endsWith('_REJECTED');
+      const icon = document.createElement('span'); icon.className = `notification-icon${rejected ? ' rejected' : ''}`; icon.setAttribute('aria-hidden', 'true'); icon.textContent = rejected ? '!' : '✓';
+      const description = document.createElement('span'); description.className = 'notification-description';
+      const title = document.createElement('strong'); title.textContent = notificationLabels[entry.type];
+      const time = document.createElement('time'); time.dateTime = entry.occurredAt; time.textContent = notificationDateTime.format(new Date(entry.occurredAt));
+      description.append(title, time);
+      const label = document.createElement('span'); label.className = 'notification-label'; label.textContent = entry.type === 'PROFILE_UPDATED' ? 'Личные данные' : `Сумма: ${formatMoney(entry.amountMinor)}`;
+      summary.append(icon, description, label);
+      const detail = document.createElement('div'); detail.className = 'notification-details';
+      const texts = entry.type === 'PROFILE_UPDATED' ? ['Изменения личных данных сохранены.'] : [`${rejected ? 'Запрос отклонён' : 'Операция выполнена'}. Сумма: ${formatMoney(entry.amountMinor)}.`, `Остаток на момент события: ${formatMoney(entry.balanceMinor)}. Это снимок, а не текущий баланс.`];
+      for (const text of [...texts, `Номер события: ${entry.eventId}`]) { const line = document.createElement('p'); line.textContent = text; detail.append(line); }
+      details.append(summary, detail); item.append(details); list.append(item);
+    }
+    renderedNotifications = notifications.items;
+  }
+  el('notifications-count').textContent = notifications.loaded ? `Загружено: ${notifications.items.length}` : '—';
+  const state = el('notifications-state');
+  state.classList.toggle('error', notifications.error !== null);
+  state.classList.toggle('sr-only', notifications.loaded && notifications.items.length > 0 && !notifications.loading && notifications.error === null);
+  state.textContent = notifications.loading ? 'Загружаем уведомления…' : notifications.error !== null ? `${notifications.items.length ? 'Показаны ранее загруженные уведомления. ' : 'Уведомления временно недоступны. '}${errorMessage(notifications.error)}` : !notifications.loaded ? 'Уведомления появятся после подключения счёта.' : notifications.items.length ? `Загружено уведомлений: ${notifications.items.length}.` : 'Уведомлений пока нет. После изменения профиля или операции они появятся здесь с небольшой задержкой.';
+  el<HTMLButtonElement>('notifications-refresh').disabled = notifications.loading || !account || !session;
+  el('notifications-more').hidden = notifications.nextCursor === null;
+  el<HTMLButtonElement>('notifications-more').disabled = notifications.loading || notifications.error !== null;
+  el('notifications-retry').hidden = notifications.error === null;
+  el<HTMLButtonElement>('notifications-retry').disabled = notifications.loading;
+}
+
+async function loadNotifications(reset = true, retry = false): Promise<void> {
+  if (!account || !session) return;
+  const ownerId = account.accountId;
+  const login = session.login;
+  const loading = retry ? notifications.retry(ownerId) : notifications.load(ownerId, reset);
+  renderNotifications();
+  await loading;
+  if (account?.accountId !== ownerId || session?.login !== login) return;
+  renderNotifications();
+}
+
 async function loadRecipients(reset = true): Promise<void> {
   const identity = ++recipientRequest;
   el<HTMLButtonElement>('recipient-search-button').disabled = true;
@@ -223,7 +275,7 @@ async function loadAnalytics(business = false): Promise<void> {
 
 async function refreshData(): Promise<void> {
   el<HTMLButtonElement>('refresh-data').disabled = true;
-  await Promise.allSettled([loadAccount().catch(error => { message('session-error-text', errorMessage(error)); el('session-error').hidden = false; }), loadHistory(), loadAnalytics(), ...(session?.analyst ? [loadAnalytics(true)] : [])]);
+  await Promise.allSettled([loadAccount().catch(error => { message('session-error-text', errorMessage(error)); el('session-error').hidden = false; }), loadHistory(), loadNotifications(), loadAnalytics(), ...(session?.analyst ? [loadAnalytics(true)] : [])]);
   el<HTMLButtonElement>('refresh-data').disabled = false;
 }
 
@@ -242,7 +294,7 @@ async function sendPending(): Promise<void> {
   try {
     const result = parseOperationResult(await request(pending.path, { method: 'POST', headers: { 'Content-Type': 'application/json', [session.csrfHeader]: session.csrfToken }, body: JSON.stringify(pending.command) }), account.accountId);
     queue.settle(result.operationId, result.status);
-    if (result.status === 'PENDING') { message('payment-message', 'Операция ещё выполняется. Проверьте результат через некоторое время.'); return; }
+    if (result.status === 'PENDING') { message('payment-message', 'Операция ещё выполняется. Проверьте результат через некоторое время.'); void loadNotifications(); return; }
     ++accountRequest;
     if (result.accountId === account.accountId && result.balanceMinor !== null) showAccount({ ...account, balanceMinor: result.balanceMinor }, false);
     if (result.status === 'SUCCEEDED') { amountInput.value = ''; message('payment-message', `Операция выполнена: ${typeLabels[pending.command.type || 'TRANSFER'].toLowerCase()}. ${formatMoney(pending.command.amountMinor)}`, 'success'); }
@@ -296,6 +348,9 @@ el('recipient-search').addEventListener('keydown', event => { if (event.key === 
 el('recipient-more').addEventListener('click', () => { void loadRecipients(false); });
 el('history-more').addEventListener('click', () => { void loadHistory(false); });
 el('history-retry').addEventListener('click', () => { void loadHistory(historyItems.length === 0); });
+el('notifications-refresh').addEventListener('click', () => { void loadNotifications(); });
+el('notifications-more').addEventListener('click', () => { void loadNotifications(false); });
+el('notifications-retry').addEventListener('click', () => { void loadNotifications(true, true); });
 el('refresh-data').addEventListener('click', () => { void refreshData(); });
 el('analytics-retry').addEventListener('click', () => { void loadAnalytics(); });
 el('business-retry').addEventListener('click', () => { void loadAnalytics(true); });
@@ -316,6 +371,7 @@ el<HTMLFormElement>('profile-form').addEventListener('submit', async event => {
     message('profile-message', 'Изменения сохранены.', 'success');
     el('profile-reload').hidden = true;
     if (!queue?.current) message('payment-message', '');
+    void loadNotifications();
   } catch (error) {
     message('profile-message', errorMessage(error), 'error');
     if (error instanceof ApiError && error.status === 409) el('profile-reload').hidden = false;
@@ -336,7 +392,7 @@ if ('IntersectionObserver' in window) {
   const observer = new IntersectionObserver(entries => {
     for (const entry of entries) if (entry.isIntersecting) for (const link of navLinks) { if (link.hash === `#${entry.target.id}`) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current'); }
   }, { rootMargin: '-15% 0px -65% 0px', threshold: 0 });
-  for (const id of ['overview', 'history', 'analytics', 'profile']) observer.observe(el(id));
+  for (const id of ['overview', 'history', 'notifications', 'analytics', 'profile']) observer.observe(el(id));
 }
 
 let chartWidth = 0;
@@ -379,7 +435,7 @@ async function initialize(): Promise<void> {
     updatePaymentFields();
     el<HTMLButtonElement>('refresh-data').disabled = false;
     el('business').hidden = !session.analyst;
-    await Promise.allSettled([loadRecipients(), loadHistory(), loadAnalytics(), ...(session.analyst ? [loadAnalytics(true)] : [])]);
+    await Promise.allSettled([loadRecipients(), loadHistory(), loadNotifications(), loadAnalytics(), ...(session.analyst ? [loadAnalytics(true)] : [])]);
   } catch (error) {
     message('session-error-text', errorMessage(error));
     el('session-error').hidden = false;

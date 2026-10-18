@@ -1,6 +1,7 @@
 package dev.principalwater.bank.notifications.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -154,6 +155,98 @@ class NotificationHttpTest extends NotificationsTestBase {
                 .andExpect(status().isForbidden());
         assertThat(jdbc.queryForObject("SELECT count(*) FROM bank_notification", Integer.class))
                 .isZero();
+    }
+
+    @Test
+    void inboxReadsPersistedEventsForOneOwnerWithStableCursorAndNoDuplicates() throws Exception {
+        UUID owner = UUID.randomUUID();
+        String producer = JWT.service("cash-service", "notifications-api", "notifications.write");
+        BankEvent first =
+                new BankEvent(
+                        UUID.randomUUID(),
+                        owner,
+                        "DEPOSIT_SUCCEEDED",
+                        100,
+                        100,
+                        Instant.parse("2026-10-17T12:00:00Z"));
+        BankEvent last =
+                new BankEvent(
+                        UUID.randomUUID(), owner, "WITHDRAW_SUCCEEDED", 25, 75, first.occurredAt());
+        send(producer, first).andExpect(status().isNoContent());
+        send(producer, event(UUID.randomUUID(), 999)).andExpect(status().isNoContent());
+        send(producer, last).andExpect(status().isNoContent());
+        send(producer, last).andExpect(status().isNoContent());
+        String reader =
+                "Bearer "
+                        + JWT.service(
+                                "accounts-service", "notifications-api", "notifications.write");
+        var response =
+                http.perform(
+                                get("/internal/notifications/" + owner)
+                                        .param("limit", "1")
+                                        .header("Authorization", reader))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("items.length()").value(1))
+                        .andExpect(jsonPath("items[0].eventId").value(last.eventId().toString()))
+                        .andExpect(jsonPath("items[0].balanceMinor").value(75))
+                        .andExpect(jsonPath("items[0].ownerId").doesNotExist())
+                        .andReturn();
+        String cursor =
+                mapper.readTree(response.getResponse().getContentAsByteArray())
+                        .path("nextCursor")
+                        .asText();
+        // Новое событие между страницами не сдвигает уже выданную границу.
+        send(
+                        producer,
+                        new BankEvent(
+                                UUID.randomUUID(),
+                                owner,
+                                "DEPOSIT_REJECTED",
+                                200,
+                                75,
+                                first.occurredAt()))
+                .andExpect(status().isNoContent());
+        http.perform(
+                        get("/internal/notifications/" + owner)
+                                .param("before", cursor)
+                                .param("limit", "1")
+                                .header("Authorization", reader))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("items.length()").value(1))
+                .andExpect(jsonPath("items[0].eventId").value(first.eventId().toString()))
+                .andExpect(jsonPath("nextCursor").isEmpty());
+        http.perform(
+                        get("/internal/notifications/" + UUID.randomUUID())
+                                .header("Authorization", reader))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("items").isEmpty());
+        for (String limit : List.of("0", "51")) {
+            http.perform(
+                            get("/internal/notifications/" + owner)
+                                    .param("limit", limit)
+                                    .header("Authorization", reader))
+                    .andExpect(status().isBadRequest());
+        }
+        http.perform(
+                        get("/internal/notifications/" + owner)
+                                .param("before", "0")
+                                .header("Authorization", reader))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void onlyTrustedAccountsCanReadInboxNotBrowserOrMoneyProducers() throws Exception {
+        String path = "/internal/notifications/" + UUID.randomUUID();
+        http.perform(get(path)).andExpect(status().isUnauthorized());
+        for (String token :
+                List.of(
+                        JWT.user("alice", "alice", "notifications.write"),
+                        JWT.service("cash-service", "notifications-api", "notifications.write"),
+                        JWT.service("accounts-service", "bank-api", "notifications.write"),
+                        JWT.service("accounts-service", "notifications-api", "accounts.read"))) {
+            http.perform(get(path).header("Authorization", "Bearer " + token))
+                    .andExpect(status().isForbidden());
+        }
     }
 
     private org.springframework.test.web.servlet.ResultActions send(String token, BankEvent event)

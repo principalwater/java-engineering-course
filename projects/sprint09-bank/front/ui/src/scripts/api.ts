@@ -4,6 +4,8 @@ export type Session = { login: string; csrfToken: string; csrfHeader: string; cs
 export type Account = { accountId: string; login: string; fullName: string | null; birthDate: string | null; balanceMinor: number; version: number; profileComplete: boolean };
 export type Recipient = { accountId: string; login: string; fullName: string | null };
 export type HistoryItem = { operationId: string; type: 'DEPOSIT' | 'WITHDRAW' | 'TRANSFER_IN' | 'TRANSFER_OUT'; amountMinor: number; balanceMinor: number; status: 'SUCCEEDED'; occurredAt: string; counterparty: string | null };
+export type NotificationItem = { eventId: string; type: 'PROFILE_UPDATED' | 'DEPOSIT_SUCCEEDED' | 'DEPOSIT_REJECTED' | 'WITHDRAW_SUCCEEDED' | 'WITHDRAW_REJECTED' | 'TRANSFER_SUCCEEDED' | 'TRANSFER_REJECTED'; amountMinor: number; balanceMinor: number; occurredAt: string };
+export type NotificationPage = { items: NotificationItem[]; nextCursor: string | null };
 export type Analytics = { available: boolean; days: { date: string; incomingMinor: number; outgoingMinor: number }[]; operationsCount: number; updatedAt: string | null; accountsCount?: number };
 export type OperationResult = { operationId: string; status: 'SUCCEEDED' | 'REJECTED' | 'PENDING'; error: string | null; accountId: string | null; balanceMinor: number | null; occurredAt: string | null };
 
@@ -95,6 +97,22 @@ export function parseHistoryItem(value: unknown): HistoryItem {
   const data = object(value);
   if (!['DEPOSIT', 'WITHDRAW', 'TRANSFER_IN', 'TRANSFER_OUT'].includes(string(data.type)) || data.status !== 'SUCCEEDED') throw new Error('Invalid history operation');
   return { operationId: uuid(data.operationId), type: data.type as HistoryItem['type'], amountMinor: integer(data.amountMinor), balanceMinor: integer(data.balanceMinor), status: 'SUCCEEDED', occurredAt: instant(data.occurredAt), counterparty: nullableString(data.counterparty) };
+}
+
+export function parseNotificationPage(value: unknown, expectedAccountId: string): NotificationPage {
+  const envelope = object(value);
+  if (uuid(envelope.accountId) !== expectedAccountId) throw new Error('Notification account mismatch');
+  const page = parsePage(envelope.notifications, value => {
+    const data = object(value);
+    if (!['PROFILE_UPDATED', 'DEPOSIT_SUCCEEDED', 'DEPOSIT_REJECTED', 'WITHDRAW_SUCCEEDED', 'WITHDRAW_REJECTED', 'TRANSFER_SUCCEEDED', 'TRANSFER_REJECTED'].includes(string(data.type))) throw new Error('Invalid notification type');
+    const occurredAt = instant(data.occurredAt);
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(occurredAt)) throw new Error('Invalid notification instant');
+    date(occurredAt.slice(0, 10));
+    return { eventId: uuid(data.eventId), type: data.type as NotificationItem['type'], amountMinor: integer(data.amountMinor), balanceMinor: integer(data.balanceMinor), occurredAt };
+  });
+  // Курсор остаётся строкой: последовательность PostgreSQL может быть больше safe integer JavaScript.
+  if (page.nextCursor !== null && !/^[1-9]\d*$/.test(page.nextCursor)) throw new Error('Invalid notification cursor');
+  return page;
 }
 
 export function parseOperationResult(value: unknown, expectedAccountId: string): OperationResult {

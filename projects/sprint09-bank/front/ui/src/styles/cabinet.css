@@ -50,6 +50,10 @@
   z-index:5
 }
 .glass-nav a {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-height:44px;
   text-decoration:none;
   font-size:11px;
   color:#5f705e;
@@ -437,8 +441,121 @@
 .history-panel>.secondary {
   margin-top:16px
 }
-.analytics-section,.business-section {
+.notifications-section,.analytics-section,.business-section {
   margin-top:26px
+}
+.notifications-section .section-heading {
+  align-items:center;
+  flex-wrap:wrap;
+  margin-bottom:18px
+}
+.notification-note {
+  max-width:740px;
+  font-size:12px;
+  color:var(--muted);
+  line-height:1.8
+}
+.notification-meta {
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:12px;
+  font-size:10px;
+  margin-top:18px
+}
+.notification-state {
+  font-size:12px;
+  color:var(--muted);
+  margin-top:17px
+}
+.notification-state.error {
+  color:var(--danger)
+}
+.notifications-list {
+  list-style:none;
+  padding:0 5px 0 0;
+  margin:12px 0 0;
+  max-height:420px;
+  overflow-y:auto;
+  overscroll-behavior-y:contain;
+  scrollbar-width:thin;
+  scrollbar-color:#cad7c1 transparent
+}
+.notifications-list:focus-visible {
+  outline:3px solid #467756;
+  outline-offset:4px
+}
+.notification-row {
+  border-top:1px solid var(--line);
+  padding:18px 0
+}
+.notification-row summary {
+  display:grid;
+  grid-template-columns:36px minmax(0,1fr) minmax(0,auto) 12px;
+  align-items:center;
+  gap:16px;
+  min-height:44px;
+  list-style:none;
+  cursor:pointer
+}
+.notification-row summary::-webkit-details-marker {
+  display:none
+}
+.notification-row summary:after {
+  content:'⌄';
+  font-size:16px;
+  color:var(--muted)
+}
+.notification-row details[open]>summary:after {
+  content:'⌃'
+}
+.notification-icon {
+  display:grid;
+  place-items:center;
+  width:36px;
+  height:36px;
+  background:#edf3e9;
+  color:var(--green);
+  border-radius:12px;
+  font-size:15px
+}
+.notification-icon.rejected {
+  background:#fbefeb;
+  color:var(--danger)
+}
+.notification-description strong,.notification-description time {
+  display:block;
+  overflow-wrap:anywhere
+}
+.notification-description strong {
+  font-size:13px;
+  font-weight:500
+}
+.notification-description time {
+  margin-top:6px;
+  font-size:11px;
+  color:var(--muted)
+}
+.notification-label {
+  font-size:12px;
+  font-variant-numeric:tabular-nums;
+  overflow-wrap:anywhere
+}
+.notification-details {
+  margin:14px 0 0 52px;
+  font-size:11px;
+  color:var(--muted);
+  overflow-wrap:anywhere
+}
+.notification-details p+p {
+  margin-top:5px
+}
+.notification-actions {
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  align-items:center;
+  margin-top:8px
 }
 .analytics-section .section-heading,.business-section .section-heading {
   align-items:center
@@ -650,10 +767,13 @@
     order:3;
     width:100%;
     justify-content:space-between;
-    padding:5px
+    padding:7px;
+    max-width:100%;
+    overflow-x:auto;
+    scrollbar-width:thin
   }
   .glass-nav a {
-    flex:1;
+    flex:1 0 auto;
     text-align:center;
     padding:11px 8px
   }
@@ -724,6 +844,24 @@
   .history-icon {
     width:36px;
     height:36px
+  }
+  .notification-row summary {
+    grid-template-columns:36px minmax(0,1fr) 12px;
+    gap:8px 12px
+  }
+  .notification-icon {
+    grid-row:1 / 3
+  }
+  .notification-label {
+    grid-column:2;
+    grid-row:2
+  }
+  .notification-row summary:after {
+    grid-column:3;
+    grid-row:1 / 3
+  }
+  .notification-details {
+    margin-left:48px
   }
   .profile-section {
     grid-template-columns:1fr;

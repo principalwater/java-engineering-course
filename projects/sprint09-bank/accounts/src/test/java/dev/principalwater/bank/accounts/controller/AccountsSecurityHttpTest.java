@@ -1,6 +1,10 @@
 package dev.principalwater.bank.accounts.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -13,7 +17,11 @@ import dev.principalwater.bank.accounts.service.MoneyService;
 import dev.principalwater.bank.accounts.service.ProfileService;
 import dev.principalwater.bank.contract.Actor;
 import dev.principalwater.bank.contract.InternalOperation;
+import dev.principalwater.bank.contract.NotificationView;
 import dev.principalwater.bank.contract.OperationType;
+import dev.principalwater.bank.contract.Page;
+import dev.principalwater.bank.runtime.client.RemoteUnavailable;
+import dev.principalwater.bank.runtime.client.ServiceClient;
 import dev.principalwater.bank.testing.BankFixtures;
 import dev.principalwater.bank.testing.JwtFixture;
 import java.time.Instant;
@@ -26,11 +34,14 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 class AccountsSecurityHttpTest extends AccountsTestBase {
     @Autowired private MoneyService money;
     @Autowired private ProfileService profiles;
+    @MockitoBean private ServiceClient notifications;
 
     @Test
     void anonymousCannotProvisionAccount() throws Exception {
@@ -150,6 +161,52 @@ class AccountsSecurityHttpTest extends AccountsTestBase {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("accountId").value(aliceId.toString()))
                 .andExpect(jsonPath("fullName").value("Changed Alice"));
+    }
+
+    @Test
+    void notificationsUseVerifiedOwnerAndExposeDeliveryOutageInsteadOfEmptySuccess()
+            throws Exception {
+        Actor alice = ready("alice");
+        UUID owner = profiles.own(alice).accountId();
+        UUID other = profiles.own(ready("bob")).accountId();
+        String path = "/internal/notifications/" + owner + "?limit=20";
+        var pageType = new ParameterizedTypeReference<Page<NotificationView>>() {};
+        NotificationView entry =
+                new NotificationView(UUID.randomUUID(), "PROFILE_UPDATED", 0, 0, Instant.now());
+        when(notifications.get(eq("notifications"), eq(path), eq(pageType)))
+                .thenReturn(new Page<>(List.of(entry), null))
+                .thenThrow(new RemoteUnavailable());
+        http.perform(get("/api/accounts/notifications")).andExpect(status().isUnauthorized());
+        http.perform(
+                        get("/api/accounts/notifications")
+                                .header(
+                                        "Authorization",
+                                        "Bearer "
+                                                + JWT.user("alice-sub", "alice", "accounts.write")))
+                .andExpect(status().isForbidden());
+        verifyNoInteractions(notifications);
+        http.perform(
+                        get("/api/accounts/notifications")
+                                .param("ownerId", other.toString())
+                                .header(
+                                        "Authorization",
+                                        "Bearer "
+                                                + JWT.user("alice-sub", "alice", "accounts.read")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("accountId").value(owner.toString()))
+                .andExpect(
+                        jsonPath("notifications.items[0].eventId")
+                                .value(entry.eventId().toString()))
+                .andExpect(jsonPath("notifications.items[0].ownerId").doesNotExist());
+        verify(notifications).get(eq("notifications"), eq(path), eq(pageType));
+        http.perform(
+                        get("/api/accounts/notifications")
+                                .header(
+                                        "Authorization",
+                                        "Bearer "
+                                                + JWT.user("alice-sub", "alice", "accounts.read")))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("code").value("UNAVAILABLE"));
     }
 
     static Stream<Arguments> invalidTokens() {

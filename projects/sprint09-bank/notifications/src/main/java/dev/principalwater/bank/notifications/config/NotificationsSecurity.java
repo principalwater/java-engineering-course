@@ -12,15 +12,25 @@ import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration(proxyBeanMethods = false)
 public class NotificationsSecurity {
+    private static final String AUDIENCE = "notifications-api";
+
     @Bean
     SecurityFilterChain notificationsSecurityFilterChain(HttpSecurity http) throws Exception {
         return BearerApiSecurity.stateless(http)
                 .authorizeHttpRequests(
                         routes ->
-                                routes.requestMatchers(HttpMethod.POST, "/internal/notifications")
+                                routes.requestMatchers(HttpMethod.GET, "/internal/notifications/*")
+                                        // Accounts определяет владельца по JWT; браузер и
+                                        // отправители денег не читают receipts.
                                         .access(
                                                 JwtAccess.service(
-                                                        "notifications-api",
+                                                        AUDIENCE,
+                                                        OAuthScope.NOTIFICATIONS_WRITE,
+                                                        BankTokenProfile.ACCOUNTS_CLIENT_ID))
+                                        .requestMatchers(HttpMethod.POST, "/internal/notifications")
+                                        .access(
+                                                JwtAccess.service(
+                                                        AUDIENCE,
                                                         OAuthScope.NOTIFICATIONS_WRITE,
                                                         BankTokenProfile.ACCOUNTS_CLIENT_ID,
                                                         BankTokenProfile.CASH_CLIENT_ID,

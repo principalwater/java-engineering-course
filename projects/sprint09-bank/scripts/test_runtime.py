@@ -1,9 +1,15 @@
 """Контракты разбора собственной формы и границы безопасного runtime-клиента."""
 
 import importlib.util
+from contextlib import redirect_stderr, redirect_stdout
+import io
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import unittest
+from unittest.mock import patch
 from urllib.parse import urlencode
 from urllib.request import Request
 
@@ -60,6 +66,77 @@ class RuntimeFormTest(unittest.TestCase):
         self.assertFalse(runtime.allowed_url("https://other.localhost"))
         with self.assertRaises(ValueError):
             runtime.checked_uuid("' OR true --")
+
+
+class RuntimeDiagnosticsTest(unittest.TestCase):
+    def test_command_failure_keeps_exit_code_without_dumping_external_output(self):
+        result = subprocess.CompletedProcess(["docker", "compose"], 17, "", "private external output")
+        with patch.object(runtime.subprocess, "run", return_value=result), redirect_stderr(io.StringIO()) as output:
+            with self.assertRaisesRegex(runtime.VerificationError, "exit 17"):
+                runtime.run(["docker", "compose"])
+        self.assertNotIn("private external output", output.getvalue())
+
+    def test_compose_failures_label_phase_and_bound_redacted_output(self):
+        password = "a" * 64
+        pem_line = "Q" * 96
+        pem = "-----BEGIN PRIVATE KEY-----\n" + pem_line + "\n-----END PRIVATE KEY-----"
+        stderr = ("old noise\n" * 100 + "x" * 20_000 + "\n" + password + "\n" + pem + "\nservice | "
+                  + pem.replace("\n", "\nservice | ") + "\n" + json.dumps(pem)[1:-1]
+                  + "\n::error::untrusted marker\ninitializer failed\n")
+        for phase in ("Compose stack startup", "Compose edge restart"):
+            for timed_out in (False, True):
+                result = subprocess.CompletedProcess(["docker", "compose"], 17, "", stderr)
+                failure = subprocess.TimeoutExpired(["docker", "compose"], 3, stderr=stderr.encode())
+                with self.subTest(phase=phase, timed_out=timed_out), \
+                        patch.object(runtime.subprocess, "run", side_effect=failure if timed_out else None, return_value=result), \
+                        redirect_stderr(io.StringIO()) as output:
+                    with self.assertRaises(runtime.VerificationError) as caught:
+                        runtime.run(["docker", "compose"], label=phase, private_values=(password, pem))
+                diagnostic = output.getvalue()
+                self.assertIn(phase, str(caught.exception))
+                self.assertIn("timed out" if timed_out else "exit 17", str(caught.exception))
+                self.assertIn("initializer failed", diagnostic)
+                self.assertIn("[redacted]", diagnostic)
+                for private in (password, pem, pem_line, "-----BEGIN PRIVATE KEY-----", "-----END PRIVATE KEY-----"):
+                    self.assertNotIn(private, diagnostic)
+                self.assertLessEqual(len(diagnostic.splitlines()), runtime.DIAGNOSTIC_TAIL_LINES)
+                self.assertLessEqual(len(diagnostic), runtime.DIAGNOSTIC_MAX_CHARS
+                                     + runtime.DIAGNOSTIC_TAIL_LINES * (len(phase) + 24))
+                self.assertTrue(all(line.startswith("DIAGNOSTIC ") for line in diagnostic.splitlines()))
+
+    def test_startup_diagnostics_only_inspects_owned_state_and_initializer_tails(self):
+        password = "b" * 64
+        commands = []
+
+        def docker(command, **kwargs):
+            commands.append(command)
+            name = command[-1]
+            if command[1] == "logs":
+                return subprocess.CompletedProcess(command, 0, "initializer stdout\n", "initialization failed " + password)
+            if command[3] == "{{json .Config.Labels}}":
+                owner = "other" if name.startswith("foreign-") else "bank09"
+                return subprocess.CompletedProcess(command, 0, json.dumps({"com.docker.compose.project": owner}), "")
+            return subprocess.CompletedProcess(command, 0, '{"status":"exited","exitCode":1,"oomKilled":false,"restarts":0}', "")
+
+        containers = {"kafka-init": "bank09-kafka-init-1", "database": "bank09-database-1", "config-seed": "foreign-config-seed-1"}
+        with patch.object(runtime.subprocess, "run", side_effect=docker), redirect_stderr(io.StringIO()) as output:
+            runtime.startup_diagnostics(containers, (password,))
+        diagnostic = output.getvalue()
+        self.assertIn('"exitCode":1', diagnostic)
+        self.assertIn("initializer stdout", diagnostic)
+        self.assertIn("initialization failed [redacted]", diagnostic)
+        self.assertIn("foreign-config-seed-1: unavailable", diagnostic)
+        self.assertNotIn(password, diagnostic)
+        self.assertEqual(["bank09-kafka-init-1"], [command[-1] for command in commands if command[1] == "logs"])
+        self.assertEqual(1, sum(command[-1] == "foreign-config-seed-1" for command in commands))
+
+    def test_external_cli_honors_secret_environment_and_explicit_override(self):
+        for options, expected in (([], "/isolated/ci-secrets"), (["--secrets-dir", "/explicit/secrets"], "/explicit/secrets")):
+            with self.subTest(options=options), patch.dict(os.environ, {"BANK_SECRETS_DIR": "/isolated/ci-secrets"}), \
+                    patch.object(sys, "argv", ["verify-runtime.py", "--external", *options]), \
+                    patch.object(runtime, "verify", return_value={}) as verify, redirect_stdout(io.StringIO()):
+                runtime.main()
+            self.assertEqual(Path(expected), verify.call_args.args[1])
 
 
 if __name__ == "__main__":

@@ -1,8 +1,11 @@
 package dev.principalwater.bank.notifications.service;
 
 import dev.principalwater.bank.contract.BankEvent;
+import dev.principalwater.bank.contract.NotificationView;
+import dev.principalwater.bank.contract.Page;
 import dev.principalwater.bank.notifications.dao.NotificationDao;
 import dev.principalwater.bank.notifications.model.NotificationKind;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.access.AccessDeniedException;
@@ -20,6 +23,10 @@ public class NotificationService {
             NotificationDao notifications, PlatformTransactionManager transactions) {
         this.notifications = notifications;
         this.transaction = new TransactionTemplate(transactions);
+    }
+
+    public Page<NotificationView> inbox(UUID owner, Long before, int limit) {
+        return notifications.inbox(owner, before, limit);
     }
 
     public void receive(String caller, BankEvent event) {

@@ -3,6 +3,7 @@ output "deployment" {
   value = one(concat(
     module.sprint03[*].deployment,
     module.sprint04[*].deployment,
+    module.sprint09[*].deployment,
     module.docker_exercise[*].deployment,
     module.mvc_exercise[*].deployment,
     [for stack in module.sprint05 : stack.deployment],

@@ -2,13 +2,13 @@ variable "deployment" {
   description = "One independently managed local stack."
   type        = string
   validation {
-    condition     = contains(["sprint03", "sprint04", "sprint05-postgresql", "sprint05-h2", "sprint06-postgresql", "sprint06-h2", "sprint07-postgresql", "sprint07-h2", "sprint08-postgresql", "sprint08-h2", "docker-exercise", "mvc-exercise"], var.deployment)
+    condition     = contains(["sprint03", "sprint04", "sprint05-postgresql", "sprint05-h2", "sprint06-postgresql", "sprint06-h2", "sprint07-postgresql", "sprint07-h2", "sprint08-postgresql", "sprint08-h2", "sprint09", "docker-exercise", "mvc-exercise"], var.deployment)
     error_message = "Select an implemented project or exercise deployment."
   }
 }
 
 variable "deployment_artifact_hashes" {
-  description = "Prepared Sprint 7/8 executable JAR hashes supplied by the reviewed-plan driver."
+  description = "Prepared multi-service executable JAR hashes supplied by the reviewed-plan driver."
   type        = map(string)
   default     = {}
 }
@@ -40,4 +40,15 @@ variable "analytics_enabled" {
   description = "Enable the selected project's optional ClickHouse integration."
   type        = bool
   default     = false
+}
+
+variable "bank_project_directory" {
+  description = "Optional explicit Sprint 9 source path for a separately checked-out project."
+  type        = string
+  default     = null
+}
+variable "bank_runtime_directory" {
+  description = "External public runtime templates prepared by the Sprint 9 saved-plan driver."
+  type        = string
+  default     = null
 }

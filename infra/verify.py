@@ -45,6 +45,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("stack", choices=deploy.STACKS)
     parser.add_argument("--analytics", action="store_true")
+    parser.add_argument("--project-dir", type=Path, help="Explicit bank source checkout")
     args = parser.parse_args()
     state = deploy.external_directory(Path(os.environ.get("COURSE_DEPLOY_STATE", Path.home() / ".local/state/java-engineering-course")) / args.stack)
     environment = {**os.environ, "TF_DATA_DIR": str(state / "providers")}
@@ -53,13 +54,77 @@ def main():
     deployed = json.loads(subprocess.check_output(tofu + ["output", "-json", "deployment"], env=environment))
     driver = [sys.executable, str(deploy.INFRA / "deploy.py"), args.stack]
     optional = ["--analytics"] if args.analytics else []
+    if args.project_dir:
+        if args.stack != "sprint09":
+            parser.error("--project-dir is supported only for the bank deployment")
+        optional += ["--project-dir", str(args.project_dir)]
 
     def plan(*options):
         with (state / "verification-plan.log").open("w") as log:
             subprocess.run(driver + ["plan"] + optional + list(options), stdout=log, stderr=subprocess.STDOUT, check=True)
         return json.loads(subprocess.check_output(tofu + ["show", "-json", str(state / "reviewed.tfplan")], env=environment))
 
-    if args.stack.startswith(deploy.JAR_PREFIXES):
+    if args.stack == "sprint09":
+        project = args.project_dir or deploy.REPOSITORY / deploy.STACKS[args.stack]
+        secrets_directory = Path(os.environ.get("COURSE_DEPLOY_SECRETS", Path.home() / ".config/java-engineering-course/tofu")) / args.stack
+        specification = importlib.util.spec_from_file_location("bank_runtime_verifier", project / "scripts/verify-runtime.py")
+        probe = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(probe)
+        containers = {name.removeprefix("java-tofu-sprint09-"): name for name in deployed["containers"]}
+        for name in containers.values():
+            probe.inspect_owned(name)
+        users = probe.verify(deployed["frontend_url"], secrets_directory, containers, args.analytics)
+        financial_query = """
+            SELECT jsonb_build_object(
+                'accounts', (SELECT jsonb_agg(jsonb_build_array(id,balance_minor,version) ORDER BY id) FROM accounts.account),
+                'operations', (SELECT jsonb_agg(to_jsonb(o) ORDER BY owner_id,type,request_id) FROM accounts.money_operation o),
+                'ledger', (SELECT jsonb_agg(to_jsonb(l) ORDER BY sequence) FROM accounts.ledger_entry l)
+            )::text
+        """
+        try:
+            expected = probe.pg(containers, financial_query)
+            account = users["alice"].account()
+            database = containers["database"]
+            old_id = subprocess.check_output(["docker", "inspect", "--format", "{{.Id}}", database], text=True).strip()
+            address = 'module.sprint09[0].docker_container.platform["database"]'
+            replacement = plan("--replace", address)
+            changes = [item for item in replacement["resource_changes"] if item["change"]["actions"] != ["no-op"]]
+            assert len(changes) == 1 and changes[0]["address"] == address, "Only the native bank database container may be replaced"
+            subprocess.run(driver + ["apply"] + optional, check=True)
+            new_id = subprocess.check_output(["docker", "inspect", "--format", "{{.Id}}", database], text=True).strip()
+            assert old_id != new_id
+
+            def restored():
+                try:
+                    return probe.pg(containers, financial_query) == expected and users["alice"].account() == account
+                except (probe.VerificationError, URLError, TimeoutError, subprocess.SubprocessError):
+                    return False
+
+            probe.wait_for("native PostgreSQL financial state and HTTP recovery", restored)
+
+            def authentication_restored():
+                try:
+                    return probe.User(deployed["frontend_url"], secrets_directory).login("alice")
+                except (probe.VerificationError, URLError, TimeoutError):
+                    return False
+
+            relogin = probe.wait_for("native OIDC connection recovery after PostgreSQL recreation", authentication_restored)
+            try:
+                assert relogin.account() == account, "Fresh OIDC login must retain the same account and balance"
+            finally:
+                relogin.logout()
+            print("Native PostgreSQL recreation: exact balances, receipts and ledger retained; HTTP and fresh OIDC login recovered")
+            known = deploy.secret_values(secrets_directory)
+            deploy.check_secret_values(json.loads((state / "terraform.tfstate").read_text()), known)
+            for name in containers.values():
+                configuration = subprocess.check_output(["docker", "inspect", "--format", "{{json .Config}}", name], text=True)
+                deploy.check_secret_values(json.loads(configuration), known)
+            print("Native state and owned container configurations contain no external secret-file values")
+        finally:
+            for user in users.values():
+                if user is not None:
+                    user.logout()
+    elif args.stack.startswith(deploy.JAR_PREFIXES):
         sprint = args.stack.split("-", 1)[0]
         oauth = "token_url" in deployed
         specification = importlib.util.spec_from_file_location("storefront_smoke", deploy.REPOSITORY / deploy.STACKS[args.stack] / "scripts/smoke.py")

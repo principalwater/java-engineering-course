@@ -15,6 +15,7 @@ jobs:
       sprint06: ${{ steps.detect.outputs.sprint06 }}
       sprint07: ${{ steps.detect.outputs.sprint07 }}
       sprint08: ${{ steps.detect.outputs.sprint08 }}
+      sprint09: ${{ steps.detect.outputs.sprint09 }}
       exercises: ${{ steps.detect.outputs.exercises }}
       observability: ${{ steps.detect.outputs.observability }}
       kafka: ${{ steps.detect.outputs.kafka }}
@@ -62,6 +63,11 @@ jobs:
             echo "sprint08=true" >> "$GITHUB_OUTPUT"
           else
             echo "sprint08=false" >> "$GITHUB_OUTPUT"
+          fi
+          if test -f projects/sprint09-bank/build.gradle; then
+            echo "sprint09=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sprint09=false" >> "$GITHUB_OUTPUT"
           fi
           if test -f exercises/sprint01/junit5/pom.xml; then
             echo "exercises=true" >> "$GITHUB_OUTPUT"
@@ -260,6 +266,11 @@ jobs:
         with:
           tofu_version: "1.11.6"
           tofu_wrapper: false
+      - name: Install the pinned native deployment YAML parser
+        run: |
+          python3 -m venv "$RUNNER_TEMP/course-infra-python"
+          "$RUNNER_TEMP/course-infra-python/bin/python" -m pip install --disable-pip-version-check -r infra/requirements.txt
+          echo "$RUNNER_TEMP/course-infra-python/bin" >> "$GITHUB_PATH"
       - name: Validate formatting and deployment safety
         run: |
           tofu fmt -check -recursive infra
@@ -925,3 +936,56 @@ jobs:
       - name: Stop owned service containers
         if: always() && steps.containers.outcome != 'skipped'
         run: docker compose -p ci-sprint08 -f compose.yaml -f compose.analytics.yaml stop
+
+  sprint09:
+    needs: projects
+    if: needs.projects.outputs.sprint09 == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: projects/sprint09-bank
+    env:
+      BANK_ALLOW_PLAINTEXT_TEST_SECRETS: "true"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Java 21 and Gradle cache
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: |
+            projects/sprint09-bank/**/*.gradle
+            projects/sprint09-bank/gradle/wrapper/gradle-wrapper.properties
+      - name: Set up Node 24.4 for the Gradle-owned Astro build
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24.4.0"
+          cache: npm
+          cache-dependency-path: projects/sprint09-bank/front/ui/package-lock.json
+      - name: Check service, producer and consumer contracts and package all seven JARs
+        run: ./gradlew --no-daemon --console=plain check packageDeployment
+      - name: Select the isolated private CI secret source
+        run: echo "BANK_SECRETS_DIR=$RUNNER_TEMP/sprint09-secrets" >> "$GITHUB_ENV"
+      - name: Verify deployment secrets TLS and runtime safety boundaries
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - name: Route the bank TLS names to the isolated runner
+        run: printf '127.0.0.1 bank.valgrind-home.localhost auth-bank.valgrind-home.localhost\n' | sudo tee -a /etc/hosts > /dev/null
+      - name: Verify native OAuth, balances, recovery and optional Kafka analytics
+        working-directory: .
+        run: python3 projects/sprint09-bank/scripts/verify-runtime.py --analytics
+      - name: Upload executable JARs and producer and consumer test evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sprint09-java21
+          path: |
+            projects/sprint09-bank/build/deployment/*.jar
+            projects/sprint09-bank/*/build/libs/*-stubs.jar
+            projects/sprint09-bank/*/build/test-results/
+            projects/sprint09-bank/*/build/reports/tests/
+            projects/sprint09-bank/*/build/generated-test-sources/contracts/
+          if-no-files-found: ignore
+          retention-days: 14

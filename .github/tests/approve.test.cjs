@@ -15,7 +15,7 @@ function scenario() {
   const run = {id: 99, head_sha: 'head', event: 'pull_request', pull_requests: [{number: 7}],
     status: 'completed', conclusion: 'success'};
   const pushRun = {...run, id: 100, event: 'push', head_branch: pull.head.ref, pull_requests: []};
-  const jobs = ['projects', 'exercises', 'sprint03', 'sprint04', 'infrastructure', 'sprint05', 'sprint06', 'sprint07', 'sprint08', 'observability-exercises', 'kafka-exercises'].map((name, index) => ({
+  const jobs = ['projects', 'exercises', 'sprint03', 'sprint04', 'infrastructure', 'sprint05', 'sprint06', 'sprint07', 'sprint08', 'observability-exercises', 'kafka-exercises', 'sprint09'].map((name, index) => ({
     name, status: 'completed', conclusion: 'success', check_run_url: 'https://api.github.com/check-runs/' + index,
   }));
   const checks = jobs.map(job => ({...job, app: {id: 15368}}));
@@ -93,7 +93,8 @@ test('approval accepts only a verified head and preserves merge history', async 
     ['missing REST services job', fixture => {fixture.jobs.splice(7, 1);}, /Required check sprint07/],
     ['missing secured services job', fixture => {fixture.jobs.splice(8, 1);}, /Required check sprint08/],
     ['missing observability exercises job', fixture => {fixture.jobs.splice(9, 1);}, /Required check observability-exercises/],
-    ['missing Kafka exercises job', fixture => {fixture.jobs.pop();}, /Required check kafka-exercises/],
+    ['missing Kafka exercises job', fixture => {fixture.jobs.splice(10, 1);}, /Required check kafka-exercises/],
+    ['missing bank job', fixture => {fixture.jobs.splice(11, 1);}, /Required check sprint09/],
     ['failed job', fixture => {fixture.jobs[1].conclusion = 'failure';}, /Required check/],
     ['existing module skipped', fixture => {
       fixture.jobs[2].conclusion = 'skipped'; fixture.checks[2].conclusion = 'skipped';
@@ -126,7 +127,7 @@ test('approval accepts only a verified head and preserves merge history', async 
   });
   await t.test('an IDE pull request without a project allows a legitimate skipped job', async () => {
     const fixture = scenario();
-    fixture.state.absentMarkers = new Set(['projects/sprint03-spring-blog/pom.xml', 'projects/sprint04-spring-boot-blog/build.gradle', 'projects/sprint05-storefront/build.gradle', 'projects/sprint06-reactive-storefront/build.gradle', 'projects/sprint07-rest-service/build.gradle', 'projects/sprint08-security/build.gradle']);
+    fixture.state.absentMarkers = new Set(['projects/sprint03-spring-blog/pom.xml', 'projects/sprint04-spring-boot-blog/build.gradle', 'projects/sprint05-storefront/build.gradle', 'projects/sprint06-reactive-storefront/build.gradle', 'projects/sprint07-rest-service/build.gradle', 'projects/sprint08-security/build.gradle', 'projects/sprint09-bank/build.gradle']);
     fixture.jobs[2].conclusion = 'skipped';
     fixture.checks[2].conclusion = 'skipped';
     fixture.jobs[3].conclusion = 'skipped';
@@ -139,6 +140,8 @@ test('approval accepts only a verified head and preserves merge history', async 
     fixture.checks[7].conclusion = 'skipped';
     fixture.jobs[8].conclusion = 'skipped';
     fixture.checks[8].conclusion = 'skipped';
+    fixture.jobs[11].conclusion = 'skipped';
+    fixture.checks[11].conclusion = 'skipped';
     await approveAndMerge(fixture);
     assert.deepEqual(fixture.effects.map(effect => effect[0]), ['review', 'merge']);
   });

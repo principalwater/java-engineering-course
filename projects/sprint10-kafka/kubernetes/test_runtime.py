@@ -163,7 +163,16 @@ class KafkaProbeTest(unittest.TestCase):
 
                 def run_script(identity, user, body):
                     nonlocal result
-                    fixture = 'bootstrap=fixture\nfunction timeout() { printf "%s" "$RECORDS"; }\n'
+                    fixture = '''bootstrap=fixture
+function timeout() {
+    for option in "$@"; do
+        case "$option" in
+            --consumer.config|--consumer-property) printf '%s\\n' 'Option is deprecated' ;;
+        esac
+    done
+    printf "%s" "$RECORDS"
+}
+'''
                     script = fixture + body.replace("/tmp/", directory + "/")
                     result = subprocess.run(["bash", "-euo", "pipefail", "-c", script],
                                             env={**os.environ, "RECORDS": received}, capture_output=True, text=True)

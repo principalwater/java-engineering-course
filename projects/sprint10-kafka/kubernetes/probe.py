@@ -124,7 +124,7 @@ echo 'Kafka TLS/SCRAM and foreign-write denial verified'
 '''
         if consumer_topic:
             script += f'''phase=forbidden-group; diagnostic=/tmp/group-denied
-timeout --kill-after=5s 20s /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server "$bootstrap" --consumer.config /tmp/client.properties --consumer-property enable.auto.commit=false --group bank10-forbidden-probe --max-messages 1 --topic {shlex.quote(consumer_topic)} >/tmp/group-denied 2>&1 || true
+timeout --kill-after=5s 20s /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server "$bootstrap" --command-config /tmp/client.properties --command-property enable.auto.commit=false --group bank10-forbidden-probe --max-messages 1 --topic {shlex.quote(consumer_topic)} >/tmp/group-denied 2>&1 || true
 grep -q GroupAuthorizationException /tmp/group-denied
 echo 'Foreign consumer group denied on an authorized input topic'
 '''
@@ -153,8 +153,9 @@ def probe_records(identity: dict, user: str, topic: str, group: str, messages: t
 printf '%s\\n' {shlex.quote(messages[-1])} | timeout --kill-after=5s 40s /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server "$bootstrap" --producer.config /tmp/client.properties --sync --topic {shlex.quote(topic)} >/tmp/publish 2>&1
 if grep -Eq 'ERROR|Exception' /tmp/publish; then exit 1; fi
 '''
+    # Kafka 4.2 prints deprecated consumer-option warnings to stdout alongside records.
     script += f'''phase=consume; diagnostic=/tmp/consumer
-timeout 35s /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server "$bootstrap" --consumer.config /tmp/client.properties --group {shlex.quote(group)} --from-beginning --max-messages {len(messages)} --timeout-ms 20000 --topic {shlex.quote(topic)} >/tmp/received 2>/tmp/consumer
+timeout 35s /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server "$bootstrap" --command-config /tmp/client.properties --group {shlex.quote(group)} --from-beginning --max-messages {len(messages)} --timeout-ms 20000 --topic {shlex.quote(topic)} >/tmp/received 2>/tmp/consumer
 test "$(wc -l < /tmp/received)" -eq {len(messages)}
 '''
     # ConsoleConsumer can return zero after a timeout; validate actual records, not only its exit code.

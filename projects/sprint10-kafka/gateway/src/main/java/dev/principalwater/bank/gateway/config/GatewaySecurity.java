@@ -15,7 +15,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
-import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.core.oidc.IdTokenClaimNames;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
@@ -25,12 +24,15 @@ import org.springframework.security.oauth2.jwt.NimbusReactiveJwtDecoder;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.security.web.server.SecurityWebFilterChain;
+import org.springframework.security.web.server.authorization.AuthorizationContext;
 import org.springframework.security.web.server.context.NoOpServerSecurityContextRepository;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
 
 @Configuration(proxyBeanMethods = false)
 public class GatewaySecurity {
+    private static final String API_PATH = "/api/**";
     private static final int JWK_CONNECT_TIMEOUT_MILLIS = 1000;
     private static final Duration JWK_READ_TIMEOUT = Duration.ofSeconds(3);
 
@@ -43,20 +45,9 @@ public class GatewaySecurity {
                         .jwsAlgorithm(SignatureAlgorithm.RS256)
                         .webClient(jwkClient())
                         .build();
-        OAuth2TokenValidator<Jwt> userAudience =
-                jwt -> {
-                    List<String> audiences = jwt.getAudience();
-                    return audiences != null && audiences.contains(BankTokenProfile.USER_AUDIENCE)
-                            ? OAuth2TokenValidatorResult.success()
-                            : OAuth2TokenValidatorResult.failure(
-                                    new OAuth2Error(
-                                            OAuth2ErrorCodes.INVALID_TOKEN,
-                                            "Invalid audience",
-                                            null));
-                };
         decoder.setJwtValidator(
                 new DelegatingOAuth2TokenValidator<>(
-                        JwtValidators.createDefaultWithIssuer(issuer), userAudience));
+                        JwtValidators.createDefaultWithIssuer(issuer), this::validateUserAudience));
         return decoder;
     }
 
@@ -65,18 +56,26 @@ public class GatewaySecurity {
         return http.csrf(csrf -> csrf.disable())
                 .securityContextRepository(NoOpServerSecurityContextRepository.getInstance())
                 .oauth2ResourceServer(resource -> resource.jwt(Customizer.withDefaults()))
-                .authorizeExchange(
-                        access ->
-                                access.pathMatchers("/api/**")
-                                        .access(
-                                                (authentication, context) ->
-                                                        authentication.map(
-                                                                auth ->
-                                                                        new AuthorizationDecision(
-                                                                                isBankFront(auth))))
-                                        .anyExchange()
-                                        .denyAll())
+                .authorizeExchange(this::configureRoutes)
                 .build();
+    }
+
+    private void configureRoutes(ServerHttpSecurity.AuthorizeExchangeSpec access) {
+        access.pathMatchers(API_PATH).access(this::authorizeBankFront).anyExchange().denyAll();
+    }
+
+    private Mono<AuthorizationDecision> authorizeBankFront(
+            Mono<Authentication> authentication, AuthorizationContext context) {
+        return authentication.map(auth -> new AuthorizationDecision(isBankFront(auth)));
+    }
+
+    private OAuth2TokenValidatorResult validateUserAudience(Jwt jwt) {
+        List<String> audiences = jwt.getAudience();
+        if (audiences != null && audiences.contains(BankTokenProfile.USER_AUDIENCE)) {
+            return OAuth2TokenValidatorResult.success();
+        }
+        return OAuth2TokenValidatorResult.failure(
+                new OAuth2Error(OAuth2ErrorCodes.INVALID_TOKEN, "Invalid audience", null));
     }
 
     private WebClient jwkClient() {

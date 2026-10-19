@@ -9,6 +9,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AuthorizeHttpRequestsConfigurer;
 import org.springframework.security.config.annotation.web.configurers.ExceptionHandlingConfigurer;
+import org.springframework.security.config.annotation.web.configurers.HeadersConfigurer;
+import org.springframework.security.config.annotation.web.configurers.LogoutConfigurer;
 import org.springframework.security.config.annotation.web.configurers.oauth2.client.OAuth2LoginConfigurer;
 import org.springframework.security.oauth2.client.endpoint.RestClientAuthorizationCodeTokenResponseClient;
 import org.springframework.security.oauth2.client.oidc.userinfo.OidcUserService;
@@ -83,18 +85,22 @@ public class FrontSecurity {
         return http.authorizeHttpRequests(this::configureRoutes)
                 .exceptionHandling(this::configureEntryPoints)
                 .oauth2Login(login -> configureLogin(login, registrations, tokens, users))
-                .logout(
-                        logout ->
-                                logout.logoutSuccessHandler(logoutHandler(registrations))
-                                        .invalidateHttpSession(true)
-                                        .deleteCookies("__Host-bank-session"))
-                .headers(
-                        headers ->
-                                headers.contentSecurityPolicy(
-                                        directives ->
-                                                directives.policyDirectives(
-                                                        contentSecurityPolicy(registrations))))
+                .logout(logout -> configureLogout(logout, registrations))
+                .headers(headers -> configureHeaders(headers, registrations))
                 .build();
+    }
+
+    private void configureLogout(
+            LogoutConfigurer<HttpSecurity> logout, ClientRegistrationRepository registrations) {
+        logout.logoutSuccessHandler(logoutHandler(registrations))
+                .invalidateHttpSession(true)
+                .deleteCookies("__Host-bank-session");
+    }
+
+    private void configureHeaders(
+            HeadersConfigurer<HttpSecurity> headers, ClientRegistrationRepository registrations) {
+        String policy = contentSecurityPolicy(registrations);
+        headers.contentSecurityPolicy(directives -> directives.policyDirectives(policy));
     }
 
     private void configureRoutes(

@@ -6,18 +6,21 @@ import org.springframework.cloud.gateway.route.RouteLocator;
 import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import reactor.netty.transport.NameResolverProvider;
 
 @Configuration(proxyBeanMethods = false)
 public class RoutesConfiguration {
+    private static final Duration DNS_CACHE_TTL = Duration.ofSeconds(5);
+    private static final Duration DNS_FAILURE_CACHE_TTL = Duration.ofSeconds(1);
+
     @Bean
     HttpClientCustomizer discoveryDnsCache() {
-        // После recreate Docker может отдать старый IP другому сервису; DNS TTL должен быть
-        // коротким.
-        return client ->
-                client.resolver(
-                        resolver ->
-                                resolver.cacheMaxTimeToLive(Duration.ofSeconds(5))
-                                        .cacheNegativeTimeToLive(Duration.ofSeconds(1)));
+        return client -> client.resolver(this::configureDiscoveryDns);
+    }
+
+    private void configureDiscoveryDns(NameResolverProvider.NameResolverSpec resolver) {
+        // Короткий кеш позволяет быстро подхватить смену IP при пересоздании сервиса.
+        resolver.cacheMaxTimeToLive(DNS_CACHE_TTL).cacheNegativeTimeToLive(DNS_FAILURE_CACHE_TTL);
     }
 
     @Bean

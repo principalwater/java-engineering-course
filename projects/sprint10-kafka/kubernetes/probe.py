@@ -145,20 +145,22 @@ def pvc_snapshot(identity: dict) -> dict:
             or item["metadata"].get("labels", {}).get("app.kubernetes.io/part-of") == "bank10"}
 
 
-def probe_records(identity: dict, user: str, topic: str, group: str, message: str, *, publish: bool,
-                  expected_records: int = 1) -> None:
+def probe_records(identity: dict, user: str, topic: str, group: str, messages: tuple[str, ...], *, publish: bool) -> None:
     script = ""
     if publish:
         # Metadata wait and delivery can each take 15s; leave room for JVM startup and shutdown.
         script += f'''phase=publish; diagnostic=/tmp/publish
-printf '%s\\n' {shlex.quote(message)} | timeout --kill-after=5s 40s /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server "$bootstrap" --producer.config /tmp/client.properties --sync --topic {shlex.quote(topic)} >/tmp/publish 2>&1
+printf '%s\\n' {shlex.quote(messages[-1])} | timeout --kill-after=5s 40s /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server "$bootstrap" --producer.config /tmp/client.properties --sync --topic {shlex.quote(topic)} >/tmp/publish 2>&1
 if grep -Eq 'ERROR|Exception' /tmp/publish; then exit 1; fi
 '''
     script += f'''phase=consume; diagnostic=/tmp/consumer
-timeout 35s /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server "$bootstrap" --consumer.config /tmp/client.properties --group {shlex.quote(group)} --from-beginning --max-messages {expected_records} --timeout-ms 20000 --topic {shlex.quote(topic)} >/tmp/received 2>/tmp/consumer
-grep -Fxq {shlex.quote(message)} /tmp/received
-echo 'Retained probe record verified'
+timeout 35s /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server "$bootstrap" --consumer.config /tmp/client.properties --group {shlex.quote(group)} --from-beginning --max-messages {len(messages)} --timeout-ms 20000 --topic {shlex.quote(topic)} >/tmp/received 2>/tmp/consumer
+test "$(wc -l < /tmp/received)" -eq {len(messages)}
 '''
+    # ConsoleConsumer can return zero after a timeout; validate actual records, not only its exit code.
+    for message in messages:
+        script += f"grep -Fxq {shlex.quote(message)} /tmp/received\n"
+    script += "echo 'All retained probe records verified'\n"
     job(identity, user, script)
 
 
@@ -183,8 +185,8 @@ def persistence(identity: dict, state_dir: Path, *, ha: bool) -> None:
             result = json.loads(kubectl(identity, "create", "-f", "-", "-o", "json", data=json.dumps(resource).encode()))
             created.append((resource["kind"], result["metadata"]["uid"]))
             resource_ready(identity, resource["kind"], prefix)
-        message = f"retained-{prefix}"
-        probe_records(identity, prefix, prefix, prefix + "-before", message, publish=True)
+        messages = (f"retained-{prefix}",)
+        probe_records(identity, prefix, prefix, prefix + "-before", messages, publish=True)
         pods = json.loads(kubectl(identity, "get", "pods", "-l", "strimzi.io/cluster=bank-kafka,strimzi.io/broker-role=true", "-o", "json"))["items"]
         targets = sorted(pods, key=lambda pod: pod["metadata"]["name"])
         if ha:
@@ -225,8 +227,8 @@ def persistence(identity: dict, state_dir: Path, *, ha: bool) -> None:
                 time.sleep(2)
             else:
                 raise RuntimeError("Worker outage did not leave exactly two ready brokers/controllers in the bounded interval")
-            message = f"degraded-{prefix}"
-            probe_records(identity, prefix, prefix, prefix + "-degraded", message, publish=True, expected_records=2)
+            messages += (f"degraded-{prefix}",)
+            probe_records(identity, prefix, prefix, prefix + "-degraded", messages, publish=True)
             command(["docker", "start", identity["nodes"][worker]], timeout=90)
             stopped_worker = None
             kubectl(identity, "wait", "--for=condition=Ready", "node/" + worker, "--timeout=180s", timeout=200)
@@ -236,7 +238,7 @@ def persistence(identity: dict, state_dir: Path, *, ha: bool) -> None:
         else:
             kubectl(identity, "delete", "pod", target["metadata"]["name"], "--wait=true", "--timeout=120s", timeout=150)
         resource_ready(identity, "pod", target["metadata"]["name"])
-        probe_records(identity, prefix, prefix, prefix + "-after", message, publish=False, expected_records=2 if ha else 1)
+        probe_records(identity, prefix, prefix, prefix + "-after", messages, publish=False)
         after = pvc_snapshot(identity)
         if before != after:
             raise ValueError("Persistent claim identities changed during the Kafka recovery proof")

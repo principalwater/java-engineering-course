@@ -156,6 +156,22 @@ class ClusterCreationTest(unittest.TestCase):
 
 
 class KafkaProbeTest(unittest.TestCase):
+    def test_retention_rejects_partial_or_duplicate_cli_output(self):
+        for received, expected_success in (("new\n", False), ("new\nnew\n", False), ("old\nnew\n", True)):
+            with self.subTest(received=received), tempfile.TemporaryDirectory() as directory:
+                result = None
+
+                def run_script(identity, user, body):
+                    nonlocal result
+                    fixture = 'bootstrap=fixture\nfunction timeout() { printf "%s" "$RECORDS"; }\n'
+                    script = fixture + body.replace("/tmp/", directory + "/")
+                    result = subprocess.run(["bash", "-euo", "pipefail", "-c", script],
+                                            env={**os.environ, "RECORDS": received}, capture_output=True, text=True)
+
+                with patch.object(probe, "job", side_effect=run_script):
+                    probe.probe_records({}, "fixture-user", "fixture-topic", "fixture-group", ("old", "new"), publish=False)
+                self.assertEqual(result.returncode == 0, expected_success)
+
     def test_failure_reports_current_stage_instead_of_prior_expected_denial(self):
         with tempfile.TemporaryDirectory() as directory:
             identity = {"kubeconfig": str(Path(directory) / "kubeconfig")}

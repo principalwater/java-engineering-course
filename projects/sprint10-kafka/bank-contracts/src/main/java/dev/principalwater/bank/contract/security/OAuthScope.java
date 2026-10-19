@@ -12,7 +12,6 @@ public enum OAuthScope {
     ACCOUNTS_RESOLVE("accounts.resolve"),
     CASH_WRITE("cash.write"),
     TRANSFER_WRITE("transfer.write"),
-    NOTIFICATIONS_WRITE("notifications.write"),
     ANALYTICS_READ("analytics.read"),
     ANALYTICS_EVENTS("analytics.events");
 

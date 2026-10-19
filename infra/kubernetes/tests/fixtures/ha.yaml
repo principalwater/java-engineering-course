@@ -1,0 +1,7 @@
+global:
+  environment: test
+  analyticsEnabled: true
+kafka:
+  profile: ha
+superset:
+  enabled: true

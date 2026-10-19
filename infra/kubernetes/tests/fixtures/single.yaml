@@ -1,0 +1,7 @@
+global:
+  environment: dev
+  analyticsEnabled: false
+kafka:
+  profile: single
+superset:
+  enabled: false

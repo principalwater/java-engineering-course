@@ -26,6 +26,8 @@
 
 Общий каталог [infra/](infra/) разворачивает Docker-окружения отдельными модулями OpenTofu. У каждого стенда собственные state, сеть, контейнеры и данные; принятые проекты сохраняют свои пути и способы запуска через Compose.
 
+Банк с Kafka использует отдельный [OpenTofu root для Kubernetes / Helm](infra/kubernetes/) с собственными state и PVC.
+
 ### Проектные работы
 
 | Спринт | Проект | Каталог |
@@ -58,7 +60,7 @@ Java · Spring Framework · Spring Boot · Spring Data JPA · Spring Web · Reac
 
 ## 🚀 Запуск, тестирование и сдача
 
-Каждый проект будет содержать краткое описание требований, архитектуру, конфигурацию окружения и команды сборки, запуска и тестирования. Код и тесты размещаются в стандартных каталогах выбранного сборщика. Параметры окружения задаются отдельно; локальные пароли монтируются файлами Docker Compose secrets вне Git.
+Каждый проект будет содержать краткое описание требований, архитектуру, конфигурацию окружения и команды сборки, запуска и тестирования. Код и тесты размещаются в стандартных каталогах выбранного сборщика. Параметры окружения задаются отдельно; локальные пароли хранятся вне Git и монтируются файлами через Docker Compose secrets или Kubernetes Secret.
 
 CI обнаруживает проекты и выполняет их реальные проверки; для ещё не добавленного проекта соответствующая задача пропускается. Формат сдачи определяется заданием на платформе; при необходимости отдельного репозитория или ветки инструкции приводятся в README проекта.
 
@@ -99,6 +101,8 @@ Sprint applications use [projects/](projects/); external IDE exercises use [exer
 
 [infra/](infra/) deploys Docker environments through separate OpenTofu modules. Each stack owns its state, network, containers and data; accepted projects retain their paths and Compose workflows.
 
+The Kafka bank uses a separate [Kubernetes / Helm OpenTofu root](infra/kubernetes/) with its own state and PVCs.
+
 ### Sprint Projects
 
 | Sprint | Project | Directory |
@@ -131,7 +135,7 @@ Java 21 is the baseline. Each project's requirements determine its exact JDK, li
 
 ## 🚀 Running, Testing, and Submission
 
-Each project will document its requirements, architecture, environment configuration, and build, run, and test commands. Source code and tests follow the selected build tool's standard layout. Runtime settings are configured separately; local passwords are mounted from Docker Compose secret files outside Git.
+Each project will document its requirements, architecture, environment configuration, and build, run, and test commands. Source code and tests follow the selected build tool's standard layout. Runtime settings are configured separately; local passwords stay outside Git and are mounted as files through Docker Compose secrets or Kubernetes Secret.
 
 CI discovers projects and runs their actual checks; jobs for projects not yet added are skipped. Submission follows the platform's assignment instructions. Any requirement for a separate repository or branch will be documented in the project's README.
 

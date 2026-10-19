@@ -156,7 +156,11 @@ if grep -Eq 'ERROR|Exception' /tmp/publish; then exit 1; fi
     # Kafka 4.2 prints deprecated consumer-option warnings to stdout alongside records.
     script += f'''phase=consume; diagnostic=/tmp/consumer
 timeout 35s /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server "$bootstrap" --command-config /tmp/client.properties --group {shlex.quote(group)} --from-beginning --max-messages {len(messages)} --timeout-ms 20000 --topic {shlex.quote(topic)} >/tmp/received 2>/tmp/consumer
-test "$(wc -l < /tmp/received)" -eq {len(messages)}
+phase=record-count
+received="$(wc -l < /tmp/received)"
+printf 'BANK_PROBE_RECORD_COUNT expected={len(messages)} received=%s\\n' "$received"
+test "$received" -eq {len(messages)}
+phase=record-membership
 '''
     # ConsoleConsumer can return zero after a timeout; validate actual records, not only its exit code.
     for message in messages:

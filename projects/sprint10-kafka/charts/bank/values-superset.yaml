@@ -1,0 +1,6 @@
+global:
+  analyticsEnabled: true
+kafka:
+  analyticsEnabled: true
+superset:
+  enabled: true

@@ -1,0 +1,29 @@
+{{- $ha := eq .Values.profile "ha" }}
+{{- range $name, $topic := .Values.topics }}
+{{- if or (not $topic.optional) $.Values.analyticsEnabled }}
+{{- $suffixes := list "" ".DLT" }}
+{{- if eq (toString $topic.deadLetter) "false" }}
+{{- $suffixes = list "" }}
+{{- end }}
+{{- range $suffix := $suffixes }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: {{ printf "%s%s" $name $suffix | lower | replace "." "-" }}
+  labels:
+    strimzi.io/cluster: {{ $.Values.global.kafkaCluster }}
+    app.kubernetes.io/part-of: bank10
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  topicName: {{ printf "%s%s" $name $suffix | quote }}
+  partitions: 6
+  replicas: {{ ternary 3 1 $ha }}
+  config:
+    min.insync.replicas: {{ ternary 2 1 $ha }}
+    retention.ms: {{ ternary 2592000000 604800000 (eq $suffix ".DLT") }}
+    cleanup.policy: delete
+{{- end }}
+{{- end }}
+{{- end }}

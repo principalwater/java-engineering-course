@@ -1,0 +1,59 @@
+{{- if not .Values.global.analyticsEnabled }}
+{{- fail "Superset requires global.analyticsEnabled=true" }}
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: superset
+  labels: {app.kubernetes.io/part-of: bank10}
+spec:
+  selector: {app: superset, bank10.io/instance: {{ .Release.Name }}}
+  ports: [{name: http, port: 8088, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: superset
+  labels: {app.kubernetes.io/part-of: bank10}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: superset, bank10.io/instance: {{ .Release.Name }}}
+  template:
+    metadata:
+      labels: {app: superset, bank10.io/instance: {{ .Release.Name }}, bank10.io/role: application}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: superset
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          ports: [{name: http, containerPort: 8088}]
+          env:
+            - {name: SUPERSET_HOME, value: /tmp/superset}
+            - {name: BANK_BI_DATABASE_HOST, value: database}
+            - {name: BANK_BI_AUTH_URL, value: "http://authorization:8080/realms/bank"}
+            - {name: BANK_BI_PUBLIC_AUTH_URL, value: {{ printf "https://auth-bank.valgrind-home.localhost:%v/realms/bank" .Values.global.externalPort | quote }}}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          readinessProbe:
+            tcpSocket: {port: http}
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: secrets, secret: {secretName: {{ .Values.existingSecret }}, defaultMode: 0440}}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 128Mi}}

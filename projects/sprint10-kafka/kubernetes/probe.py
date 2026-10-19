@@ -166,7 +166,13 @@ def persistence(identity: dict, state_dir: Path, *, ha: bool) -> None:
         message = f"retained-{prefix}"
         probe_records(identity, prefix, prefix, prefix + "-before", message, publish=True)
         pods = json.loads(kubectl(identity, "get", "pods", "-l", "strimzi.io/cluster=bank-kafka,strimzi.io/broker-role=true", "-o", "json"))["items"]
-        target = sorted(pods, key=lambda pod: pod["metadata"]["name"])[0]
+        targets = sorted(pods, key=lambda pod: pod["metadata"]["name"])
+        if ha:
+            targets = [pod for pod in targets if pod["spec"].get("nodeName") in identity["nodes"]
+                       and pod["spec"]["nodeName"] != identity["cluster"] + "-control-plane"]
+            if not targets:
+                raise ValueError("HA proof requires a broker on an exact owned non-control-plane worker")
+        target = targets[0]
         if ha:
             if len(pods) != 3:
                 raise ValueError("HA proof requires three dedicated brokers")

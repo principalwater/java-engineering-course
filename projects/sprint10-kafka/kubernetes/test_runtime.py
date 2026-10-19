@@ -9,6 +9,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import yaml
+
 import runtime
 
 
@@ -59,11 +61,13 @@ class ClusterCreationTest(unittest.TestCase):
             state = Path(directory) / "state"
             secret_source = Path(directory) / "private"
             secret_source.mkdir(mode=0o700)
-            arguments = argparse.Namespace(state_dir=state, secrets_dir=secret_source, environment="dev",
-                                           profile="single", external_port=8450)
+            arguments = argparse.Namespace(state_dir=state, secrets_dir=secret_source, environment="test",
+                                           profile="ha", external_port=8450)
+            cluster = "bank10-test-ha"
+            node_names = [cluster + suffix for suffix in ("-control-plane", "-worker", "-worker2")]
+            node_ids = {name: str(index + 1) * 64 for index, name in enumerate(node_names)}
             created_networks = []
             node_present = False
-            node_id = "c" * 64
             network_id = "a" * 64
 
             def fake_command(argv, **kwargs):
@@ -74,16 +78,16 @@ class ClusterCreationTest(unittest.TestCase):
                 if argv[:3] == ["docker", "network", "inspect"]:
                     model = {"Name": "none", "IPAM": {"Config": None}}
                     if argv[3] == network_id:
-                        model = {"Name": "bank10-dev-single", "Id": network_id,
-                                 "Labels": {runtime.OWNER_LABEL: "bank10-dev-single"}, "IPAM": {"Config": [{"Subnet": "10.251.10.64/27"}]}}
+                        model = {"Name": cluster, "Id": network_id,
+                                 "Labels": {runtime.OWNER_LABEL: cluster}, "IPAM": {"Config": [{"Subnet": "10.251.10.160/27"}]}}
                     return json.dumps([model])
                 if argv[:3] == ["docker", "network", "create"]:
                     created_networks.append(network_id)
                     return network_id
                 if argv[:3] == ["docker", "ps", "-a"]:
-                    return "bank10-dev-single-control-plane" if node_present else ""
+                    return "\n".join(node_names) if node_present else ""
                 if argv[:2] == ["docker", "inspect"]:
-                    return json.dumps({"owned": {"NetworkID": network_id}}) if "Networks" in argv[3] else node_id
+                    return json.dumps({"owned": {"NetworkID": network_id}}) if "Networks" in argv[3] else node_ids[argv[-1]]
                 if argv[0] == "kubectl":
                     return "owned-kube-system-uid"
                 self.fail(f"Unexpected external command: {argv[:3]}")
@@ -106,13 +110,18 @@ class ClusterCreationTest(unittest.TestCase):
                     runtime.create_cluster(arguments)
                 intent = json.loads((state / "creation.json").read_text(encoding="utf-8"))
                 self.assertEqual(intent["network_id"], network_id)
-                key_file = secret_source / "kubernetes/bank10-dev-single/encryption.yaml"
+                topology = yaml.safe_load((state / "kind.yaml").read_text())
+                self.assertEqual([node["role"] for node in topology["nodes"]], ["control-plane", "worker", "worker"])
+                self.assertTrue(all(node["labels"]["bank10.io/worker"] == "true" for node in topology["nodes"]))
+                control_plane_patch = yaml.safe_load(topology["nodes"][0]["kubeadmConfigPatches"][0])
+                self.assertEqual(control_plane_patch, {"kind": "InitConfiguration", "nodeRegistration": {"taints": []}})
+                key_file = secret_source / ("kubernetes/" + cluster + "/encryption.yaml")
                 encrypted_config = key_file.read_bytes()
                 runtime.create_cluster(arguments)
                 self.assertEqual(created_networks, [network_id])
                 self.assertEqual(key_file.read_bytes(), encrypted_config)
                 identity = json.loads((state / "cluster.json").read_text(encoding="utf-8"))
-                self.assertEqual(identity["nodes"], {"bank10-dev-single-control-plane": node_id})
+                self.assertEqual(identity["nodes"], node_ids)
                 self.assertEqual(identity["network_id"], network_id)
 
 

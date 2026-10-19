@@ -191,15 +191,18 @@ def create_cluster(args: argparse.Namespace) -> None:
         raise ValueError("An existing kubeconfig must be reconciled before creating new cluster identity")
     node_names = [f"{cluster}-control-plane"]
     if args.profile == "ha":
-        node_names.extend(f"{cluster}-worker{suffix}" for suffix in ("", "2", "3"))
+        node_names.extend(f"{cluster}-worker{suffix}" for suffix in ("", "2"))
     nodes = []
     for index, name in enumerate(node_names):
         data_dir = state_dir / "pvc" / name
         data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         node = {"role": "control-plane" if index == 0 else "worker", "image": NODE_IMAGE,
-                "labels": {"bank10.io/worker": "true" if args.profile == "single" or index > 0 else "false"},
+                "labels": {"bank10.io/worker": "true"},
                 "extraMounts": [{"hostPath": str(data_dir), "containerPath": "/var/local-path-provisioner"}]}
         if index == 0:
+            if args.profile == "ha":
+                node["kubeadmConfigPatches"] = [yaml.safe_dump({"kind": "InitConfiguration",
+                                                               "nodeRegistration": {"taints": []}})]
             node["extraMounts"].append({"hostPath": str(encryption_path),
                                         "containerPath": "/etc/kubernetes/bank10-encryption.yaml", "readOnly": True})
             node["extraPortMappings"] = [{"containerPort": 30450, "hostPort": args.external_port,

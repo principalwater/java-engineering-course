@@ -1,4 +1,4 @@
-"""Exercise resumable creation at the actual CLI/file boundary without Docker mutations."""
+"""Exercise owned cluster lifecycle at the CLI/file boundary without Docker mutations."""
 
 import argparse
 import json
@@ -13,6 +13,47 @@ import runtime
 
 
 class ClusterCreationTest(unittest.TestCase):
+    def test_stop_preserves_single_node_scheduling_and_rejects_unrecorded_nodes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            name = "bank10-dev-single-control-plane"
+            identity = {"nodes": {name: "c" * 64}}
+            arguments = argparse.Namespace(state_dir=state)
+            mutations = []
+            foreign_node = False
+
+            def fake_kubectl(cluster, *argv, **kwargs):
+                if argv[:2] == ("get", "nodes"):
+                    node = {"kind": "Node", "metadata": {"name": name}, "spec": {"unschedulable": True}}
+                    if name in argv[2:]:
+                        return json.dumps(node)
+                    nodes = [node]
+                    if foreign_node:
+                        nodes.append({"kind": "Node", "metadata": {"name": "unrecorded-worker"}})
+                    return json.dumps({"kind": "List", "items": nodes})
+                mutations.append(argv[:2] if argv[0] == "cordon" else (argv[0], argv[3]))
+                return ""
+
+            def fake_command(argv, **kwargs):
+                mutations.append(tuple(argv))
+                return ""
+
+            with patch.object(runtime, "owned_identity", return_value=identity), \
+                    patch.object(runtime, "kubectl", side_effect=fake_kubectl), \
+                    patch.object(runtime, "command", side_effect=fake_command):
+                runtime.lifecycle(arguments, stop=True)
+                self.assertEqual(json.loads((state / "scheduling.json").read_text()), {name: True})
+                self.assertEqual(mutations, [("cordon", name),
+                                             ("delete", "bank10.io/role=application"),
+                                             ("delete", "bank10.io/role=storage"),
+                                             ("delete", "bank10.io/role=kafka"),
+                                             ("docker", "stop", "--time", "60", name)])
+                mutations.clear()
+                foreign_node = True
+                with self.assertRaisesRegex(ValueError, "node inventory"):
+                    runtime.lifecycle(arguments, stop=True)
+                self.assertFalse(mutations)
+
     def test_failed_bootstrap_reuses_exact_network_receipt_and_encryption_key(self):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory) / "state"

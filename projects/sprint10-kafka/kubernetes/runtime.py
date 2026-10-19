@@ -359,7 +359,9 @@ def lifecycle(args: argparse.Namespace, *, stop: bool) -> None:
             time.sleep(2)
         owned_identity(args.state_dir)
     if stop:
-        node_state = json.loads(kubectl(identity, "get", "nodes", *nodes, "-o", "json"))["items"]
+        node_state = json.loads(kubectl(identity, "get", "nodes", "-o", "json"))["items"]
+        if {node["metadata"]["name"] for node in node_state} != set(nodes):
+            raise ValueError("Kubernetes node inventory does not match the owned nodes")
         previous = {node["metadata"]["name"]: node.get("spec", {}).get("unschedulable", False) for node in node_state}
         snapshot = args.state_dir / "scheduling.json"
         if snapshot.exists():

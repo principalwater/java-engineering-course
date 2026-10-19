@@ -22,7 +22,7 @@ spec:
   template:
     metadata:
       labels: {app: authorization, bank10.io/instance: {{ .Release.Name }}, bank10.io/role: application}
-      annotations: {checksum/public-config: {{ toJson .Values.assets | sha256sum }}}
+      annotations: {checksum/public-config: {{ index .Values.assets "bank10-authorization" | toJson | sha256sum }}}
     spec:
       automountServiceAccountToken: false
       nodeSelector:

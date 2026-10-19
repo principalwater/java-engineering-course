@@ -22,7 +22,7 @@ spec:
   template:
     metadata:
       labels: {app: database, bank10.io/instance: {{ .Release.Name }}, bank10.io/role: storage}
-      annotations: {checksum/public-config: {{ toJson .Values.assets | sha256sum }}}
+      annotations: {checksum/public-config: {{ dict "setup" (pick (index .Values.assets "bank10-setup") "start-database.sh") "database" (index .Values.assets "bank10-database") | toJson | sha256sum }}}
     spec:
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 30

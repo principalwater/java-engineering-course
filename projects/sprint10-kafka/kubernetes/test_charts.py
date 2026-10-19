@@ -1,5 +1,6 @@
 """Test rendered deployment contracts before any Kubernetes lifecycle operation."""
 
+import copy
 from pathlib import Path
 import subprocess
 import tempfile
@@ -112,6 +113,37 @@ class BankChartTest(unittest.TestCase):
         for deployment in self.resources(analytics=True, kind="Deployment").values():
             self.assertEqual(deployment["spec"]["replicas"], 1)
             self.assertEqual(deployment["spec"]["strategy"]["type"], "Recreate")
+
+        values_path = Path(self.directory.name) / "single-True/public-values.yaml"
+        baseline_values = yaml.safe_load(values_path.read_text(encoding="utf-8"))
+        baseline = {(item["kind"], item["metadata"]["name"]): item["spec"]["template"]
+                    for item in self.models[("single", True)]
+                    if item and item["kind"] in {"Deployment", "StatefulSet"}}
+        changes = (
+            ("bank10-edge", "Caddyfile", {("Deployment", "edge")}),
+            ("bank10-setup", "start-database.sh", {("StatefulSet", "database")}),
+            ("bank10-database", "init-database.sh", {("StatefulSet", "database")}),
+            ("bank10-authorization", "bank-realm.json", {("Deployment", "authorization")}),
+            ("bank10-analytics-setup", "start-cassandra.sh", {("StatefulSet", "cassandra")}),
+            ("bank10-analytics-setup", "start-clickhouse.sh", {("StatefulSet", "clickhouse")}),
+            ("bank10-analytics-setup", "clickhouse-users.xml", {("StatefulSet", "clickhouse")}),
+            ("bank10-analytics-setup", "clickhouse-storage.xml", {("StatefulSet", "clickhouse")}),
+            ("bank10-setup", "init-config.sh", {("Deployment", name) for name in
+             ("accounts", "cash", "transfer", "notifications", "gateway", "front", "analytics")}),
+        )
+        for config_map, asset, expected in changes:
+            with self.subTest(config_map=config_map, asset=asset):
+                values = copy.deepcopy(baseline_values)
+                values["assets"][config_map][asset] += "\n"
+                override = Path(self.directory.name) / "changed-asset.yaml"
+                override.write_text(yaml.safe_dump(values), encoding="utf-8")
+                rendered = subprocess.run(["helm", "template", "bank", str(self.project / "charts/bank"),
+                                           "--namespace", "bank10-dev", "-f", str(override)],
+                                          capture_output=True, text=True, check=True)
+                actual = {(item["kind"], item["metadata"]["name"]): item["spec"]["template"]
+                          for item in yaml.safe_load_all(rendered.stdout)
+                          if item and item["kind"] in {"Deployment", "StatefulSet"}}
+                self.assertEqual({key for key in baseline if baseline[key] != actual[key]}, expected)
 
     def test_foreign_namespace_fails_before_any_cluster_contact(self):
         result = subprocess.run(["helm", "template", "bank", str(self.project / "charts/bank"), "--namespace", "default",

@@ -2,8 +2,10 @@
 {{- $stores := list (dict "name" "cassandra" "image" .Values.platform.cassandraImage "port" 9042 "memory" "1Gi") (dict "name" "clickhouse" "image" .Values.platform.clickhouseImage "port" 8123 "memory" "768Mi") }}
 {{- range $store := $stores }}
 {{- $initialization := index $.Values.assets "bank10-analytics-setup" (printf "init-%s.sh" $store.name) }}
+{{- $startup := pick (index $.Values.assets "bank10-analytics-setup") (printf "start-%s.sh" $store.name) }}
 {{- if eq $store.name "clickhouse" }}
 {{- $initialization = printf "%s\n%s\n%s" $initialization (index $.Values.assets "bank10-analytics-setup" "init-clickhouse.sql") (index $.Values.assets "bank10-analytics-setup" "activity-marts.sql") }}
+{{- $startup = pick (index $.Values.assets "bank10-analytics-setup") "start-clickhouse.sh" "clickhouse-users.xml" "clickhouse-storage.xml" }}
 {{- end }}
 ---
 apiVersion: v1
@@ -34,7 +36,7 @@ spec:
   template:
     metadata:
       labels: {app: {{ $store.name }}, bank10.io/instance: {{ $.Release.Name }}, bank10.io/role: storage}
-      annotations: {checksum/public-config: {{ toJson $.Values.assets | sha256sum }}}
+      annotations: {checksum/public-config: {{ toJson $startup | sha256sum }}}
     spec:
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 45

@@ -29,7 +29,7 @@ spec:
   template:
     metadata:
       labels: {app: edge, bank10.io/instance: {{ .Release.Name }}, bank10.io/role: application}
-      annotations: {checksum/public-config: {{ toJson .Values.assets | sha256sum }}}
+      annotations: {checksum/public-config: {{ index .Values.assets "bank10-edge" | toJson | sha256sum }}}
     spec:
       automountServiceAccountToken: false
       securityContext:

@@ -85,7 +85,7 @@ spec:
     metadata:
       labels: {app: {{ $name }}, bank10.io/instance: {{ $.Release.Name }}, bank10.io/role: application}
       annotations:
-        checksum/public-config: {{ toJson $.Values.assets | sha256sum }}
+        checksum/shared-config: {{ index $.Values.assets "bank10-setup" "init-config.sh" | sha256sum }}
         checksum/client: {{ toJson $app | sha256sum }}
         checksum/options: {{ toJson $.Values.global | sha256sum }}
     spec:

@@ -11,6 +11,7 @@ unset password
 for attempt in {1..60}; do
     if clickhouse-client --config-file=/tmp/client.xml --query 'SELECT 1' >/dev/null 2>&1; then
         clickhouse-client --config-file=/tmp/client.xml --multiquery < /setup/init-clickhouse.sql
+        clickhouse-client --config-file=/tmp/client.xml --multiquery < /setup/activity-marts.sql
         rm -f /tmp/client.xml
         echo 'ClickHouse bank database is ready'
         exit 0

@@ -71,22 +71,6 @@
       }
     },
     {
-      "name": "notifications.write",
-      "protocol": "openid-connect",
-      "attributes": {
-        "include.in.token.scope": "true",
-        "display.on.consent.screen": "false"
-      }
-    },
-    {
-      "name": "analytics.write",
-      "protocol": "openid-connect",
-      "attributes": {
-        "include.in.token.scope": "true",
-        "display.on.consent.screen": "false"
-      }
-    },
-    {
       "name": "accounts.cash",
       "protocol": "openid-connect",
       "attributes": {
@@ -140,7 +124,8 @@
             "jsonType.label": "String",
             "multivalued": "true",
             "access.token.claim": "true",
-            "id.token.claim": "true"
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true"
           }
         }
       ]
@@ -175,6 +160,28 @@
           "config": {
             "access.token.claim": "true",
             "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "name": "email",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "email",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "config": {
+            "user.attribute": "email",
+            "claim.name": "email",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
           }
         }
       ]
@@ -232,45 +239,6 @@
       }
     },
     {
-      "clientId": "accounts-service",
-      "protocol": "openid-connect",
-      "enabled": true,
-      "publicClient": false,
-      "secret": "__oauth_accounts_secret__",
-      "standardFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
-      "implicitFlowEnabled": false,
-      "serviceAccountsEnabled": true,
-      "fullScopeAllowed": false,
-      "defaultClientScopes": [],
-      "optionalClientScopes": [
-        "notifications.write",
-        "analytics.write"
-      ],
-      "protocolMappers": [
-        {
-          "name": "notifications-api-audience",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-audience-mapper",
-          "config": {
-            "included.custom.audience": "notifications-api",
-            "id.token.claim": "false",
-            "access.token.claim": "true"
-          }
-        },
-        {
-          "name": "analytics-api-audience",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-audience-mapper",
-          "config": {
-            "included.custom.audience": "analytics-api",
-            "id.token.claim": "false",
-            "access.token.claim": "true"
-          }
-        }
-      ]
-    },
-    {
       "clientId": "cash-service",
       "protocol": "openid-connect",
       "enabled": true,
@@ -283,8 +251,7 @@
       "fullScopeAllowed": false,
       "defaultClientScopes": [],
       "optionalClientScopes": [
-        "accounts.cash",
-        "notifications.write"
+        "accounts.cash"
       ],
       "protocolMappers": [
         {
@@ -293,16 +260,6 @@
           "protocolMapper": "oidc-audience-mapper",
           "config": {
             "included.custom.audience": "accounts-api",
-            "id.token.claim": "false",
-            "access.token.claim": "true"
-          }
-        },
-        {
-          "name": "notifications-api-audience",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-audience-mapper",
-          "config": {
-            "included.custom.audience": "notifications-api",
             "id.token.claim": "false",
             "access.token.claim": "true"
           }
@@ -322,8 +279,7 @@
       "fullScopeAllowed": false,
       "defaultClientScopes": [],
       "optionalClientScopes": [
-        "accounts.transfer",
-        "notifications.write"
+        "accounts.transfer"
       ],
       "protocolMappers": [
         {
@@ -332,16 +288,6 @@
           "protocolMapper": "oidc-audience-mapper",
           "config": {
             "included.custom.audience": "accounts-api",
-            "id.token.claim": "false",
-            "access.token.claim": "true"
-          }
-        },
-        {
-          "name": "notifications-api-audience",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-audience-mapper",
-          "config": {
-            "included.custom.audience": "notifications-api",
             "id.token.claim": "false",
             "access.token.claim": "true"
           }
@@ -385,6 +331,35 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "fullScopeAllowed": false
+    },
+    {
+      "clientId": "bank-insights",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "__oauth_insights_secret__",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "optionalClientScopes": [],
+      "rootUrl": "https://insights.valgrind-home.localhost:8450",
+      "redirectUris": [
+        "https://insights.valgrind-home.localhost:8450/oauth-authorized/bank"
+      ],
+      "webOrigins": [
+        "https://insights.valgrind-home.localhost:8450"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
     }
   ],
   "scopeMappings": [
@@ -392,6 +367,12 @@
       "client": "bank-front",
       "roles": [
         "customer",
+        "analyst"
+      ]
+    },
+    {
+      "client": "bank-insights",
+      "roles": [
         "analyst"
       ]
     }

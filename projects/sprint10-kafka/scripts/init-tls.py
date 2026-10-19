@@ -9,7 +9,7 @@ import sys
 import tempfile
 
 
-HOSTS = ("bank.valgrind-home.localhost", "auth-bank.valgrind-home.localhost")
+HOSTS = ("bank.valgrind-home.localhost", "auth-bank.valgrind-home.localhost", "insights.valgrind-home.localhost", "superset")
 
 
 def openssl_binary():

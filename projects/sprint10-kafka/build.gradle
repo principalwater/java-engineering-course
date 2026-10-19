@@ -56,7 +56,7 @@ tasks.named('build') { dependsOn subprojects.collect { "${it.path}:build" } }
 tasks.register('packageDeployment', Sync) {
     group = 'build'
     description = 'Prepare executable service artifacts for Docker and OpenTofu'
-    ['accounts', 'cash', 'transfer', 'notifications', 'front', 'gateway', 'analytics'].each { service ->
+    ['accounts', 'cash', 'transfer', 'notifications', 'front', 'gateway', 'analytics', 'bank-bi'].each { service ->
         dependsOn ":${service}:bootJar"
         from project(":${service}").layout.buildDirectory.file("libs/${service}.jar")
     }

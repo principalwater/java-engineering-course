@@ -16,7 +16,7 @@ read_secret() {
     printf 'bootstrap-admin-password=%s\n' "$(read_secret authorization_admin_password)"
 } > /tmp/keycloak.conf
 realm="$(cat /setup/bank-realm.json)"
-for name in oauth_front_secret oauth_accounts_secret oauth_cash_secret oauth_transfer_secret oauth_analytics_secret demo_alice_password demo_bob_password demo_analyst_password; do
+for name in oauth_front_secret oauth_insights_secret oauth_cash_secret oauth_transfer_secret oauth_analytics_secret demo_alice_password demo_bob_password demo_analyst_password; do
     value="$(read_secret "$name")"
     placeholder="__${name}__"
     realm="${realm//"$placeholder"/"$value"}"

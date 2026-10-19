@@ -1,4 +1,4 @@
 rootProject.name = 'bank'
 include 'bank-contracts', 'bank-runtime', 'bank-test-support', 'accounts', 'cash', 'transfer', 'notifications', 'front', 'gateway', 'analytics'
 
-include 'bank-messaging', 'bank-service-client'
+include 'bank-messaging', 'bank-service-client', 'bank-bi'

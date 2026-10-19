@@ -2,7 +2,7 @@
 set -euo pipefail
 umask 077
 users="$(cat /setup/clickhouse-users.xml)"
-for role in admin writer reader; do
+for role in admin writer reader bi; do
     password="$(cat "/run/secrets/analytics_${role}_password")"
     if [[ ! "$password" =~ ^[a-f0-9]{64}$ ]]; then
         echo 'ClickHouse requires 64-character hexadecimal secret files' >&2

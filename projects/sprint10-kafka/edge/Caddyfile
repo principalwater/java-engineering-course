@@ -32,3 +32,21 @@ https://auth-bank.valgrind-home.localhost:8450 {
         header_up X-Forwarded-Port 8450
     }
 }
+
+https://insights.valgrind-home.localhost:8450 {
+    tls /run/secrets/tls_certificate.pem /run/secrets/tls_private_key.pem
+    request_body {
+        max_size 2MB
+    }
+    header Referrer-Policy no-referrer
+    reverse_proxy https://superset:8088 {
+        transport http {
+            tls_trusted_ca_certs /run/secrets/tls_ca.pem
+        }
+        header_up -Forwarded
+        header_up -X-Forwarded-Prefix
+        header_up X-Forwarded-Host insights.valgrind-home.localhost:8450
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-Port 8450
+    }
+}

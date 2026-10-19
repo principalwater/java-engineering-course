@@ -5,7 +5,7 @@ psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --set ON_ERROR_STOP=1 <
 REVOKE ALL ON DATABASE bank FROM PUBLIC;
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 SQL
-for name in accounts cash transfer notifications analytics keycloak; do
+for name in accounts cash transfer notifications analytics keycloak superset; do
     password=$(cat "/run/bank-secrets/$name")
     case "$password" in
         ''|*[!a-f0-9]*) echo 'Database role password must be a nonempty hexadecimal secret' >&2; exit 1 ;;

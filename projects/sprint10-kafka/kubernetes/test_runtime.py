@@ -4,8 +4,10 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -15,6 +17,32 @@ import runtime
 
 
 class ClusterCreationTest(unittest.TestCase):
+    def test_image_operations_refuse_low_host_space_before_each_build_and_import(self):
+        floor = 5 * 1024 ** 3
+        cases = (([floor - 1], []),
+                 ([floor, floor - 1], [("docker", "build")]),
+                 ([floor, floor, floor - 1], [("docker", "build"), ("kind", "load")]))
+        for available, expected in cases:
+            with self.subTest(available=available), tempfile.TemporaryDirectory() as directory:
+                state = Path(directory)
+                (state / "source.json").write_text(json.dumps({"analytics": False, "superset": False}))
+                mutations = []
+
+                def fake_command(argv, **kwargs):
+                    mutations.append(tuple(argv[:2]))
+                    if len(mutations) > len(expected):
+                        self.fail("Image operation ran below the required free host disk floor")
+                    return ""
+
+                with patch.object(runtime, "owned_identity", return_value={"cluster": "bank10-test-ha"}), \
+                        patch.object(runtime, "image_reference", return_value="bank10-accounts:" + "a" * 20), \
+                        patch.object(shutil, "disk_usage", side_effect=[SimpleNamespace(free=value) for value in available]), \
+                        patch.object(runtime, "command", side_effect=fake_command):
+                    with self.assertRaisesRegex(ValueError, "free host disk"):
+                        runtime.load_images(argparse.Namespace(state_dir=state))
+                self.assertEqual(mutations, expected)
+                self.assertFalse((state / "images.json").exists())
+
     def test_stop_preserves_single_node_scheduling_and_rejects_unrecorded_nodes(self):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory)

@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import time
@@ -22,6 +23,8 @@ from prepare import APPS, image_reference, prepare, project_dir, require_externa
 
 NODE_IMAGE = "kindest/node:v1.34.11@sha256:44e222ee2132dab25ff87301682f89eb82c7880ea3a1bf543bfe9708fd08d67d"
 OWNER_LABEL = "bank10.io/cluster"
+# Docker exports/unpacked layers need temporary headroom; this floor is not a capacity estimate.
+MIN_HOST_DISK_FREE_GIB = 5
 
 
 def command(arguments: list[str], *, data: bytes | None = None, timeout: int = 120,
@@ -287,6 +290,12 @@ def bootstrap_secrets(args: argparse.Namespace) -> None:
     print(f"Bootstrapped {len(bindings)} owned Secret references; existing values preserved, no Terraform Secret resources")
 
 
+def require_host_disk_space() -> None:
+    if shutil.disk_usage(project_dir()).free < MIN_HOST_DISK_FREE_GIB * 1024 ** 3:
+        raise ValueError(f"Image operations require at least {MIN_HOST_DISK_FREE_GIB} GiB free host disk; "
+                         "this lower bound does not guarantee capacity")
+
+
 def load_images(args: argparse.Namespace) -> None:
     identity = owned_identity(args.state_dir)
     project = project_dir()
@@ -298,12 +307,14 @@ def load_images(args: argparse.Namespace) -> None:
         services.extend(["superset", "bank-bi"])
     images = {}
     for name in services:
+        require_host_disk_space()
         image = image_reference(project, name)
         if name in APPS or name == "bank-bi":
             command(["docker", "build", "--tag", image, "--build-arg", f"SERVICE={name}", str(project)], timeout=300)
         else:
             context = project / ("bank-bi/superset" if name == "superset" else name)
             command(["docker", "build", "--tag", image, str(context)], timeout=300)
+        require_host_disk_space()
         command(["kind", "load", "docker-image", "--name", identity["cluster"], image], timeout=300)
         images[name] = image
     (args.state_dir / "images.json").write_text(json.dumps(images, indent=2) + "\n", encoding="utf-8")

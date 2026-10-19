@@ -1,5 +1,6 @@
 package dev.principalwater.bank.analytics.config;
 
+import dev.principalwater.bank.messaging.KafkaClientProperties;
 import java.time.Duration;
 import java.util.Map;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -42,22 +43,16 @@ public class AnalyticsKafka {
     private static final int PRODUCER_CLOSE_SECONDS = 5;
     private static final Duration AUTHENTICATION_RETRY = Duration.ofSeconds(10);
     private final KafkaProperties properties;
-    private final String jaas;
+    private final String user;
+    private final String password;
 
     public AnalyticsKafka(
             KafkaProperties properties,
-            @Value("${bank.analytics.kafka-user}") String user,
-            @Value("${bank.analytics.kafka-password}") String password) {
-        if (!user.matches("[a-z][a-z0-9_]{1,63}") || !password.matches("[a-f0-9]{64}")) {
-            throw new IllegalArgumentException("Invalid analytics Kafka credentials");
-        }
+            @Value("${bank.kafka.user}") String user,
+            @Value("${bank.kafka.password}") String password) {
         this.properties = properties;
-        jaas =
-                "org.apache.kafka.common.security.plain.PlainLoginModule required username=\""
-                        + user
-                        + "\" password=\""
-                        + password
-                        + "\";";
+        this.user = user;
+        this.password = password;
     }
 
     @Bean
@@ -139,7 +134,6 @@ public class AnalyticsKafka {
     }
 
     private Map<String, Object> secured(Map<String, Object> configuration) {
-        configuration.put("sasl.jaas.config", jaas);
-        return configuration;
+        return KafkaClientProperties.secured(configuration, user, password);
     }
 }

@@ -1,14 +1,15 @@
 package dev.principalwater.bank.notifications.service;
 
 import dev.principalwater.bank.contract.BankEvent;
-import dev.principalwater.bank.contract.NotificationView;
-import dev.principalwater.bank.contract.Page;
+import dev.principalwater.bank.contract.BankTopics;
+import dev.principalwater.bank.contract.NotificationKind;
+import dev.principalwater.bank.contract.NotificationReceipt;
+import dev.principalwater.bank.contract.NotificationSource;
+import dev.principalwater.bank.messaging.KafkaOutbox;
+import dev.principalwater.bank.messaging.MessageRejected;
 import dev.principalwater.bank.notifications.dao.NotificationDao;
-import dev.principalwater.bank.notifications.model.NotificationKind;
-import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -17,27 +18,39 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class NotificationService {
     private static final Logger LOG = LoggerFactory.getLogger(NotificationService.class);
     private final NotificationDao notifications;
+    private final KafkaOutbox outbox;
     private final TransactionTemplate transaction;
 
     public NotificationService(
-            NotificationDao notifications, PlatformTransactionManager transactions) {
+            NotificationDao notifications,
+            KafkaOutbox outbox,
+            PlatformTransactionManager transactions) {
         this.notifications = notifications;
+        this.outbox = outbox;
         this.transaction = new TransactionTemplate(transactions);
     }
 
-    public Page<NotificationView> inbox(UUID owner, Long before, int limit) {
-        return notifications.inbox(owner, before, limit);
-    }
-
-    public void receive(String caller, BankEvent event) {
-        NotificationKind kind = NotificationKind.parse(event.type());
-        if (!kind.accepts(caller)) {
-            throw new AccessDeniedException("Caller cannot send this notification action");
+    public void receive(NotificationSource source, BankEvent event) {
+        NotificationKind kind;
+        try {
+            kind = NotificationKind.valueOf(event.type());
+        } catch (IllegalArgumentException failure) {
+            throw new MessageRejected();
         }
-        Boolean inserted = transaction.execute(status -> notifications.receive(caller, event));
-        // Best-effort после commit; receipt долговечен, в журнал попадает только enum действия.
-        if (Boolean.TRUE.equals(inserted)) {
-            LOG.info("Notification action={}", kind);
-        }
+        if (kind.getSource() != source) throw new MessageRejected();
+        Boolean inserted =
+                transaction.execute(
+                        status -> {
+                            boolean fresh = notifications.receive(source.getCaller(), event);
+                            // Receipt и его исходящий факт фиксируются вместе: crash не теряет
+                            // доставку в кабинет.
+                            outbox.enqueue(
+                                    BankTopics.NOTIFICATION_RECEIPTS,
+                                    event.ownerId().toString(),
+                                    source.identity(event.eventId()),
+                                    new NotificationReceipt(source, event));
+                            return fresh;
+                        });
+        if (Boolean.TRUE.equals(inserted)) LOG.info("Notification action={}", kind);
     }
 }

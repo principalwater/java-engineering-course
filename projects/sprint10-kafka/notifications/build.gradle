@@ -1,6 +1,74 @@
 apply plugin: 'org.springframework.boot'
+apply plugin: 'org.springframework.cloud.contract'
 
 dependencies {
-    implementation project(':bank-runtime')
+    implementation project(':bank-messaging')
     testImplementation project(':bank-test-support')
 }
+
+sourceSets.contractTest {
+    compileClasspath += sourceSets.test.output
+    runtimeClasspath += sourceSets.test.output
+}
+dependencies {
+    contractTestImplementation project(':bank-test-support')
+    contractTestImplementation 'org.springframework.cloud:spring-cloud-starter-contract-verifier:4.3.4'
+}
+contracts {
+    testFramework = 'JUNIT5'
+    baseClassForTests = 'dev.principalwater.bank.notifications.contract.NotificationContractBase'
+    basePackageForTests = 'dev.principalwater.bank.notifications.contract.generated'
+}
+tasks.named('compileContractTestJava') { dependsOn tasks.named('testClasses') }
+tasks.named('contractTest') { useJUnitPlatform() }
+tasks.named('check') { dependsOn tasks.named('contractTest') }
+configurations {
+    verifiedContractStubs { canBeConsumed = true; canBeResolved = false }
+}
+artifacts { verifiedContractStubs tasks.named('verifierStubsJar') }
+tasks.named('pmdContractTest') { exclude '**/generated/**' }
+
+sourceSets {
+    messagingConsumerTest {
+        compileClasspath += sourceSets.main.output + sourceSets.test.output
+        runtimeClasspath += sourceSets.main.output + sourceSets.test.output
+    }
+}
+configurations {
+    messagingConsumerTestImplementation.extendsFrom testImplementation
+    messagingConsumerTestRuntimeOnly.extendsFrom testRuntimeOnly
+    messagingContractStubs { canBeConsumed = false; canBeResolved = true }
+}
+dependencies {
+    messagingConsumerTestImplementation 'org.springframework.cloud:spring-cloud-contract-stub-runner:4.3.4'
+    messagingContractStubs project(path: ':accounts', configuration: 'verifiedContractStubs')
+    messagingContractStubs project(path: ':cash', configuration: 'verifiedContractStubs')
+    messagingContractStubs project(path: ':transfer', configuration: 'verifiedContractStubs')
+    messagingConsumerTestRuntimeOnly files(configurations.messagingContractStubs)
+}
+tasks.register('messagingConsumerTest', Test) {
+    description = 'Consume verified messaging stubs through real Kafka adapters'
+    testClassesDirs = sourceSets.messagingConsumerTest.output.classesDirs
+    classpath = sourceSets.messagingConsumerTest.runtimeClasspath
+    dependsOn tasks.named('testClasses')
+    dependsOn configurations.messagingContractStubs
+    inputs.files(configurations.messagingContractStubs).withPropertyName('verifiedMessagingStubs')
+    dependsOn ':accounts:contractTest'
+    dependsOn ':cash:contractTest'
+    dependsOn ':transfer:contractTest'
+}
+tasks.named('check') { dependsOn tasks.named('messagingConsumerTest') }
+
+tasks.register('verifyRuntimeIsolation') {
+    inputs.files(configurations.runtimeClasspath).withPropertyName('notificationRuntime')
+    doLast {
+        def forbidden = ['spring-webmvc', 'spring-webflux', 'spring-boot-starter-web',
+                         'spring-boot-starter-webflux', 'spring-boot-starter-tomcat',
+                         'spring-security-oauth2-client', 'spring-security-oauth2-resource-server',
+                         'bank-runtime', 'bank-service-client'] as Set
+        def found = configurations.runtimeClasspath.resolvedConfiguration.resolvedArtifacts
+                .collect { it.moduleVersion.id.name }.findAll { forbidden.contains(it) }
+        if (!found.empty) throw new GradleException("Notifications runtime contains forbidden dependencies: ${found}")
+    }
+}
+tasks.named('check') { dependsOn tasks.named('verifyRuntimeIsolation') }

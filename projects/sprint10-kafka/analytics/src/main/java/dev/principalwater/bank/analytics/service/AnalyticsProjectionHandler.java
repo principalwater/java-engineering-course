@@ -4,8 +4,10 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.principalwater.bank.analytics.dao.AnalyticsInbox;
 import dev.principalwater.bank.analytics.model.AnalyticsProjection;
+import dev.principalwater.bank.analytics.model.AnalyticsRecord;
 import dev.principalwater.bank.analytics.model.InvalidAnalyticsRecord;
 import dev.principalwater.bank.contract.BankEvent;
+import dev.principalwater.bank.contract.UiActivityEvent;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -35,7 +37,15 @@ public class AnalyticsProjectionHandler {
             ConsumerRecord<String, String> record,
             AnalyticsProjection projection,
             Consumer<BankEvent> sink) {
-        BankEvent event;
+        deliver(record, projection, sink, null);
+    }
+
+    public void deliver(
+            ConsumerRecord<String, String> record,
+            AnalyticsProjection projection,
+            Consumer<BankEvent> sink,
+            Consumer<UiActivityEvent> uiSink) {
+        AnalyticsRecord event;
         try {
             event = decode(record);
             if (!inbox.projectionPending(event, projection)) {
@@ -45,7 +55,7 @@ public class AnalyticsProjectionHandler {
             // Только durable quarantine разрешает offset commit; отказ PostgreSQL оставляет запись
             // на retry.
             inbox.quarantine(
-                    projection,
+                    projection.name(),
                     record.topic(),
                     record.partition(),
                     record.offset(),
@@ -57,16 +67,25 @@ public class AnalyticsProjectionHandler {
                     failure.getReason());
             return;
         }
-        sink.accept(event);
+        if (event.ui() != null) {
+            // UI warehouse ACK принадлежит Cassandra-derived batch. Offset commit не теряет задачу:
+            // PG хранит её до ACK.
+            if (projection == AnalyticsProjection.BUSINESS) return;
+            uiSink.accept(event.ui());
+        } else {
+            sink.accept(event.bank());
+        }
         inbox.acknowledgeProjection(event.eventId(), projection);
     }
 
-    private BankEvent decode(ConsumerRecord<String, String> record) {
-        if (record.value() == null || record.value().length() > MAX_EVENT_CHARACTERS) {
+    private AnalyticsRecord decode(ConsumerRecord<String, String> record) {
+        if (!AnalyticsProjection.TOPIC.equals(record.topic())
+                || record.value() == null
+                || record.value().length() > MAX_EVENT_CHARACTERS) {
             throw new InvalidAnalyticsRecord(InvalidAnalyticsRecord.Reason.MALFORMED);
         }
         try {
-            BankEvent event = mapper.readValue(record.value(), BankEvent.class);
+            AnalyticsRecord event = AnalyticsRecord.decode(record.value(), mapper);
             if (event == null || event.eventId() == null || event.ownerId() == null) {
                 throw new InvalidAnalyticsRecord(InvalidAnalyticsRecord.Reason.MALFORMED);
             }
@@ -74,9 +93,21 @@ public class AnalyticsProjectionHandler {
                 throw new InvalidAnalyticsRecord(InvalidAnalyticsRecord.Reason.KEY_MISMATCH);
             }
             return event;
-        } catch (JsonProcessingException failure) {
+        } catch (JsonProcessingException | IllegalArgumentException failure) {
             throw new InvalidAnalyticsRecord(InvalidAnalyticsRecord.Reason.MALFORMED);
         }
+    }
+
+    public void quarantineIngress(
+            ConsumerRecord<String, String> record, InvalidAnalyticsRecord.Reason reason) {
+        inbox.quarantine(
+                "INGRESS",
+                record.topic(),
+                record.partition(),
+                record.offset(),
+                fingerprint(record),
+                reason);
+        LOG.warn("Analytics ingress record quarantined: {}", reason);
     }
 
     private String fingerprint(ConsumerRecord<String, String> record) {

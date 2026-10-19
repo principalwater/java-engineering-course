@@ -5,7 +5,7 @@ import type { NotificationItem } from '../src/scripts/api.ts';
 import { NotificationFeed } from '../src/scripts/notifications.ts';
 
 function notification(values: Partial<NotificationItem> = {}): NotificationItem {
-  return { eventId: crypto.randomUUID(), type: 'DEPOSIT_SUCCEEDED', amountMinor: 29, balanceMinor: 125050, occurredAt: '2026-10-19T09:12:34.123456789Z', ...values };
+  return { eventId: crypto.randomUUID(), source: 'CASH', readAt: null, type: 'DEPOSIT_SUCCEEDED', amountMinor: 29, balanceMinor: 125050, occurredAt: '2026-10-19T09:12:34.123456789Z', ...values };
 }
 
 function envelope(accountId: string, items: unknown[], nextCursor: unknown = null) {
@@ -108,4 +108,35 @@ test('late responses and errors cannot replace a newer feed or leak the previous
   assert.equal(feed.loading, false);
   assert.equal(feed.loaded, true);
   assert.deepEqual(feed.items, []);
+});
+
+
+test('a confirmed read survives a late page response and a foreign read acknowledgement cannot replace it', async t => {
+  const ownerId = crypto.randomUUID();
+  const entry = notification();
+  const read = { ...entry, readAt: '2026-10-19T09:15:00Z' };
+  let resolvePage: (response: Response) => void = () => {};
+  const sent: string[] = [];
+  let refresh = false;
+  let foreign = false;
+  t.mock.method(globalThis, 'fetch', async (path: string | URL | Request, options?: RequestInit) => {
+    if (String(path) === '/ui/notifications/read') {
+      sent.push(String(options?.body));
+      return Response.json({ accountId: foreign ? crypto.randomUUID() : ownerId, notification: read });
+    }
+    if (refresh) return new Promise<Response>(resolve => { resolvePage = resolve; });
+    return Response.json(envelope(ownerId, [entry]));
+  });
+  const feed = new NotificationFeed();
+  await feed.load(ownerId);
+  refresh = true;
+  const pending = feed.load(ownerId);
+  await feed.markRead(ownerId, entry.source, entry.eventId, { 'X-CSRF-TOKEN': 'fixture' });
+  resolvePage(Response.json(envelope(ownerId, [entry])));
+  await pending;
+  assert.deepEqual(feed.items, [read]);
+  assert.deepEqual(JSON.parse(sent[0]!), { source: entry.source, eventId: entry.eventId });
+  foreign = true;
+  await assert.rejects(feed.markRead(ownerId, entry.source, entry.eventId, {}), /Notification account mismatch/);
+  assert.deepEqual(feed.items, [read]);
 });

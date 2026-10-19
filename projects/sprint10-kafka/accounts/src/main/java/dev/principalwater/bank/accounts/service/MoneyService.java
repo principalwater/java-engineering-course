@@ -6,10 +6,11 @@ import dev.principalwater.bank.accounts.model.Account;
 import dev.principalwater.bank.accounts.model.MoneyRules;
 import dev.principalwater.bank.contract.AnalyticsEventType;
 import dev.principalwater.bank.contract.BankEvent;
+import dev.principalwater.bank.contract.BankTopics;
 import dev.principalwater.bank.contract.InternalOperation;
 import dev.principalwater.bank.contract.OperationResult;
 import dev.principalwater.bank.contract.OperationType;
-import dev.principalwater.bank.runtime.delivery.RestOutbox;
+import dev.principalwater.bank.messaging.KafkaOutbox;
 import dev.principalwater.bank.runtime.error.BankError;
 import dev.principalwater.bank.runtime.error.BankException;
 import java.nio.charset.StandardCharsets;
@@ -28,14 +29,14 @@ import org.springframework.transaction.annotation.Transactional;
 public class MoneyService {
     private final AccountDao accounts;
     private final OperationDao operations;
-    private final RestOutbox outbox;
+    private final KafkaOutbox outbox;
     private final Clock clock;
     private final boolean analyticsEnabled;
 
     public MoneyService(
             AccountDao accounts,
             OperationDao operations,
-            RestOutbox outbox,
+            KafkaOutbox outbox,
             Clock clock,
             @Value("${bank.analytics.enabled:false}") boolean analyticsEnabled) {
         this.accounts = accounts;
@@ -123,8 +124,9 @@ public class MoneyService {
                     owner + ":" + commandOwner + ":" + command.type() + ":" + command.operationId();
             UUID eventId = UUID.nameUUIDFromBytes(identity.getBytes(StandardCharsets.UTF_8));
             outbox.enqueue(
-                    "analytics",
-                    "/internal/analytics/events",
+                    BankTopics.ACCOUNTS_ANALYTICS,
+                    owner.toString(),
+                    eventId.toString(),
                     new BankEvent(eventId, owner, type, delta, balance, now));
         }
     }

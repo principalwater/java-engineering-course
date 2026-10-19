@@ -1,8 +1,9 @@
 plugins { id 'org.springframework.boot' }
 dependencies {
-    implementation project(':bank-runtime')
+    implementation project(':bank-service-client')
     implementation 'org.springframework.boot:spring-boot-starter-data-cassandra'
     implementation 'org.springframework.kafka:spring-kafka'
+    implementation 'com.clickhouse:client-v2:0.9.8'
     testImplementation project(':bank-test-support')
     testImplementation 'org.testcontainers:kafka'
 }

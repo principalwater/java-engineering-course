@@ -6,6 +6,8 @@ import dev.principalwater.bank.contract.AccountView;
 import dev.principalwater.bank.contract.BankLimits;
 import dev.principalwater.bank.contract.HistoryEntry;
 import dev.principalwater.bank.contract.NotificationInbox;
+import dev.principalwater.bank.contract.NotificationRead;
+import dev.principalwater.bank.contract.NotificationReadResult;
 import dev.principalwater.bank.contract.Page;
 import dev.principalwater.bank.contract.ProfileRequest;
 import dev.principalwater.bank.contract.Recipient;
@@ -16,6 +18,7 @@ import jakarta.validation.constraints.Min;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -47,6 +50,12 @@ public class AccountsController {
                     @Max(BankLimits.MAX_PAGE_SIZE)
                     int limit) {
         return notifications.inbox(UserIdentity.actor(jwt), before, limit);
+    }
+
+    @PostMapping("/notifications/read")
+    public NotificationReadResult readNotification(
+            @AuthenticationPrincipal Jwt jwt, @Valid @RequestBody NotificationRead request) {
+        return notifications.read(UserIdentity.actor(jwt), request);
     }
 
     @PutMapping("/me")

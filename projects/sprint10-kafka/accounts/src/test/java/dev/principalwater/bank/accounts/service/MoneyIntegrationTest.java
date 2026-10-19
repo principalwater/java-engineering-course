@@ -127,7 +127,7 @@ class MoneyIntegrationTest extends AccountsTestBase {
         Actor bob = ready("bob");
         money.execute(BankFixtures.deposit(alice, 1_000));
         jdbc.execute(
-                "ALTER TABLE bank_outbox ADD CONSTRAINT reject_transfer_fixture CHECK (payload->>'type' <> 'TRANSFER_IN')");
+                "ALTER TABLE bank_kafka_outbox ADD CONSTRAINT reject_transfer_fixture CHECK (payload->>'type' <> 'TRANSFER_IN')");
         try {
             InternalOperation transfer =
                     new InternalOperation(
@@ -144,7 +144,7 @@ class MoneyIntegrationTest extends AccountsTestBase {
             assertEquals(1, count("money_operation"));
             assertEquals(1, count("ledger_entry"));
         } finally {
-            jdbc.execute("ALTER TABLE bank_outbox DROP CONSTRAINT reject_transfer_fixture");
+            jdbc.execute("ALTER TABLE bank_kafka_outbox DROP CONSTRAINT reject_transfer_fixture");
         }
     }
 

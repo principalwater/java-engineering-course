@@ -560,6 +560,19 @@
 .analytics-section .section-heading,.business-section .section-heading {
   align-items:center
 }
+.analytics-filters {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:18px;
+  margin-bottom:24px
+}
+.analytics-filters select {
+  margin-top:0
+}
+.notification-read {
+  margin-top:9px;
+  min-height:44px
+}
 .analytics-unavailable {
   display:flex;
   gap:20px;
@@ -894,6 +907,9 @@
   }
 }
 @media(max-width:420px) {
+  .analytics-filters {
+    grid-template-columns:1fr
+  }
   .welcome h1 {
     font-size:30px
   }

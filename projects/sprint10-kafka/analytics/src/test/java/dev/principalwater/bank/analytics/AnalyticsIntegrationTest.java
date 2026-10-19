@@ -1,7 +1,6 @@
 package dev.principalwater.bank.analytics;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verify;
@@ -14,34 +13,35 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.principalwater.bank.analytics.controller.AnalyticsController;
+import dev.principalwater.bank.analytics.dao.ActivityExportQueue;
 import dev.principalwater.bank.analytics.dao.AnalyticsInbox;
+import dev.principalwater.bank.analytics.model.AnalyticsProjection;
 import dev.principalwater.bank.analytics.model.AnalyticsView;
 import dev.principalwater.bank.contract.BankEvent;
+import dev.principalwater.bank.contract.UiActivityRequest;
+import dev.principalwater.bank.contract.UiActivitySection;
+import dev.principalwater.bank.contract.UiActivityType;
 import java.time.YearMonth;
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 
 class AnalyticsIntegrationTest extends AnalyticsTestBase {
     @Autowired private AnalyticsInbox inbox;
+    @Autowired private ActivityExportQueue exports;
 
     @Test
     void freshFactsPrecedeDueRetriesAndSuccessfulRepublishBackoffIsBounded() {
         BankEvent retry = event();
-        inbox.acceptFinancial(retry);
+        inbox.acceptBackend(retry);
         inbox.release(inbox.claim(retry.eventId()), false);
         jdbc.update(
                 "UPDATE analytics_inbox SET next_attempt_at = now() - interval '1 day' WHERE event_id = ?",
                 retry.eventId());
         BankEvent fresh = event();
-        inbox.acceptFinancial(fresh);
+        inbox.acceptBackend(fresh);
         assertEquals(fresh.eventId(), inbox.pendingIds().getFirst());
 
         inbox.release(inbox.claim(retry.eventId()), false);
@@ -64,55 +64,7 @@ class AnalyticsIntegrationTest extends AnalyticsTestBase {
     }
 
     @Test
-    void inboxAcknowledgesOnlyDurableImmutableEventsAndPreservesNanosecondPayloadOnReplay()
-            throws Exception {
-        BankEvent event = event();
-        String caller =
-                "Bearer " + JWT.service("accounts-service", "analytics-api", "analytics.write");
-        for (int replay = 0; replay < 2; replay++) {
-            http.perform(
-                            post("/internal/analytics/events")
-                                    .header(AUTHORIZATION, caller)
-                                    .contentType(APPLICATION_JSON)
-                                    .content(mapper.writeValueAsBytes(event)))
-                    .andExpect(status().isNoContent());
-        }
-        assertEquals(1, count());
-        assertEquals(
-                event,
-                mapper.readValue(
-                        jdbc.queryForObject(
-                                "SELECT payload::text FROM analytics_inbox", String.class),
-                        BankEvent.class));
-        BankEvent changed = new BankEvent(event.eventId(), ALICE, "DEPOSIT", 30, 100, NOW);
-        http.perform(
-                        post("/internal/analytics/events")
-                                .header(AUTHORIZATION, caller)
-                                .contentType(APPLICATION_JSON)
-                                .content(mapper.writeValueAsBytes(changed)))
-                .andExpect(status().isConflict());
-        assertFalse(
-                jdbc.queryForObject(
-                        "SELECT cassandra_done OR warehouse_done FROM analytics_inbox",
-                        Boolean.class));
-        jdbc.execute("TRUNCATE analytics_inbox");
-        jdbc.execute(
-                "ALTER TABLE analytics_inbox ADD CONSTRAINT reject_fixture CHECK (event_type <> 'DEPOSIT')");
-        try {
-            http.perform(
-                            post("/internal/analytics/events")
-                                    .header(AUTHORIZATION, caller)
-                                    .contentType(APPLICATION_JSON)
-                                    .content(mapper.writeValueAsBytes(event)))
-                    .andExpect(status().isServiceUnavailable());
-            assertEquals(0, count());
-        } finally {
-            jdbc.execute("ALTER TABLE analytics_inbox DROP CONSTRAINT reject_fixture");
-        }
-    }
-
-    @Test
-    void userViewsBindToVerifiedIdentityAndDuplicateEventIdsCannotBeReassigned() throws Exception {
+    void userViewsKeepImmutableOwnerNamespacesForReusedClientEventIds() throws Exception {
         UUID eventId = UUID.randomUUID();
         String alice = "Bearer " + JWT.user("alice-id", "alice", "analytics.events");
         byte[] view = mapper.writeValueAsBytes(new AnalyticsController.ViewRequest(eventId));
@@ -134,7 +86,7 @@ class AnalyticsIntegrationTest extends AnalyticsTestBase {
                                         "Bearer " + JWT.user("bob-id", "bob", "analytics.events"))
                                 .contentType(APPLICATION_JSON)
                                 .content(view))
-                .andExpect(status().isConflict());
+                .andExpect(status().isNoContent());
         http.perform(
                         post("/api/analytics/views")
                                 .header(AUTHORIZATION, alice)
@@ -146,35 +98,39 @@ class AnalyticsIntegrationTest extends AnalyticsTestBase {
                                                 + BOB
                                                 + "\"}"))
                 .andExpect(status().isBadRequest());
-        assertEquals(1, count());
+        assertEquals(2, count());
+        assertEquals(
+                1,
+                jdbc.queryForObject(
+                        "SELECT count(*) FROM analytics_inbox WHERE owner_id = ?",
+                        Integer.class,
+                        ALICE));
+        assertEquals(
+                1,
+                jdbc.queryForObject(
+                        "SELECT count(*) FROM analytics_inbox WHERE owner_id = ?",
+                        Integer.class,
+                        BOB));
     }
 
     @Test
     void signedAccessTokensEnforceCallerAudienceScopeAndActualRealmAnalystRole() throws Exception {
-        byte[] event = mapper.writeValueAsBytes(event());
         for (String token :
                 List.of(
-                        JWT.service("cash-service", "analytics-api", "analytics.write"),
-                        JWT.service("accounts-service", "analytics-api", "accounts.write"),
-                        JWT.user("alice-id", "alice", "analytics.write"))) {
-            http.perform(
-                            post("/internal/analytics/events")
-                                    .header(AUTHORIZATION, "Bearer " + token)
-                                    .contentType(APPLICATION_JSON)
-                                    .content(event))
+                        JWT.service("accounts-service", "analytics-api", "analytics.read"),
+                        JWT.user("alice-id", "alice", "analytics.events"))) {
+            http.perform(get("/api/analytics").header(AUTHORIZATION, "Bearer " + token))
                     .andExpect(status().isForbidden());
         }
         http.perform(
-                        post("/internal/analytics/events")
+                        get("/api/analytics")
                                 .header(
                                         AUTHORIZATION,
                                         "Bearer "
                                                 + JWT.service(
                                                         "accounts-service",
                                                         "accounts-api",
-                                                        "analytics.write"))
-                                .contentType(APPLICATION_JSON)
-                                .content(event))
+                                                        "analytics.read")))
                 .andExpect(status().isUnauthorized());
         http.perform(
                         get("/api/analytics/business")
@@ -205,53 +161,15 @@ class AnalyticsIntegrationTest extends AnalyticsTestBase {
         assertEquals(0, count());
     }
 
-    @ParameterizedTest(name = "{0} rejects {1}")
-    @MethodSource("malformedMinorFields")
-    void financialWireRejectsCoercionAndMissingRequiredMinorFields(String field, String kind)
-            throws Exception {
-        ObjectNode body = mapper.valueToTree(event());
-        switch (kind) {
-            case "string" -> body.put(field, body.get(field).asText());
-            case "null" -> body.putNull(field);
-            case "missing", "exponent" -> body.remove(field);
-            default -> throw new IllegalArgumentException("Unknown wire fixture");
-        }
-        String json = mapper.writeValueAsString(body);
-        if (kind.equals("exponent")) {
-            json = json.substring(0, json.length() - 1) + ",\"" + field + "\":1e2}";
-        }
-        http.perform(
-                        post("/internal/analytics/events")
-                                .header(
-                                        AUTHORIZATION,
-                                        "Bearer "
-                                                + JWT.service(
-                                                        "accounts-service",
-                                                        "analytics-api",
-                                                        "analytics.write"))
-                                .contentType(APPLICATION_JSON)
-                                .content(json))
-                .andExpect(status().isBadRequest());
-        assertEquals(0, count());
-    }
-
-    static Stream<Arguments> malformedMinorFields() {
-        return Stream.of("amountMinor", "balanceMinor")
-                .flatMap(
-                        field ->
-                                Stream.of("string", "null", "missing", "exponent")
-                                        .map(kind -> Arguments.of(field, kind)));
-    }
-
     @Test
-    void personalReadUsesOnlyResolvedOwnerAndCurrentUtcMonthAndNeverFakesPendingProjection()
+    void personalReadUsesOnlyResolvedOwnerAndBoundedSelectedUtcMonthAndNeverFakesPendingProjection()
             throws Exception {
-        when(cassandra.month(ALICE, YearMonth.of(2026, 10))).thenReturn(List.of());
+        when(cassandra.month(ALICE, YearMonth.of(2026, 9))).thenReturn(List.of());
         String alice = "Bearer " + JWT.user("alice-id", "alice", "analytics.read");
         http.perform(
                         get("/api/analytics")
                                 .queryParam("ownerId", BOB.toString())
-                                .queryParam("month", "1970-01")
+                                .queryParam("month", "2026-09")
                                 .header(AUTHORIZATION, alice))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.available").value(true))
@@ -259,7 +177,14 @@ class AnalyticsIntegrationTest extends AnalyticsTestBase {
                 .andExpect(jsonPath("$.updatedAt").hasJsonPath())
                 .andExpect(jsonPath("$.updatedAt").isEmpty())
                 .andExpect(jsonPath("$.accountsCount").doesNotHaveJsonPath());
-        verify(cassandra).month(ALICE, YearMonth.of(2026, 10));
+        verify(cassandra).month(ALICE, YearMonth.of(2026, 9));
+        for (String invalid : List.of("2026-06", "2026-11", "1970-01", "bad", "2026-99")) {
+            http.perform(
+                            get("/api/analytics")
+                                    .queryParam("month", invalid)
+                                    .header(AUTHORIZATION, alice))
+                    .andExpect(status().isBadRequest());
+        }
         clearInvocations(cassandra);
         jdbc.update(
                 """
@@ -275,6 +200,209 @@ class AnalyticsIntegrationTest extends AnalyticsTestBase {
                 .andExpect(jsonPath("$.available").value(false))
                 .andExpect(jsonPath("$.operationsCount").isEmpty());
         verifyNoInteractions(cassandra);
+    }
+
+    @Test
+    void typedUiActivitiesDeriveOwnerAndFirstTimestampAndRejectOwnPayloadReassignment()
+            throws Exception {
+        UUID eventId = UUID.randomUUID();
+        String alice = "Bearer " + JWT.user("alice-id", "alice", "analytics.events");
+        byte[] body =
+                mapper.writeValueAsBytes(
+                        new UiActivityRequest(
+                                eventId,
+                                UiActivityType.SCREEN_OPENED,
+                                UiActivitySection.ANALYTICS));
+        for (int replay = 0; replay < 2; replay++)
+            http.perform(
+                            post("/api/analytics/activities")
+                                    .header(AUTHORIZATION, alice)
+                                    .contentType(APPLICATION_JSON)
+                                    .content(body))
+                    .andExpect(status().isNoContent());
+        assertEquals(1, count());
+        assertEquals(
+                ALICE, jdbc.queryForObject("SELECT owner_id FROM analytics_inbox", UUID.class));
+        assertEquals(
+                NOW.toString(),
+                mapper.readTree(
+                                jdbc.queryForObject(
+                                        "SELECT payload::text FROM analytics_inbox", String.class))
+                        .path("occurredAt")
+                        .asText());
+        http.perform(
+                        post("/api/analytics/activities")
+                                .header(
+                                        AUTHORIZATION,
+                                        "Bearer " + JWT.user("bob-id", "bob", "analytics.events"))
+                                .contentType(APPLICATION_JSON)
+                                .content(body))
+                .andExpect(status().isNoContent());
+        http.perform(
+                        post("/api/analytics/activities")
+                                .header(AUTHORIZATION, alice)
+                                .contentType(APPLICATION_JSON)
+                                .content(
+                                        mapper.writeValueAsBytes(
+                                                new UiActivityRequest(
+                                                        eventId,
+                                                        UiActivityType.SCREEN_OPENED,
+                                                        UiActivitySection.HISTORY))))
+                .andExpect(status().isConflict());
+        for (String json :
+                List.of(
+                        "{\"eventId\":\""
+                                + UUID.randomUUID()
+                                + "\",\"type\":\"FORM_OPENED\",\"section\":\"NOTIFICATIONS\"}",
+                        "{\"eventId\":\""
+                                + UUID.randomUUID()
+                                + "\",\"type\":\"SCREEN_OPENED\",\"section\":\"ANALYTICS\",\"ownerId\":\""
+                                + BOB
+                                + "\"}",
+                        "{\"eventId\":\""
+                                + UUID.randomUUID()
+                                + "\",\"type\":\"SCREEN_OPENED\",\"section\":\"ANALYTICS\",\"amountMinor\":29}")) {
+            http.perform(
+                            post("/api/analytics/activities")
+                                    .header(AUTHORIZATION, alice)
+                                    .contentType(APPLICATION_JSON)
+                                    .content(json))
+                    .andExpect(status().isBadRequest());
+        }
+        assertEquals(2, count());
+        assertEquals(
+                1,
+                jdbc.queryForObject(
+                        "SELECT count(*) FROM analytics_inbox WHERE owner_id = ?",
+                        Integer.class,
+                        ALICE));
+        assertEquals(
+                1,
+                jdbc.queryForObject(
+                        "SELECT count(*) FROM analytics_inbox WHERE owner_id = ?",
+                        Integer.class,
+                        BOB));
+    }
+
+    @Test
+    void monthlyUiAdmissionIsOwnerScopedAndFullPartitionStillAcceptsImmutableReplay()
+            throws Exception {
+        jdbc.update(
+                "INSERT INTO analytics_ui_months(owner_id, month, accepted) VALUES (?, '2026-10', 998)",
+                ALICE);
+        UUID eventId = UUID.randomUUID();
+        String alice = "Bearer " + JWT.user("alice-id", "alice", "analytics.events");
+        byte[] legacyView =
+                mapper.writeValueAsBytes(new AnalyticsController.ViewRequest(UUID.randomUUID()));
+        for (int replay = 0; replay < 2; replay++)
+            http.perform(
+                            post("/api/analytics/views")
+                                    .header(AUTHORIZATION, alice)
+                                    .contentType(APPLICATION_JSON)
+                                    .content(legacyView))
+                    .andExpect(status().isNoContent());
+        byte[] body =
+                mapper.writeValueAsBytes(
+                        new UiActivityRequest(
+                                eventId,
+                                UiActivityType.SCREEN_OPENED,
+                                UiActivitySection.ANALYTICS));
+        for (int replay = 0; replay < 2; replay++)
+            http.perform(
+                            post("/api/analytics/activities")
+                                    .header(AUTHORIZATION, alice)
+                                    .contentType(APPLICATION_JSON)
+                                    .content(body))
+                    .andExpect(status().isNoContent());
+        assertEquals(
+                1000,
+                jdbc.queryForObject(
+                        "SELECT accepted FROM analytics_ui_months WHERE owner_id = ?",
+                        Integer.class,
+                        ALICE));
+        byte[] otherAction =
+                mapper.writeValueAsBytes(
+                        new UiActivityRequest(
+                                UUID.randomUUID(),
+                                UiActivityType.FORM_OPENED,
+                                UiActivitySection.PROFILE));
+        http.perform(
+                        post("/api/analytics/activities")
+                                .header(AUTHORIZATION, alice)
+                                .contentType(APPLICATION_JSON)
+                                .content(otherAction))
+                .andExpect(status().isTooManyRequests());
+        http.perform(
+                        post("/api/analytics/views")
+                                .header(AUTHORIZATION, alice)
+                                .contentType(APPLICATION_JSON)
+                                .content(
+                                        mapper.writeValueAsBytes(
+                                                new AnalyticsController.ViewRequest(
+                                                        UUID.randomUUID()))))
+                .andExpect(status().isTooManyRequests());
+        assertEquals(2, count());
+        http.perform(
+                        post("/api/analytics/activities")
+                                .header(
+                                        AUTHORIZATION,
+                                        "Bearer " + JWT.user("bob-id", "bob", "analytics.events"))
+                                .contentType(APPLICATION_JSON)
+                                .content(otherAction))
+                .andExpect(status().isNoContent());
+        assertEquals(3, count());
+        assertEquals(
+                1,
+                jdbc.queryForObject(
+                        "SELECT accepted FROM analytics_ui_months WHERE owner_id = ?",
+                        Integer.class,
+                        BOB));
+    }
+
+    @Test
+    void staleCassandraSnapshotRevisionCannotAcknowledgeNewerUiDelivery() {
+        UiActivityRequest first =
+                new UiActivityRequest(
+                        UUID.randomUUID(), UiActivityType.SCREEN_OPENED, UiActivitySection.HISTORY);
+        inbox.acceptUi(first, ALICE);
+        UUID firstStored = jdbc.queryForObject("SELECT event_id FROM analytics_inbox", UUID.class);
+        inbox.acknowledgeProjection(firstStored, AnalyticsProjection.PERSONAL);
+        ActivityExportQueue.Export old = exports.claim();
+        assertTrue(old != null);
+        UiActivityRequest second =
+                new UiActivityRequest(
+                        UUID.randomUUID(), UiActivityType.FORM_OPENED, UiActivitySection.PROFILE);
+        inbox.acceptUi(second, ALICE);
+        UUID secondStored =
+                jdbc.queryForObject(
+                        "SELECT event_id FROM analytics_inbox WHERE event_id <> ?",
+                        UUID.class,
+                        firstStored);
+        inbox.acknowledgeProjection(secondStored, AnalyticsProjection.PERSONAL);
+        exports.complete(old);
+        assertEquals(
+                0,
+                jdbc.queryForObject(
+                        "SELECT count(*) FROM analytics_inbox WHERE warehouse_done",
+                        Integer.class));
+        ActivityExportQueue.Export current = exports.claim();
+        assertTrue(current.revision() > old.revision());
+        exports.fail(current);
+        assertEquals(
+                0,
+                jdbc.queryForObject(
+                        "SELECT count(*) FROM analytics_inbox WHERE warehouse_done",
+                        Integer.class));
+        jdbc.update("UPDATE analytics_activity_exports SET next_attempt_at = now()");
+        ActivityExportQueue.Export retry = exports.claim();
+        assertEquals(current.revision(), retry.revision());
+        exports.complete(retry);
+        assertEquals(
+                2,
+                jdbc.queryForObject(
+                        "SELECT count(*) FROM analytics_inbox WHERE cassandra_done AND warehouse_done",
+                        Integer.class));
+        assertTrue(exports.claim() == null);
     }
 
     private int count() {

@@ -127,7 +127,7 @@ public class ClickHouseWarehouse implements AutoCloseable {
                 SELECT toDate(occurred_at) AS date, grouping(date) AS summary,
                     sumIf(amount_minor, amount_minor > 0) AS incomingMinor,
                     -sumIf(amount_minor, amount_minor < 0) AS outgoingMinor,
-                    countIf(event_type NOT IN ('CABINET_VIEW', 'TRANSFER_IN')) AS operationsCount,
+                    countIf(event_type IN ('DEPOSIT', 'WITHDRAW', 'TRANSFER_OUT')) AS operationsCount,
                     uniqExact(owner_id) AS accountsCount, countIf(event_type = 'CABINET_VIEW') AS viewCount,
                     count() AS eventCount, max(toUnixTimestamp64Milli(occurred_at)) AS updatedAtMillis
                 FROM bank_analytics.events FINAL

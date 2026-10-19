@@ -1,6 +1,7 @@
 package dev.principalwater.bank.runtime.error;
 
 public enum BankError {
+    NOTIFICATION_NOT_FOUND(404, "Notification is unavailable"),
     INVALID_REQUEST(400, "Invalid request"),
     INVALID_PROFILE(422, "All profile fields are required and age must be over 18"),
     PROFILE_REQUIRED(422, "Complete the account profile first"),

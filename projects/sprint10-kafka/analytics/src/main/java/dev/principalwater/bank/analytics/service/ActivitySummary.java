@@ -7,7 +7,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.TreeMap;
 
 final class ActivitySummary {
@@ -15,6 +17,7 @@ final class ActivitySummary {
 
     static AnalyticsView personal(List<CassandraActivityStore.Activity> events) {
         TreeMap<LocalDate, long[]> days = new TreeMap<>();
+        TreeMap<LocalDate, Map<AnalyticsEventType, long[]>> breakdown = new TreeMap<>();
         long operations = 0;
         long views = 0;
         Instant updatedAt = null;
@@ -26,6 +29,18 @@ final class ActivitySummary {
                 views++;
                 continue;
             }
+            if (!event.type().isFinancial()) {
+                continue;
+            }
+            LocalDate date = event.occurredAt().atOffset(ZoneOffset.UTC).toLocalDate();
+            long[] typed =
+                    breakdown
+                            .computeIfAbsent(
+                                    date, ignored -> new EnumMap<>(AnalyticsEventType.class))
+                            .computeIfAbsent(event.type(), ignored -> new long[3]);
+            typed[2]++;
+            if (event.amountMinor() > 0) typed[0] = Math.addExact(typed[0], event.amountMinor());
+            else typed[1] = Math.subtractExact(typed[1], event.amountMinor());
             operations++;
             long[] amounts =
                     days.computeIfAbsent(
@@ -40,6 +55,19 @@ final class ActivitySummary {
         List<AnalyticsView.Day> result = new ArrayList<>();
         days.forEach(
                 (date, amounts) -> result.add(new AnalyticsView.Day(date, amounts[0], amounts[1])));
-        return new AnalyticsView(true, result, operations, null, views, updatedAt);
+        List<AnalyticsView.Breakdown> types = new ArrayList<>();
+        breakdown.forEach(
+                (date, values) ->
+                        values.forEach(
+                                (type, amounts) ->
+                                        types.add(
+                                                new AnalyticsView.Breakdown(
+                                                        date,
+                                                        type,
+                                                        amounts[0],
+                                                        amounts[1],
+                                                        amounts[2]))));
+        return new AnalyticsView(
+                true, result, operations, null, views, updatedAt, types, null, null);
     }
 }

@@ -14,7 +14,6 @@ public enum OAuthScope {
     TRANSFER_WRITE("transfer.write"),
     NOTIFICATIONS_WRITE("notifications.write"),
     ANALYTICS_READ("analytics.read"),
-    ANALYTICS_WRITE("analytics.write"),
     ANALYTICS_EVENTS("analytics.events");
 
     private final String value;

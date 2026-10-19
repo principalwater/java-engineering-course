@@ -1,10 +1,6 @@
 package dev.principalwater.bank.accounts.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -13,15 +9,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.principalwater.bank.accounts.AccountsTestBase;
+import dev.principalwater.bank.accounts.service.AccountNotifications;
 import dev.principalwater.bank.accounts.service.MoneyService;
 import dev.principalwater.bank.accounts.service.ProfileService;
 import dev.principalwater.bank.contract.Actor;
+import dev.principalwater.bank.contract.BankEvent;
 import dev.principalwater.bank.contract.InternalOperation;
-import dev.principalwater.bank.contract.NotificationView;
+import dev.principalwater.bank.contract.NotificationRead;
+import dev.principalwater.bank.contract.NotificationReceipt;
+import dev.principalwater.bank.contract.NotificationSource;
 import dev.principalwater.bank.contract.OperationType;
-import dev.principalwater.bank.contract.Page;
-import dev.principalwater.bank.runtime.client.RemoteUnavailable;
-import dev.principalwater.bank.runtime.client.ServiceClient;
 import dev.principalwater.bank.testing.BankFixtures;
 import dev.principalwater.bank.testing.JwtFixture;
 import java.time.Instant;
@@ -34,14 +31,12 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.MediaType;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 class AccountsSecurityHttpTest extends AccountsTestBase {
     @Autowired private MoneyService money;
     @Autowired private ProfileService profiles;
-    @MockitoBean private ServiceClient notifications;
+    @Autowired private AccountNotifications notifications;
 
     @Test
     void anonymousCannotProvisionAccount() throws Exception {
@@ -164,49 +159,123 @@ class AccountsSecurityHttpTest extends AccountsTestBase {
     }
 
     @Test
-    void notificationsUseVerifiedOwnerAndExposeDeliveryOutageInsteadOfEmptySuccess()
+    void notificationFeedAndIdempotentReadUseVerifiedOwnerAndKeepCompositeSourceIdentity()
             throws Exception {
         Actor alice = ready("alice");
+        Actor bob = ready("bob");
         UUID owner = profiles.own(alice).accountId();
-        UUID other = profiles.own(ready("bob")).accountId();
-        String path = "/internal/notifications/" + owner + "?limit=20";
-        var pageType = new ParameterizedTypeReference<Page<NotificationView>>() {};
-        NotificationView entry =
-                new NotificationView(UUID.randomUUID(), "PROFILE_UPDATED", 0, 0, Instant.now());
-        when(notifications.get(eq("notifications"), eq(path), eq(pageType)))
-                .thenReturn(new Page<>(List.of(entry), null))
-                .thenThrow(new RemoteUnavailable());
+        UUID other = profiles.own(bob).accountId();
+        UUID id = UUID.randomUUID();
+        BankEvent cash = new BankEvent(id, owner, "DEPOSIT_SUCCEEDED", 100, 100, Instant.now());
+        BankEvent transfer =
+                new BankEvent(id, owner, "TRANSFER_SUCCEEDED", 50, 50, cash.occurredAt());
+        notifications.accept(new NotificationReceipt(NotificationSource.CASH, cash));
+        notifications.accept(new NotificationReceipt(NotificationSource.CASH, cash));
+        notifications.accept(new NotificationReceipt(NotificationSource.TRANSFER, transfer));
+        notifications.accept(
+                new NotificationReceipt(
+                        NotificationSource.CASH,
+                        new BankEvent(
+                                UUID.randomUUID(),
+                                other,
+                                "DEPOSIT_SUCCEEDED",
+                                999,
+                                999,
+                                cash.occurredAt())));
+        String aliceToken =
+                "Bearer "
+                        + JWT.user(alice.subject(), alice.login(), "accounts.read accounts.write");
+        String bobToken =
+                "Bearer " + JWT.user(bob.subject(), bob.login(), "accounts.read accounts.write");
         http.perform(get("/api/accounts/notifications")).andExpect(status().isUnauthorized());
         http.perform(
                         get("/api/accounts/notifications")
                                 .header(
                                         "Authorization",
                                         "Bearer "
-                                                + JWT.user("alice-sub", "alice", "accounts.write")))
+                                                + JWT.user(
+                                                        alice.subject(),
+                                                        alice.login(),
+                                                        "accounts.write")))
                 .andExpect(status().isForbidden());
-        verifyNoInteractions(notifications);
+        var first =
+                http.perform(
+                                get("/api/accounts/notifications")
+                                        .param("ownerId", other.toString())
+                                        .param("limit", "1")
+                                        .header("Authorization", aliceToken))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("accountId").value(owner.toString()))
+                        .andExpect(jsonPath("notifications.items.length()").value(1))
+                        .andExpect(jsonPath("notifications.items[0].source").value("TRANSFER"))
+                        .andExpect(jsonPath("notifications.items[0].ownerId").doesNotExist())
+                        .andReturn();
+        String cursor =
+                mapper.readTree(first.getResponse().getContentAsByteArray())
+                        .path("notifications")
+                        .path("nextCursor")
+                        .asText();
         http.perform(
                         get("/api/accounts/notifications")
-                                .param("ownerId", other.toString())
-                                .header(
-                                        "Authorization",
-                                        "Bearer "
-                                                + JWT.user("alice-sub", "alice", "accounts.read")))
+                                .param("before", cursor)
+                                .header("Authorization", aliceToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("accountId").value(owner.toString()))
-                .andExpect(
-                        jsonPath("notifications.items[0].eventId")
-                                .value(entry.eventId().toString()))
-                .andExpect(jsonPath("notifications.items[0].ownerId").doesNotExist());
-        verify(notifications).get(eq("notifications"), eq(path), eq(pageType));
+                .andExpect(jsonPath("notifications.items.length()").value(1))
+                .andExpect(jsonPath("notifications.items[0].source").value("CASH"));
+        String body = mapper.writeValueAsString(new NotificationRead(NotificationSource.CASH, id));
         http.perform(
-                        get("/api/accounts/notifications")
+                        post("/api/accounts/notifications/read")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(body)
+                                .header("Authorization", bobToken))
+                .andExpect(status().isNotFound());
+        http.perform(
+                        post("/api/accounts/notifications/read")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(body)
                                 .header(
                                         "Authorization",
                                         "Bearer "
-                                                + JWT.user("alice-sub", "alice", "accounts.read")))
-                .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("code").value("UNAVAILABLE"));
+                                                + JWT.user(
+                                                        alice.subject(),
+                                                        alice.login(),
+                                                        "accounts.read")))
+                .andExpect(status().isForbidden());
+        var read =
+                http.perform(
+                                post("/api/accounts/notifications/read")
+                                        .contentType(MediaType.APPLICATION_JSON)
+                                        .content(body)
+                                        .header("Authorization", aliceToken))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("accountId").value(owner.toString()))
+                        .andExpect(jsonPath("notification.readAt").isNotEmpty())
+                        .andReturn();
+        var repeated =
+                http.perform(
+                                post("/api/accounts/notifications/read")
+                                        .contentType(MediaType.APPLICATION_JSON)
+                                        .content(body)
+                                        .header("Authorization", aliceToken))
+                        .andExpect(status().isOk())
+                        .andReturn();
+        assertThat(mapper.readTree(repeated.getResponse().getContentAsByteArray()))
+                .isEqualTo(mapper.readTree(read.getResponse().getContentAsByteArray()));
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT count(*) FROM bank_kafka_outbox WHERE payload->>'type'='NOTIFICATION_READ'",
+                                Integer.class))
+                .isEqualTo(1);
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT count(*) FROM bank_kafka_outbox WHERE payload->>'type'='NOTIFICATION_AVAILABLE'",
+                                Integer.class))
+                .isEqualTo(3);
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT count(*) FROM notification_inbox WHERE read_at IS NOT NULL",
+                                Integer.class))
+                .isEqualTo(1);
     }
 
     static Stream<Arguments> invalidTokens() {

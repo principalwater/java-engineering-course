@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import dev.principalwater.bank.analytics.model.ActivitySnapshot;
 import dev.principalwater.bank.analytics.model.AnalyticsUnavailable;
 import dev.principalwater.bank.analytics.model.AnalyticsView;
 import dev.principalwater.bank.contract.BankEvent;
@@ -19,7 +20,9 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.YearMonth;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -102,6 +105,52 @@ class ClickHouseWarehouseTest {
         assertEquals(event.eventId().toString(), fact.path("event_id").asText());
         assertEquals(-29, fact.path("amount_minor").asLong());
         assertEquals("2026-10-17 01:02:03.456", fact.path("occurred_at").asText());
+    }
+
+    @Test
+    void officialClientBatchKeepsSnapshotRevisionAndWaitsForDurableAsyncResponse()
+            throws Exception {
+        AtomicReference<String> payload = new AtomicReference<>();
+        handler.set(
+                exchange -> {
+                    String query =
+                            java.net.URLDecoder.decode(
+                                    exchange.getRequestURI().getRawQuery(), StandardCharsets.UTF_8);
+                    assertTrue(query.contains("wait_for_async_insert=1"));
+                    payload.set(
+                            new String(
+                                    exchange.getRequestBody().readAllBytes(),
+                                    StandardCharsets.UTF_8));
+                    exchange.getResponseHeaders()
+                            .add(
+                                    "X-ClickHouse-Summary",
+                                    "{\"written_rows\":\"1\",\"written_bytes\":\"100\"}");
+                    reply(exchange, 200, "");
+                });
+        UUID owner = UUID.randomUUID();
+        try (ClickHouseActivityMart mart =
+                new ClickHouseActivityMart(
+                        URI.create("http://127.0.0.1:" + server.getAddress().getPort()),
+                        "writer",
+                        "fixture-password",
+                        mapper)) {
+            mart.insert(
+                    List.of(
+                            new ActivitySnapshot.Row(
+                                    owner,
+                                    LocalDate.of(2026, 10, 19),
+                                    "UI",
+                                    "SCREEN_OPENED",
+                                    "ANALYTICS",
+                                    1,
+                                    9)));
+        }
+        JsonNode row = mapper.readTree(payload.get());
+        assertEquals(owner.toString(), row.path("owner_id").asText());
+        assertEquals("2026-10-19", row.path("event_date").asText());
+        assertEquals("SCREEN_OPENED", row.path("event_type").asText());
+        assertEquals(1, row.path("events_count").asLong());
+        assertEquals(9, row.path("revision").asLong());
     }
 
     @Test

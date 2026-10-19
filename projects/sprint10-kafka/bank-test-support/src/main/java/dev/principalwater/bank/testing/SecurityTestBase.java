@@ -10,7 +10,10 @@ import org.springframework.test.context.TestPropertySource;
             "spring.cloud.zookeeper.enabled=false",
             "spring.cloud.zookeeper.config.enabled=false",
             "spring.cloud.zookeeper.discovery.enabled=false",
-            "bank.delivery.enabled=false"
+            "bank.delivery.enabled=false",
+            "bank.kafka.user=fixture-service",
+            "bank.kafka.password=fixture-password",
+            "spring.kafka.listener.auto-startup=false"
         })
 public abstract class SecurityTestBase {
     protected static final JwtFixture JWT = new JwtFixture();

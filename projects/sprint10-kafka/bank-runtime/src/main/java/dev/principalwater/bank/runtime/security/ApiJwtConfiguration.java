@@ -23,7 +23,7 @@ import org.springframework.web.client.RestTemplate;
 public class ApiJwtConfiguration {
     @Bean
     JwtDecoder jwtDecoder(JwtProperties properties) {
-        JdkClientHttpRequestFactory requests = OAuthHttpRequests.create();
+        JdkClientHttpRequestFactory requests = HttpRequests.create();
         NimbusJwtDecoder decoder =
                 NimbusJwtDecoder.withJwkSetUri(properties.jwkSetUri().toString())
                         .jwsAlgorithm(SignatureAlgorithm.RS256)

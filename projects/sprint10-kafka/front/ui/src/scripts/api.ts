@@ -4,9 +4,11 @@ export type Session = { login: string; csrfToken: string; csrfHeader: string; cs
 export type Account = { accountId: string; login: string; fullName: string | null; birthDate: string | null; balanceMinor: number; version: number; profileComplete: boolean };
 export type Recipient = { accountId: string; login: string; fullName: string | null };
 export type HistoryItem = { operationId: string; type: 'DEPOSIT' | 'WITHDRAW' | 'TRANSFER_IN' | 'TRANSFER_OUT'; amountMinor: number; balanceMinor: number; status: 'SUCCEEDED'; occurredAt: string; counterparty: string | null };
-export type NotificationItem = { eventId: string; type: 'PROFILE_UPDATED' | 'DEPOSIT_SUCCEEDED' | 'DEPOSIT_REJECTED' | 'WITHDRAW_SUCCEEDED' | 'WITHDRAW_REJECTED' | 'TRANSFER_SUCCEEDED' | 'TRANSFER_REJECTED'; amountMinor: number; balanceMinor: number; occurredAt: string };
+export type NotificationSource = 'ACCOUNTS' | 'CASH' | 'TRANSFER';
+export type NotificationItem = { eventId: string; source: NotificationSource; readAt: string | null; type: 'PROFILE_UPDATED' | 'DEPOSIT_SUCCEEDED' | 'DEPOSIT_REJECTED' | 'WITHDRAW_SUCCEEDED' | 'WITHDRAW_REJECTED' | 'TRANSFER_SUCCEEDED' | 'TRANSFER_REJECTED'; amountMinor: number; balanceMinor: number; occurredAt: string };
 export type NotificationPage = { items: NotificationItem[]; nextCursor: string | null };
-export type Analytics = { available: boolean; days: { date: string; incomingMinor: number; outgoingMinor: number }[]; operationsCount: number; updatedAt: string | null; accountsCount?: number };
+export type Breakdown = { date: string; type: 'DEPOSIT' | 'WITHDRAW' | 'TRANSFER_IN' | 'TRANSFER_OUT'; incomingMinor: number; outgoingMinor: number; operationsCount: number };
+export type Analytics = { accountId?: string; month?: string; breakdown: Breakdown[]; available: boolean; days: { date: string; incomingMinor: number; outgoingMinor: number }[]; operationsCount: number; updatedAt: string | null; accountsCount?: number };
 export type OperationResult = { operationId: string; status: 'SUCCEEDED' | 'REJECTED' | 'PENDING'; error: string | null; accountId: string | null; balanceMinor: number | null; occurredAt: string | null };
 
 export class ApiError extends Error {
@@ -99,20 +101,32 @@ export function parseHistoryItem(value: unknown): HistoryItem {
   return { operationId: uuid(data.operationId), type: data.type as HistoryItem['type'], amountMinor: integer(data.amountMinor), balanceMinor: integer(data.balanceMinor), status: 'SUCCEEDED', occurredAt: instant(data.occurredAt), counterparty: nullableString(data.counterparty) };
 }
 
+function parseNotificationItem(value: unknown): NotificationItem {
+  const data = object(value);
+  if (!['PROFILE_UPDATED', 'DEPOSIT_SUCCEEDED', 'DEPOSIT_REJECTED', 'WITHDRAW_SUCCEEDED', 'WITHDRAW_REJECTED', 'TRANSFER_SUCCEEDED', 'TRANSFER_REJECTED'].includes(string(data.type))) throw new Error('Invalid notification type');
+  if (!['ACCOUNTS', 'CASH', 'TRANSFER'].includes(string(data.source))) throw new Error('Invalid notification source');
+  function notificationInstant(value: unknown): string {
+    const text = instant(value);
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(text)) throw new Error('Invalid notification instant');
+    date(text.slice(0, 10));
+    return text;
+  }
+  return { eventId: uuid(data.eventId), source: data.source as NotificationSource, type: data.type as NotificationItem['type'], amountMinor: integer(data.amountMinor), balanceMinor: integer(data.balanceMinor), occurredAt: notificationInstant(data.occurredAt), readAt: data.readAt === null ? null : notificationInstant(data.readAt) };
+}
+
 export function parseNotificationPage(value: unknown, expectedAccountId: string): NotificationPage {
   const envelope = object(value);
   if (uuid(envelope.accountId) !== expectedAccountId) throw new Error('Notification account mismatch');
-  const page = parsePage(envelope.notifications, value => {
-    const data = object(value);
-    if (!['PROFILE_UPDATED', 'DEPOSIT_SUCCEEDED', 'DEPOSIT_REJECTED', 'WITHDRAW_SUCCEEDED', 'WITHDRAW_REJECTED', 'TRANSFER_SUCCEEDED', 'TRANSFER_REJECTED'].includes(string(data.type))) throw new Error('Invalid notification type');
-    const occurredAt = instant(data.occurredAt);
-    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(occurredAt)) throw new Error('Invalid notification instant');
-    date(occurredAt.slice(0, 10));
-    return { eventId: uuid(data.eventId), type: data.type as NotificationItem['type'], amountMinor: integer(data.amountMinor), balanceMinor: integer(data.balanceMinor), occurredAt };
-  });
+  const page = parsePage(envelope.notifications, parseNotificationItem);
   // Курсор остаётся строкой: последовательность PostgreSQL может быть больше safe integer JavaScript.
   if (page.nextCursor !== null && !/^[1-9]\d*$/.test(page.nextCursor)) throw new Error('Invalid notification cursor');
   return page;
+}
+
+export function parseNotificationRead(value: unknown, expectedAccountId: string): NotificationItem {
+  const envelope = object(value);
+  if (uuid(envelope.accountId) !== expectedAccountId) throw new Error('Notification account mismatch');
+  return parseNotificationItem(envelope.notification);
 }
 
 export function parseOperationResult(value: unknown, expectedAccountId: string): OperationResult {
@@ -125,10 +139,12 @@ export function parseOperationResult(value: unknown, expectedAccountId: string):
   return { operationId: uuid(data.operationId), status: data.status as OperationResult['status'], error: nullableString(data.error), accountId, balanceMinor: data.balanceMinor === null ? null : integer(data.balanceMinor), occurredAt: data.occurredAt === null ? null : instant(data.occurredAt) };
 }
 
-export function parseAnalytics(value: unknown): Analytics {
+export function parseAnalytics(value: unknown, expectedAccountId?: string, expectedMonth?: string): Analytics {
   const data = object(value);
   const available = boolean(data.available);
-  if (!available) return { available: false, days: [], operationsCount: 0, updatedAt: null };
+  if (!available) return { available: false, days: [], breakdown: [], operationsCount: 0, updatedAt: null };
+  if (expectedAccountId && uuid(data.accountId) !== expectedAccountId) throw new Error('Analytics account mismatch');
+  if (expectedMonth && data.month !== expectedMonth) throw new Error('Analytics month mismatch');
   if (!Array.isArray(data.days) || data.days.length > 31) throw new Error('Invalid analytics days');
   const days = data.days.map(value => {
     const day = object(value);
@@ -140,7 +156,19 @@ export function parseAnalytics(value: unknown): Analytics {
   if (new Set(days.map(day => day.date)).size !== days.length) throw new Error('Duplicate analytics date');
   const operationsCount = integer(data.operationsCount);
   if (operationsCount < 0) throw new Error('Invalid analytics count');
-  return { available, days: days.sort((a, b) => a.date.localeCompare(b.date)), operationsCount, updatedAt: data.updatedAt === null ? null : instant(data.updatedAt), ...(data.accountsCount === undefined || data.accountsCount === null ? {} : { accountsCount: integer(data.accountsCount) }) };
+  let breakdown: Breakdown[] = [];
+  if (expectedAccountId) {
+    if (!Array.isArray(data.breakdown) || data.breakdown.length > 124) throw new Error('Invalid analytics breakdown');
+    breakdown = data.breakdown.map(value => {
+      const row = object(value);
+      if (!['DEPOSIT', 'WITHDRAW', 'TRANSFER_IN', 'TRANSFER_OUT'].includes(string(row.type))) throw new Error('Invalid breakdown type');
+      const item = { date: date(row.date), type: row.type as Breakdown['type'], incomingMinor: integer(row.incomingMinor), outgoingMinor: integer(row.outgoingMinor), operationsCount: integer(row.operationsCount) };
+      if (item.incomingMinor < 0 || item.outgoingMinor < 0 || item.operationsCount < 1 || expectedMonth && !item.date.startsWith(expectedMonth + '-')) throw new Error('Invalid breakdown amount or date');
+      return item;
+    });
+    if (new Set(breakdown.map(row => row.date + row.type)).size !== breakdown.length) throw new Error('Duplicate breakdown');
+  }
+  return { available, breakdown, ...(expectedAccountId ? { accountId: expectedAccountId, month: expectedMonth } : {}), days: days.sort((a, b) => a.date.localeCompare(b.date)), operationsCount, updatedAt: data.updatedAt === null ? null : instant(data.updatedAt), ...(data.accountsCount === undefined || data.accountsCount === null ? {} : { accountsCount: integer(data.accountsCount) }) };
 }
 
 export function errorMessage(error: unknown): string {

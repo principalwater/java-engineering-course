@@ -1,9 +1,10 @@
 package dev.principalwater.bank.front.config;
 
-import dev.principalwater.bank.runtime.security.OAuthHttpRequests;
+import dev.principalwater.bank.runtime.security.HttpRequests;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.http.converter.FormHttpMessageConverter;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientProviderBuilder;
 import org.springframework.security.oauth2.client.endpoint.RestClientAuthorizationCodeTokenResponseClient;
@@ -18,11 +19,13 @@ import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserServ
 import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizedClientManager;
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.http.converter.OAuth2AccessTokenResponseHttpMessageConverter;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtDecoderFactory;
 import org.springframework.security.oauth2.jwt.JwtTimestampValidator;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestTemplate;
 
 @Configuration(proxyBeanMethods = false)
@@ -30,14 +33,14 @@ public class OAuthHttpConfiguration {
     private final JdkClientHttpRequestFactory requests;
 
     public OAuthHttpConfiguration() {
-        requests = OAuthHttpRequests.create();
+        requests = HttpRequests.create();
     }
 
     @Bean
     RestClientAuthorizationCodeTokenResponseClient authorizationCodeClient() {
         RestClientAuthorizationCodeTokenResponseClient client =
                 new RestClientAuthorizationCodeTokenResponseClient();
-        client.setRestClient(OAuthHttpRequests.tokenClient(requests));
+        client.setRestClient(tokenClient());
         return client;
     }
 
@@ -47,7 +50,7 @@ public class OAuthHttpConfiguration {
             OAuth2AuthorizedClientRepository authorizedClients) {
         RestClientRefreshTokenTokenResponseClient refresh =
                 new RestClientRefreshTokenTokenResponseClient();
-        refresh.setRestClient(OAuthHttpRequests.tokenClient(requests));
+        refresh.setRestClient(tokenClient());
         DefaultOAuth2AuthorizedClientManager manager =
                 new DefaultOAuth2AuthorizedClientManager(registrations, authorizedClients);
         manager.setAuthorizedClientProvider(
@@ -92,5 +95,18 @@ public class OAuthHttpConfiguration {
             throw new IllegalArgumentException("Unknown OIDC registration");
         }
         return decoder;
+    }
+
+    private RestClient tokenClient() {
+        return RestClient.builder()
+                .requestFactory(requests)
+                .messageConverters(
+                        converters -> {
+                            converters.clear();
+                            converters.add(new FormHttpMessageConverter());
+                            converters.add(new OAuth2AccessTokenResponseHttpMessageConverter());
+                        })
+                .defaultStatusHandler(new OAuth2ErrorResponseErrorHandler())
+                .build();
     }
 }

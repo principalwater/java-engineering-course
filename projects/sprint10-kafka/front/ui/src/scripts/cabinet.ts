@@ -5,6 +5,8 @@ import { formatMoney, MAX_AMOUNT_MINOR, parseAmount } from './money.ts';
 import { OperationQueue } from './operation.ts';
 import type { OperationType } from './operation.ts';
 import { NotificationFeed } from './notifications.ts';
+import { UiActivityBuffer } from './activity.ts';
+import { filterAnalytics } from './analytics.ts';
 
 function el<T extends HTMLElement = HTMLElement>(id: string): T {
   const element = document.getElementById(id);
@@ -39,7 +41,11 @@ let recipientSearch = '';
 let recipientRequest = 0;
 let analyticsData: Analytics | null = null;
 let businessData: Analytics | null = null;
-let viewSubmitted = false;
+const activity = new UiActivityBuffer();
+const openedForms = new Set<string>();
+let activeScreen = 'OVERVIEW';
+let analyticsRequest = 0;
+let businessRequest = 0;
 let reviewed: { type: OperationType; amountMinor: number; recipientId?: string } | null = null;
 const dateTime = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 const notificationDateTime = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' });
@@ -168,10 +174,12 @@ function renderNotifications(): void {
   const list = el<HTMLOListElement>('notifications-list');
   list.setAttribute('aria-busy', String(notifications.loading));
   if (renderedNotifications !== notifications.items) {
+    const opened = new Set([...list.querySelectorAll<HTMLDetailsElement>('details[open]')].map(item => item.dataset.key));
     list.replaceChildren();
     for (const entry of notifications.items) {
       const item = document.createElement('li'); item.className = 'notification-row';
       const details = document.createElement('details');
+      details.dataset.key = `${entry.source}:${entry.eventId}`; details.open = opened.has(details.dataset.key);
       const summary = document.createElement('summary');
       const rejected = entry.type.endsWith('_REJECTED');
       const icon = document.createElement('span'); icon.className = `notification-icon${rejected ? ' rejected' : ''}`; icon.setAttribute('aria-hidden', 'true'); icon.textContent = rejected ? '!' : '✓';
@@ -184,6 +192,28 @@ function renderNotifications(): void {
       const detail = document.createElement('div'); detail.className = 'notification-details';
       const texts = entry.type === 'PROFILE_UPDATED' ? ['Изменения личных данных сохранены.'] : [`${rejected ? 'Запрос отклонён' : 'Операция выполнена'}. Сумма: ${formatMoney(entry.amountMinor)}.`, `Остаток на момент события: ${formatMoney(entry.balanceMinor)}. Это снимок, а не текущий баланс.`];
       for (const text of [...texts, `Номер события: ${entry.eventId}`]) { const line = document.createElement('p'); line.textContent = text; detail.append(line); }
+      const read = document.createElement('button'); read.type = 'button'; read.className = 'text-button notification-read';
+      read.textContent = entry.readAt ? `Прочитано · ${notificationDateTime.format(new Date(entry.readAt))}` : 'Отметить прочитанным';
+      read.disabled = entry.readAt !== null;
+      read.addEventListener('click', async () => {
+        if (!account || !session || entry.readAt) return;
+        const ownerId = account.accountId;
+        read.disabled = true;
+        read.textContent = 'Сохраняем отметку…';
+        message('notifications-read-message', '');
+        try {
+          await notifications.markRead(ownerId, entry.source, entry.eventId, { [session.csrfHeader]: session.csrfToken });
+          if (account?.accountId === ownerId) {
+            const restoreFocus = document.activeElement === read || document.activeElement === document.body;
+            renderNotifications();
+            if (restoreFocus) [...list.querySelectorAll<HTMLDetailsElement>('details')].find(item => item.dataset.key === `${entry.source}:${entry.eventId}`)?.querySelector('summary')?.focus({ preventScroll: true });
+            message('notifications-read-message', 'Уведомление отмечено прочитанным.', 'success');
+          }
+        } catch (error) {
+          if (account?.accountId === ownerId) { message('notifications-read-message', errorMessage(error), 'error'); read.disabled = false; read.textContent = 'Отметить прочитанным'; }
+        }
+      });
+      detail.append(read);
       details.append(summary, detail); item.append(details); list.append(item);
     }
     renderedNotifications = notifications.items;
@@ -251,23 +281,41 @@ function analyticsUnavailable(business: boolean, title: string, text: string): v
   else { state.querySelector('h3')!.textContent = title; state.querySelector('p')!.textContent = text; }
 }
 
+function personalAnalyticsData(): Analytics | null {
+  if (!analyticsData || analyticsData.month !== el<HTMLSelectElement>('analytics-month').value) return null;
+  const type = el<HTMLSelectElement>('analytics-type').value;
+  if (type === 'ALL') return analyticsData;
+  return filterAnalytics(analyticsData, type);
+}
+
+function renderAnalytics(data: Analytics, business = false): void {
+  const prefix = business ? 'business' : 'analytics';
+  el(`${prefix}-state`).hidden = true;
+  el(`${prefix}-content`).hidden = false;
+  el(`${prefix}-incoming`).textContent = formatMoney(data.days.reduce((sum, day) => sum + BigInt(day.incomingMinor), 0n));
+  el(`${prefix}-outgoing`).textContent = formatMoney(data.days.reduce((sum, day) => sum + BigInt(day.outgoingMinor), 0n));
+  el(`${prefix}-count`).textContent = new Intl.NumberFormat('ru-RU').format(data.operationsCount);
+  if (business) el('business-accounts').textContent = data.accountsCount === undefined ? 'Недоступно' : new Intl.NumberFormat('ru-RU').format(data.accountsCount);
+  el(`${prefix}-updated`).textContent = data.updatedAt ? `Последнее событие: ${dateTime.format(new Date(data.updatedAt))}. ${business ? 'Текущий месяц UTC.' : `Выбран месяц ${data.month}, время UTC.`} Данные могут поступать с задержкой.` : 'Событий за выбранный период пока нет. Данные могут поступать с задержкой.';
+  renderAnalyticsChart(el(`${prefix}-chart`), data);
+}
+
 async function loadAnalytics(business = false): Promise<void> {
   const prefix = business ? 'business' : 'analytics';
+  const identity = business ? ++businessRequest : ++analyticsRequest;
+  const ownerId = account?.accountId;
+  const month = el<HTMLSelectElement>('analytics-month').value;
   el(`${prefix}-retry`).hidden = true;
   if (!session?.analyticsEnabled) { analyticsUnavailable(business, 'Аналитика пока не подключена', 'Счёт, переводы и история доступны как обычно.'); return; }
+  analyticsUnavailable(business, 'Загружаем аналитику', 'Получаем подтверждённые события за месяц.');
   try {
-    const data = parseAnalytics(await request(`/ui/analytics${business ? '/business' : ''}`));
+    const data = parseAnalytics(await request(`/ui/analytics${business ? '/business' : `?month=${encodeURIComponent(month)}`}`), business ? undefined : ownerId, business ? undefined : month);
+    if (identity !== (business ? businessRequest : analyticsRequest) || ownerId !== account?.accountId) return;
     if (!data.available) { analyticsUnavailable(business, 'Аналитика временно недоступна', 'Данные не подменяются расчётными значениями. Попробуйте обновить позже.'); el(`${prefix}-retry`).hidden = false; return; }
-    if (business) businessData = data; else analyticsData = data;
-    el(`${prefix}-state`).hidden = true;
-    el(`${prefix}-content`).hidden = false;
-    el(`${prefix}-incoming`).textContent = formatMoney(data.days.reduce((sum, day) => sum + BigInt(day.incomingMinor), 0n));
-    el(`${prefix}-outgoing`).textContent = formatMoney(data.days.reduce((sum, day) => sum + BigInt(day.outgoingMinor), 0n));
-    el(`${prefix}-count`).textContent = new Intl.NumberFormat('ru-RU').format(data.operationsCount);
-    if (business) el('business-accounts').textContent = data.accountsCount === undefined ? 'Недоступно' : new Intl.NumberFormat('ru-RU').format(data.accountsCount);
-    el(`${prefix}-updated`).textContent = data.updatedAt ? `Последнее обновление: ${dateTime.format(new Date(data.updatedAt))}. Данные аналитики могут поступать с задержкой.` : 'Время обновления недоступно. Данные аналитики могут поступать с задержкой.';
-    renderAnalyticsChart(el(`${prefix}-chart`), data);
+    if (business) { businessData = data; renderAnalytics(data, true); }
+    else { analyticsData = data; const filtered = personalAnalyticsData(); if (filtered) renderAnalytics(filtered); }
   } catch (error) {
+    if (identity !== (business ? businessRequest : analyticsRequest) || ownerId !== account?.accountId) return;
     analyticsUnavailable(business, error instanceof ApiError && error.status === 403 ? 'Доступ к сводке ограничен' : 'Не удалось загрузить аналитику', errorMessage(error));
     el(`${prefix}-retry`).hidden = false;
   }
@@ -353,6 +401,27 @@ el('notifications-more').addEventListener('click', () => { void loadNotification
 el('notifications-retry').addEventListener('click', () => { void loadNotifications(true, true); });
 el('refresh-data').addEventListener('click', () => { void refreshData(); });
 el('analytics-retry').addEventListener('click', () => { void loadAnalytics(); });
+el('analytics-month').addEventListener('change', () => { void loadAnalytics(); });
+el('analytics-type').addEventListener('change', () => { const filtered = personalAnalyticsData(); if (filtered) renderAnalytics(filtered); });
+
+function recordActivity(event: Event, type: 'SCREEN_OPENED' | 'FORM_OPENED', section: 'OVERVIEW' | 'HISTORY' | 'NOTIFICATIONS' | 'ANALYTICS' | 'PROFILE' | 'PAYMENTS'): void {
+  if (!event.isTrusted || !session?.analyticsEnabled || !account) return;
+  activity.record(type, section);
+  void activity.flush({ [session.csrfHeader]: session.csrfToken });
+}
+
+for (const link of document.querySelectorAll<HTMLAnchorElement>('.glass-nav a')) link.addEventListener('click', event => {
+  const section = link.hash.slice(1).toUpperCase() as 'OVERVIEW' | 'HISTORY' | 'NOTIFICATIONS' | 'ANALYTICS' | 'PROFILE';
+  if (event.isTrusted && section !== activeScreen) { activeScreen = section; recordActivity(event, 'SCREEN_OPENED', section); }
+});
+for (const [id, section] of [['payment-form', 'PAYMENTS'], ['profile-form', 'PROFILE']] as const) {
+  for (const name of ['pointerdown', 'keydown']) el(id).addEventListener(name, event => {
+    if (!event.isTrusted || openedForms.has(id) || !account || !session?.analyticsEnabled) return;
+    openedForms.add(id);
+    recordActivity(event, 'FORM_OPENED', section);
+  });
+}
+
 el('business-retry').addEventListener('click', () => { void loadAnalytics(true); });
 
 el<HTMLFormElement>('profile-form').addEventListener('submit', async event => {
@@ -401,7 +470,8 @@ if ('ResizeObserver' in window) new ResizeObserver(entries => {
   if (width === chartWidth) return;
   chartWidth = width;
   if (historyItems.length) renderBalanceChart(el('balance-chart'), historyItems);
-  if (analyticsData && !el('analytics-content').hidden) renderAnalyticsChart(el('analytics-chart'), analyticsData);
+  const personal = personalAnalyticsData();
+  if (personal && !el('analytics-content').hidden) renderAnalyticsChart(el('analytics-chart'), personal);
   if (businessData && !el('business-content').hidden) renderAnalyticsChart(el('business-chart'), businessData);
 }).observe(el('main'));
 
@@ -422,14 +492,6 @@ async function initialize(): Promise<void> {
     el<HTMLFormElement>('logout-form').querySelector<HTMLButtonElement>('button')!.disabled = false;
     await loadAccount(profileVersion === null);
     if (!account) throw new Error('Account unavailable');
-    if (session.analyticsEnabled && !viewSubmitted) {
-      viewSubmitted = true;
-      void request('/ui/analytics/views', { method: 'POST',
-        headers: { 'Content-Type': 'application/json', [session.csrfHeader]: session.csrfToken },
-        body: JSON.stringify({ eventId: crypto.randomUUID() }) }).catch(() => {
-          console.info('Cabinet view event unavailable');
-        });
-    }
     try { queue = new OperationQueue(sessionStorage, (account as Account).accountId); }
     catch { queue = null; message('payment-message', 'Не удалось прочитать сохранённую операцию. Проверьте историю перед новой отправкой. Операции временно заблокированы в этой вкладке.', 'error'); }
     updatePaymentFields();
@@ -440,6 +502,12 @@ async function initialize(): Promise<void> {
     message('session-error-text', errorMessage(error));
     el('session-error').hidden = false;
   } finally { el('session-notice').hidden = true; el<HTMLButtonElement>('session-retry').disabled = false; }
+}
+const monthLabels = new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+const monthNow = new Date();
+for (let offset = 0; offset < 4; offset++) {
+  const month = new Date(Date.UTC(monthNow.getUTCFullYear(), monthNow.getUTCMonth() - offset, 1));
+  el<HTMLSelectElement>('analytics-month').add(new Option(monthLabels.format(month), month.toISOString().slice(0, 7)));
 }
 const today = new Date();
 el<HTMLInputElement>('birth-date').max = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;

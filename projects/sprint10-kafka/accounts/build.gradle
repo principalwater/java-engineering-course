@@ -17,6 +17,7 @@ contracts {
     testFramework = 'JUNIT5'
     baseClassForTests = 'dev.principalwater.bank.accounts.contract.AccountsContractBase'
     basePackageForTests = 'dev.principalwater.bank.accounts.contract.generated'
+    baseClassMappings { baseClassMapping('.*notification.*', 'dev.principalwater.bank.accounts.contract.AccountsNotificationContractBase') }
 }
 tasks.named('compileContractTestJava') { dependsOn tasks.named('testClasses') }
 tasks.named('contractTest') { useJUnitPlatform() }
@@ -41,3 +42,41 @@ publishing {
     }
     repositories { maven { name = 'contracts'; url = rootProject.layout.buildDirectory.dir('contract-repository') } }
 }
+
+sourceSets {
+    messagingConsumerTest {
+        compileClasspath += sourceSets.main.output + sourceSets.test.output
+        runtimeClasspath += sourceSets.main.output + sourceSets.test.output
+    }
+}
+configurations {
+    messagingConsumerTestImplementation.extendsFrom testImplementation
+    messagingConsumerTestRuntimeOnly.extendsFrom testRuntimeOnly
+    messagingContractStubs { canBeConsumed = false; canBeResolved = true }
+}
+dependencies {
+    messagingConsumerTestImplementation 'org.springframework.cloud:spring-cloud-contract-stub-runner:4.3.4'
+    messagingContractStubs project(path: ':notifications', configuration: 'verifiedContractStubs')
+    messagingConsumerTestRuntimeOnly files(configurations.messagingContractStubs)
+}
+tasks.register('messagingConsumerTest', Test) {
+    description = 'Consume verified messaging stubs through real Kafka adapters'
+    testClassesDirs = sourceSets.messagingConsumerTest.output.classesDirs
+    classpath = sourceSets.messagingConsumerTest.runtimeClasspath
+    dependsOn tasks.named('testClasses')
+    dependsOn configurations.messagingContractStubs
+    inputs.files(configurations.messagingContractStubs).withPropertyName('verifiedMessagingStubs')
+    dependsOn ':notifications:contractTest'
+}
+tasks.named('check') { dependsOn tasks.named('messagingConsumerTest') }
+
+tasks.register('verifyRuntimeIsolation') {
+    inputs.files(configurations.runtimeClasspath).withPropertyName('accountsRuntime')
+    doLast {
+        def forbidden = ['bank-service-client', 'spring-security-oauth2-client'] as Set
+        def found = configurations.runtimeClasspath.resolvedConfiguration.resolvedArtifacts
+                .collect { it.moduleVersion.id.name }.findAll { forbidden.contains(it) }
+        if (!found.empty) throw new GradleException("Accounts runtime contains forbidden dependencies: ${found}")
+    }
+}
+tasks.named('check') { dependsOn tasks.named('verifyRuntimeIsolation') }

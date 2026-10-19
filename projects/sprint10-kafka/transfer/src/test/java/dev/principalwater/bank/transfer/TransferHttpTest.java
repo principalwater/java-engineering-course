@@ -21,6 +21,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 @WebMvcTest(
@@ -29,6 +30,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
             "spring.config.import=classpath:bank-common.properties",
             "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.security.oauth2.client.servlet.OAuth2ClientAutoConfiguration"
         })
+@ContextConfiguration(classes = TransferController.class)
 @Import({TransferSecurity.class, TransferService.class, ApiJwtConfiguration.class, ApiErrors.class})
 class TransferHttpTest extends ServletSecurityTestBase {
     @MockitoBean private MoneyWorkflow workflow;

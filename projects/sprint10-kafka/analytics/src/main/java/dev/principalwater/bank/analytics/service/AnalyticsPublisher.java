@@ -3,6 +3,7 @@ package dev.principalwater.bank.analytics.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.principalwater.bank.analytics.model.AnalyticsProjection;
+import dev.principalwater.bank.analytics.model.AnalyticsRecord;
 import dev.principalwater.bank.analytics.model.AnalyticsUnavailable;
 import dev.principalwater.bank.contract.BankEvent;
 import java.time.Duration;
@@ -25,12 +26,13 @@ public class AnalyticsPublisher {
     }
 
     public void publish(BankEvent event) {
+        publish(new AnalyticsRecord(event, null));
+    }
+
+    public void publish(AnalyticsRecord event) {
         try {
             // owner key выбирает общий partition, но не порядок ledger; replay дедуплицирует inbox.
-            kafka.send(
-                            AnalyticsProjection.TOPIC,
-                            event.ownerId().toString(),
-                            mapper.writeValueAsString(event))
+            kafka.send(AnalyticsProjection.TOPIC, event.ownerId().toString(), event.encode(mapper))
                     .get(PUBLISH_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException failure) {
             Thread.currentThread().interrupt();

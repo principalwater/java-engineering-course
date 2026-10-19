@@ -3,6 +3,8 @@ package dev.principalwater.bank.analytics;
 import static org.mockito.Mockito.when;
 
 import dev.principalwater.bank.analytics.dao.CassandraActivityStore;
+import dev.principalwater.bank.analytics.dao.CassandraUiActivityStore;
+import dev.principalwater.bank.analytics.dao.ClickHouseActivityMart;
 import dev.principalwater.bank.analytics.dao.ClickHouseWarehouse;
 import dev.principalwater.bank.contract.Actor;
 import dev.principalwater.bank.contract.OwnerReference;
@@ -23,7 +25,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
         properties = {
             "spring.config.import=classpath:bank-common.properties,classpath:bank-service-client.properties",
             "bank.analytics.delivery-enabled=false",
-            "bank.analytics.kafka-password=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "bank.kafka.password=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "spring.security.oauth2.client.registration.service.client-secret=fixture-secret",
             "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.cassandra.CassandraAutoConfiguration,"
                     + "org.springframework.boot.autoconfigure.data.cassandra.CassandraDataAutoConfiguration,"
@@ -36,11 +38,14 @@ public abstract class AnalyticsTestBase extends JdbcServiceTestBase {
     protected static final UUID BOB = UUID.fromString("e89ee362-5ca9-4064-a97b-24abe2fa4109");
     @MockitoBean protected CassandraActivityStore cassandra;
     @MockitoBean protected ClickHouseWarehouse warehouse;
+    @MockitoBean protected CassandraUiActivityStore uiActivity;
+    @MockitoBean protected ClickHouseActivityMart activityMart;
     @MockitoBean protected ServiceClient accounts;
 
     @Override
     protected void resetDatabase() {
-        jdbc.execute("TRUNCATE analytics_inbox, analytics_quarantine");
+        jdbc.execute(
+                "TRUNCATE analytics_inbox, analytics_quarantine, analytics_activity_exports, analytics_ui_months");
         when(accounts.post(
                         "accounts",
                         "/internal/accounts/identity",

@@ -12,8 +12,7 @@ import org.springframework.context.annotation.Primary;
 
 @SpringBootTest(
         properties = {
-            "spring.config.import=classpath:bank-common.properties,classpath:bank-service-client.properties",
-            "spring.security.oauth2.client.registration.service.client-secret=fixture-secret",
+            "spring.config.import=classpath:bank-common.properties,classpath:bank-kafka.properties",
             "bank.analytics.enabled=true"
         })
 @Import(AccountsTestBase.PreciseClock.class)
@@ -29,6 +28,7 @@ public abstract class AccountsTestBase extends JdbcServiceTestBase {
 
     @Override
     protected void resetDatabase() {
-        jdbc.execute("TRUNCATE bank_outbox,ledger_entry,money_operation,account RESTART IDENTITY");
+        jdbc.execute(
+                "TRUNCATE notification_inbox,bank_kafka_outbox,bank_outbox,ledger_entry,money_operation,account RESTART IDENTITY");
     }
 }

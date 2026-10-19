@@ -2,14 +2,17 @@ package dev.principalwater.bank.front.controller;
 
 import dev.principalwater.bank.contract.BankLimits;
 import dev.principalwater.bank.contract.CashRequest;
+import dev.principalwater.bank.contract.NotificationRead;
 import dev.principalwater.bank.contract.ProfileRequest;
 import dev.principalwater.bank.contract.TransferRequest;
+import dev.principalwater.bank.contract.UiActivityRequest;
 import dev.principalwater.bank.front.client.GatewayClient;
 import dev.principalwater.bank.front.config.FrontOAuth;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.util.Optional;
 import java.util.UUID;
@@ -108,6 +111,15 @@ public class BankController {
         return gateway.exchange(HttpMethod.GET, path, null, token(client));
     }
 
+    @PostMapping("/ui/notifications/read")
+    public ResponseEntity<byte[]> readNotification(
+            @RegisteredOAuth2AuthorizedClient(FrontOAuth.REGISTRATION_ID)
+                    OAuth2AuthorizedClient client,
+            @Valid @RequestBody NotificationRead request) {
+        return gateway.exchange(
+                HttpMethod.POST, "/api/accounts/notifications/read", request, token(client));
+    }
+
     @PostMapping("/ui/cash")
     public ResponseEntity<byte[]> cash(
             @RegisteredOAuth2AuthorizedClient(FrontOAuth.REGISTRATION_ID)
@@ -127,8 +139,15 @@ public class BankController {
     @GetMapping("/ui/analytics")
     public ResponseEntity<byte[]> analytics(
             @RegisteredOAuth2AuthorizedClient(FrontOAuth.REGISTRATION_ID)
-                    OAuth2AuthorizedClient client) {
-        return gateway.exchange(HttpMethod.GET, "/api/analytics", null, token(client));
+                    OAuth2AuthorizedClient client,
+            @RequestParam(required = false) @Pattern(regexp = "\\d{4}-\\d{2}") String month) {
+        String path =
+                UriComponentsBuilder.fromPath("/api/analytics")
+                        .queryParamIfPresent("month", Optional.ofNullable(month))
+                        .build()
+                        .encode()
+                        .toUriString();
+        return gateway.exchange(HttpMethod.GET, path, null, token(client));
     }
 
     @GetMapping("/ui/analytics/business")
@@ -144,6 +163,16 @@ public class BankController {
                     OAuth2AuthorizedClient client,
             @Valid @RequestBody ViewEvent request) {
         return gateway.exchange(HttpMethod.POST, "/api/analytics/views", request, token(client));
+    }
+
+    @PostMapping("/ui/analytics/activities")
+    public ResponseEntity<byte[]> activity(
+            @RegisteredOAuth2AuthorizedClient(FrontOAuth.REGISTRATION_ID)
+                    OAuth2AuthorizedClient client,
+            @Valid @RequestBody UiActivityRequest request) {
+        request.validate();
+        return gateway.exchange(
+                HttpMethod.POST, "/api/analytics/activities", request, token(client));
     }
 
     private String token(OAuth2AuthorizedClient client) {

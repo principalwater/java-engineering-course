@@ -36,6 +36,8 @@ public class AccountsSecurity {
                                 BankTokenProfile.ANALYTICS_CLIENT_ID));
         routes.requestMatchers(HttpMethod.GET, "/api/accounts/**")
                 .access(JwtAccess.user(OAuthScope.ACCOUNTS_READ));
+        routes.requestMatchers(HttpMethod.POST, "/api/accounts/notifications/read")
+                .access(JwtAccess.user(OAuthScope.ACCOUNTS_WRITE));
         routes.requestMatchers(HttpMethod.PUT, "/api/accounts/me")
                 .access(JwtAccess.user(OAuthScope.ACCOUNTS_WRITE));
         routes.requestMatchers(HttpMethod.POST, "/internal/accounts/operations")

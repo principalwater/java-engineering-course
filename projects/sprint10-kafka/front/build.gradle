@@ -1,5 +1,9 @@
 plugins { id 'org.springframework.boot' }
-dependencies { implementation project(':bank-runtime'); testImplementation project(':bank-test-support') }
+dependencies {
+    implementation project(':bank-runtime')
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
+    testImplementation project(':bank-test-support')
+}
 
 tasks.register('installUi', Exec) {
     workingDir 'ui'

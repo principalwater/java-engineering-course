@@ -31,12 +31,8 @@ public class AnalyticsSecurity {
                 .access(JwtAccess.user(OAuthScope.ANALYTICS_READ));
         routes.requestMatchers(HttpMethod.POST, "/api/analytics/views")
                 .access(JwtAccess.user(OAuthScope.ANALYTICS_EVENTS));
-        routes.requestMatchers(HttpMethod.POST, "/internal/analytics/events")
-                .access(
-                        JwtAccess.service(
-                                "analytics-api",
-                                OAuthScope.ANALYTICS_WRITE,
-                                BankTokenProfile.ACCOUNTS_CLIENT_ID));
+        routes.requestMatchers(HttpMethod.POST, "/api/analytics/activities")
+                .access(JwtAccess.user(OAuthScope.ANALYTICS_EVENTS));
         routes.anyRequest().denyAll();
     }
 

@@ -626,6 +626,9 @@ def verify(base_url, secrets_dir, containers, analytics=False, superset=False):
         return wait_for(label, condition, timeout=startup_deadline - time.monotonic())
     anonymous = User(base_url, secrets_dir)
     ready("bank TLS/login readiness", lambda: anonymous.request("GET", "/login")[0] == 200)
+    with anonymous.http.open(Request(base_url + "/login", method="HEAD"), timeout=HTTP_TIMEOUT) as response:
+        require(response.status == 200 and "h3=" not in response.headers.get("Alt-Svc", ""),
+                "TCP-only ingress advertised unsupported HTTP/3")
     require(anonymous.request("GET", "/ui/account")[0] == 401, "Anonymous private API did not return 401")
     require(anonymous.request("GET", "/ui/notifications")[0] == 401, "Anonymous notification API did not return 401")
     authority = base_url.replace("bank.valgrind-home.localhost", "auth-bank.valgrind-home.localhost")

@@ -1,10 +1,15 @@
 {
     admin off
     auto_https off
+    # В kind опубликован только TCP: не рекламируем недоступный клиенту QUIC/UDP.
+    servers {
+        protocols h1 h2
+    }
 }
 
 https://bank.valgrind-home.localhost:8450 {
     tls /run/secrets/tls_certificate.pem /run/secrets/tls_private_key.pem
+    header Alt-Svc clear
     request_body {
         max_size 32KB
     }
@@ -21,6 +26,7 @@ https://bank.valgrind-home.localhost:8450 {
 
 https://auth-bank.valgrind-home.localhost:8450 {
     tls /run/secrets/tls_certificate.pem /run/secrets/tls_private_key.pem
+    header Alt-Svc clear
     request_body {
         max_size 32KB
     }
@@ -35,6 +41,7 @@ https://auth-bank.valgrind-home.localhost:8450 {
 
 https://insights.valgrind-home.localhost:8450 {
     tls /run/secrets/tls_certificate.pem /run/secrets/tls_private_key.pem
+    header Alt-Svc clear
     request_body {
         max_size 2MB
     }

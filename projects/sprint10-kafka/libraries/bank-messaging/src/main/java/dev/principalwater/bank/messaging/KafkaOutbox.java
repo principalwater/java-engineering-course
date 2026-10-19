@@ -13,7 +13,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 
 public class KafkaOutbox implements RecoverableDelivery {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaOutbox.class);
-    // Metadata max.block1s и delivery4s укладываются в lease30s.
+    // Ожидание метаданных до 1 с и доставки до 4 с укладывается в аренду записи на 30 с.
     private static final int SEND_SECONDS = 5;
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;

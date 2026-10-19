@@ -10,10 +10,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 public class ActivityExportQueue {
-    // Один exporter ограничен двумя CQL partitions и одним HTTP insert; 60s lease покрывает
-    // конечные I/O deadlines.
+    // Один процесс экспорта читает две CQL-партиции и выполняет одну HTTP-вставку;
+    // аренда на 60 с покрывает предельные сроки ввода-вывода.
     private static final int LEASE_SECONDS = 60;
-    // Backoff 2..60s удерживает конечную нагрузку при outage; счётчик насыщается до SQL overflow.
+    // Пауза 2..60 с ограничивает нагрузку при отказе; счётчик не доходит до переполнения SQL-типа.
     private static final int RETRY_STEP_SECONDS = 2;
     private static final int MAX_RETRY_SECONDS = 60;
     private static final int MAX_ATTEMPTS = 1_000_000;
@@ -42,8 +42,8 @@ public class ActivityExportQueue {
                 "INSERT INTO analytics_activity_exports(owner_id, month, revision) VALUES (?, ?, 0) ON CONFLICT DO NOTHING",
                 owner.ownerId(),
                 owner.month().toString());
-        // Все ACK и complete берут owner/month до event rows: одинаковый порядок исключает взаимный
-        // deadlock.
+        // Подтверждение и завершение сначала блокируют строку владельца/месяца, затем события:
+        // единый порядок исключает взаимную блокировку.
         jdbc.queryForObject(
                 "SELECT revision FROM analytics_activity_exports WHERE owner_id = ? AND month = ? FOR UPDATE",
                 Long.class,
@@ -107,7 +107,8 @@ public class ActivityExportQueue {
                         export.revision(),
                         export.lease());
         if (completed == 1) {
-            // Только durable batch со всё ещё актуальной revision завершает UI warehouse ACK.
+            // Только сохранённый пакет с актуальной ревизией подтверждает запись событий интерфейса
+            // в витрину.
             jdbc.update(
                     """
                     UPDATE analytics_inbox SET warehouse_done = true WHERE owner_id = ?

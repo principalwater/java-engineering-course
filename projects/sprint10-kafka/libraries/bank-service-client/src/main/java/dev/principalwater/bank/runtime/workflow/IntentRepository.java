@@ -24,7 +24,7 @@ public class IntentRepository {
     }
 
     public Intent reserve(InternalOperation operation) {
-        // Конкурентный повтор сохраняет первый payload; ниже сверяем неизменяемые параметры
+        // Конкурентный повтор сохраняет первое содержимое; ниже сверяем неизменяемые параметры
         // команды.
         jdbc.update(
                 """

@@ -33,13 +33,13 @@ import org.springframework.util.backoff.FixedBackOff;
 @Configuration(proxyBeanMethods = false)
 public class AnalyticsKafka {
     private static final Logger LOG = LoggerFactory.getLogger(AnalyticsKafka.class);
-    // Один partition читается одним потоком каждой группы; между конечными попытками даём
+    // Одну партицию читает один поток каждой группы; между ограниченными попытками даём
     // зависимости восстановиться.
     private static final int CONSUMERS_PER_GROUP = 1;
     private static final long POLL_TIMEOUT_MS = 1000;
     private static final long RETRY_BACKOFF_MS = 5000;
-    // 4s delivery deadline должен завершиться внутри 5s close, не съедая стандартные 30s graceful
-    // shutdown.
+    // Предельные 4 с доставки укладываются в 5 с закрытия, оставляя запас стандартных 30 с штатной
+    // остановки.
     private static final int PRODUCER_CLOSE_SECONDS = 5;
     private static final Duration AUTHENTICATION_RETRY = Duration.ofSeconds(10);
     private final KafkaProperties properties;
@@ -109,7 +109,7 @@ public class AnalyticsKafka {
         listeners.setConcurrency(CONSUMERS_PER_GROUP);
         listeners.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
         listeners.getContainerProperties().setPollTimeout(POLL_TIMEOUT_MS);
-        // При восстановлении ACL/брокера consumer продолжает работу, а не останавливается навсегда.
+        // После восстановления ACL/брокера консьюмер продолжает работу.
         listeners.getContainerProperties().setAuthExceptionRetryInterval(AUTHENTICATION_RETRY);
         // Штатная пауза потока 5s меньше max.poll.interval 60s; seekAfterError=false удерживает
         // только одну запись.

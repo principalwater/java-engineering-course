@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class AccountsAnalyticsIngress {
-    // Типизированное событие меньше 1KiB; запас 4KiB ограничивает парсер ниже broker limit.
+    // Типизированное событие меньше 1 KiB; запас 4 KiB ограничивает парсер ниже лимита брокера.
     private static final int MAX_EVENT_CHARACTERS = 4096;
     private final AnalyticsInbox inbox;
     private final AnalyticsProjectionHandler handler;
@@ -48,7 +48,7 @@ public class AccountsAnalyticsIngress {
                     || !event.ownerId().toString().equals(record.key())) {
                 throw new InvalidAnalyticsRecord(InvalidAnalyticsRecord.Reason.KEY_MISMATCH);
             }
-            // Возврат разрешает offset commit только после PostgreSQL commit; Kafka ACL
+            // Офсет подтверждается только после фиксации транзакции PostgreSQL; Kafka ACL
             // ограничивает источник Accounts.
             inbox.acceptBackend(event);
         } catch (InvalidAnalyticsRecord failure) {

@@ -29,7 +29,7 @@ public class AnalyticsRelay {
 
     static final class Workers implements AutoCloseable {
         private static final Logger LOG = LoggerFactory.getLogger(Workers.class);
-        // Два worker и сканирующий поток ограничивают публикации тремя без очереди в памяти.
+        // Два воркера и сканирующий поток ограничивают число публикаций тремя без очереди в памяти.
         private static final int PUBLISH_WORKERS = 2;
         private static final int SCAN_INTERVAL_SECONDS = 1;
         private static final Duration SHUTDOWN_TIMEOUT = Duration.ofSeconds(10);

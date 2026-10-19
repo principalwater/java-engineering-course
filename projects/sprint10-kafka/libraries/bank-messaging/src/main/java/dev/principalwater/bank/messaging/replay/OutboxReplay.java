@@ -50,8 +50,8 @@ public final class OutboxReplay {
                                     parameters.toArray());
                     int requeued = 0;
                     for (Row row : rows) {
-                        // Payload, key, ID и текущий lease не меняются; второй publish остаётся тем
-                        // же фактом.
+                        // Повторная публикация сохраняет содержимое, ключ, ID и текущую аренду
+                        // записи.
                         requeued +=
                                 jdbc.update(
                                         "UPDATE bank_kafka_outbox SET status='PENDING',next_attempt_at=now() WHERE id=? AND status='PUBLISHED'",

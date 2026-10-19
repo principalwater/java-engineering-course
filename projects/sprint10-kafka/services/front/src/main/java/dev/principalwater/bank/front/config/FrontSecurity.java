@@ -42,7 +42,7 @@ public class FrontSecurity {
     @Bean
     ClientRegistrationRepository bankRegistration(LoginProperties properties) {
         String issuer = properties.issuer().toString();
-        // Явные backchannel endpoints сохраняют canonical issuer и его проверку в ID Token.
+        // Явные серверные адреса сохраняют канонический issuer и его проверку в ID Token.
         ClientRegistration registration =
                 ClientRegistration.withRegistrationId(FrontOAuth.REGISTRATION_ID)
                         .clientId(properties.clientId())

@@ -92,7 +92,7 @@ public class ServiceClient {
         } catch (BankException exception) {
             throw exception;
         } catch (RuntimeException exception) {
-            // Ответ мог потеряться после commit: write автоматически не повторяется.
+            // Ответ мог потеряться после фиксации транзакции: запись автоматически не повторяется.
             throw new RemoteUnavailable();
         } finally {
             permits.release();

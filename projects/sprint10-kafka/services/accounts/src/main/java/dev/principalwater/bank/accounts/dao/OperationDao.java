@@ -20,7 +20,7 @@ public class OperationDao {
     }
 
     public boolean reserve(UUID owner, InternalOperation command, Instant now) {
-        // Повтор сохраняет первую операцию; replay сверяет payload и возвращает исходный результат.
+        // Повтор сохраняет первую операцию, сверяет содержимое и возвращает исходный результат.
         return jdbc.update(
                         """
                 INSERT INTO money_operation(owner_id,type,request_id,amount_minor,recipient_id,status,occurred_at)

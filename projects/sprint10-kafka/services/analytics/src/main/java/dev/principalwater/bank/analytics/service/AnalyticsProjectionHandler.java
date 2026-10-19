@@ -22,8 +22,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class AnalyticsProjectionHandler {
     private static final Logger LOG = LoggerFactory.getLogger(AnalyticsProjectionHandler.class);
-    // Фиксированный BankEvent меньше 1KiB; 4KiB оставляют запас ниже broker limit 32KiB и
-    // ограничивают JSON parsing.
+    // Фиксированный BankEvent меньше 1 KiB; 4 KiB оставляют запас ниже лимита брокера 32 KiB и
+    // ограничивают разбор JSON.
     private static final int MAX_EVENT_CHARACTERS = 4096;
     private final AnalyticsInbox inbox;
     private final ObjectMapper mapper;
@@ -52,8 +52,8 @@ public class AnalyticsProjectionHandler {
                 return;
             }
         } catch (InvalidAnalyticsRecord failure) {
-            // Только durable quarantine разрешает offset commit; отказ PostgreSQL оставляет запись
-            // на retry.
+            // Только сохранение в карантине позволяет подтвердить офсет; отказ PostgreSQL
+            // оставляет запись для повторной доставки.
             inbox.quarantine(
                     projection.name(),
                     record.topic(),
@@ -68,8 +68,8 @@ public class AnalyticsProjectionHandler {
             return;
         }
         if (event.ui() != null) {
-            // UI warehouse ACK принадлежит Cassandra-derived batch. Offset commit не теряет задачу:
-            // PG хранит её до ACK.
+            // Запись в витрину подтверждает отдельный процесс экспорта из Cassandra.
+            // Офсет можно подтвердить: PostgreSQL хранит задачу до завершения экспорта.
             if (projection == AnalyticsProjection.BUSINESS) return;
             uiSink.accept(event.ui());
         } else {

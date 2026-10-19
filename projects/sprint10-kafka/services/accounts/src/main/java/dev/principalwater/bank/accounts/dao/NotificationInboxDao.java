@@ -38,7 +38,7 @@ public class NotificationInboxDao {
         } catch (JsonProcessingException failure) {
             throw new MessageRejected();
         }
-        // Один UUID допустим у разных источников; смена владельца или payload внутри источника
+        // Один UUID допустим у разных источников; смена владельца или содержимого внутри источника
         // запрещена.
         int fresh =
                 jdbc.update(

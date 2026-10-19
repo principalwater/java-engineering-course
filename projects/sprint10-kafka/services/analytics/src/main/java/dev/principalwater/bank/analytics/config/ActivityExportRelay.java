@@ -31,7 +31,8 @@ public class ActivityExportRelay {
 
     static final class Worker implements AutoCloseable {
         private static final Logger LOG = LoggerFactory.getLogger(Worker.class);
-        // Один worker без очереди обслуживает одну owner/month за тик; каждый внешний I/O конечен.
+        // Один воркер без очереди обслуживает одну пару владельца/месяца за такт; внешнее ожидание
+        // ограничено.
         private static final int INTERVAL_SECONDS = 1;
         private final ScheduledThreadPoolExecutor timer =
                 new ScheduledThreadPoolExecutor(

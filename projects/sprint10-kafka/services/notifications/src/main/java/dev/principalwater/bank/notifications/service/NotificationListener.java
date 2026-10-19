@@ -30,7 +30,8 @@ public class NotificationListener {
     public void receive(ConsumerRecord<String, String> record) {
         BankEvent event = codec.decode(record.value(), BankEvent.class);
         if (!event.ownerId().toString().equals(record.key())) throw new MessageRejected();
-        // Только ACL topic задаёт отправителя; headers/payload не предоставляют identity producer.
+        // Отправителя определяет топик с ACL; заголовки и содержимое не подтверждают личность
+        // продюсера.
         MessagePersistence.store(
                 () -> notifications.receive(NotificationSource.fromTopic(record.topic()), event));
     }

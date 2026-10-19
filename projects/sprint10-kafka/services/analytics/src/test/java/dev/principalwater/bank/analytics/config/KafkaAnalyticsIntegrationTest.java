@@ -78,8 +78,7 @@ class KafkaAnalyticsIntegrationTest extends AnalyticsTestBase {
     protected void resetDatabase() {
         stopConsumers();
         try {
-            // Удаляем только записи своего test-container topic, сохраняя тот же broker и Spring
-            // context.
+            // Очищаем только свой тестовый топик, сохраняя брокер и Spring-контекст.
             admin.deleteRecords(
                             Map.of(
                                     PARTITION,
@@ -152,8 +151,7 @@ class KafkaAnalyticsIntegrationTest extends AnalyticsTestBase {
                         .get(WAIT.toSeconds(), TimeUnit.SECONDS)
                         .lowWatermark();
         assertTrue(lowWatermark >= removedUntil);
-        // Сдвигаем только retry-clock строки fixture: неизменный payload/ID обязан пережить потерю
-        // записи Kafka.
+        // Сдвигаем время повтора тестовой записи; содержимое и ID переживают потерю записи Kafka.
         jdbc.update(
                 "UPDATE analytics_inbox SET next_attempt_at = now() - interval '1 second' WHERE event_id = ?",
                 event.eventId());

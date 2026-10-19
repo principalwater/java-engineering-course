@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class AnalyticsPublisher {
-    // delivery.timeout 4s плюс metadata max.block 1s; ожидание не удерживает lease бесконечно.
+    // Доставка ограничена 4 с, ожидание метаданных — 1 с; ожидание не удерживает аренду бесконечно.
     private static final Duration PUBLISH_TIMEOUT = Duration.ofSeconds(5);
     private final KafkaTemplate<String, String> kafka;
     private final ObjectMapper mapper;
@@ -31,7 +31,8 @@ public class AnalyticsPublisher {
 
     public void publish(AnalyticsRecord event) {
         try {
-            // owner key выбирает общий partition, но не порядок ledger; replay дедуплицирует inbox.
+            // Ключ владельца выбирает общую партицию, но не порядок проводок; входящие повторы
+            // устраняются.
             kafka.send(AnalyticsProjection.TOPIC, event.ownerId().toString(), event.encode(mapper))
                     .get(PUBLISH_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException failure) {

@@ -3,8 +3,8 @@ package dev.principalwater.bank.messaging;
 import java.sql.SQLException;
 import org.springframework.dao.DataAccessException;
 
-// Ошибки данных/ограничений не лечатся повтором того же payload; сетевые, lock и shutdown —
-// лечатся.
+// Повтор доставки не исправляет ошибки данных и ограничений, но позволяет пережить
+// временные сбои сети, блокировки и остановку сервиса.
 public final class MessagePersistence {
     private MessagePersistence() {}
 

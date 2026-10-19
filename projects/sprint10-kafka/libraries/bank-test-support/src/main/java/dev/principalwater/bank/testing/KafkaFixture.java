@@ -18,7 +18,7 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.testcontainers.kafka.KafkaContainer;
 
-// Один broker на JVM: тесты перезапускают consumers и очищают только свои topics.
+// Один брокер на JVM: тесты перезапускают консьюмеры и очищают только свои топики.
 public final class KafkaFixture {
     public static final Duration WAIT = Duration.ofSeconds(30);
     private static final int PARTITIONS = 2;

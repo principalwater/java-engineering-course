@@ -47,8 +47,8 @@ public class NotificationReplay {
                     row.event().ownerId().toString(),
                     identity,
                     new NotificationReceipt(row.source(), row.event()));
-            // Только подтверждённые публикации переоткрываются; уже leased PENDING не
-            // перехватывается.
+            // Повторно открываются только подтверждённые публикации; активная аренда PENDING
+            // сохраняется.
             jdbc.update(
                     "UPDATE bank_kafka_outbox SET status='PENDING',next_attempt_at=now() WHERE topic=? AND message_id=? AND status='PUBLISHED'",
                     BankTopics.NOTIFICATION_RECEIPTS,

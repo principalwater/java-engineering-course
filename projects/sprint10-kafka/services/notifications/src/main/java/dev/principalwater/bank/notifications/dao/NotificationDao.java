@@ -24,7 +24,8 @@ public class NotificationDao {
         } catch (JsonProcessingException failure) {
             throw new MessageRejected();
         }
-        // Первый receipt неизменяем; конкурентный повтор проверяет payload до подтверждения offset.
+        // Первая квитанция неизменяема; конкурентный повтор сверяет содержимое до подтверждения
+        // офсета.
         int inserted =
                 jdbc.update(
                         "INSERT INTO bank_notification(caller,event_id,payload) VALUES (?,?,?::jsonb) ON CONFLICT(caller,event_id) DO NOTHING",

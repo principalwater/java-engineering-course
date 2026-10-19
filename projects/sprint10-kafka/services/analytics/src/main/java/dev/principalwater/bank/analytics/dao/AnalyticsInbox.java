@@ -235,7 +235,7 @@ public class AnalyticsInbox {
             long offset,
             String hash,
             InvalidAnalyticsRecord.Reason reason) {
-        // Хеш различает содержимое при повторном использовании offset; сырой payload не
+        // Хеш различает содержимое при повторном использовании офсета; исходное сообщение не
         // сохраняется.
         jdbc.update(
                 """
@@ -252,8 +252,9 @@ public class AnalyticsInbox {
     }
 
     public void release(Delivery delivery, boolean failed) {
-        // Успешный publish без sink ACK отступает от 30s до 15min, чтобы outage одной витрины не
-        // вытеснял свежие факты дублями. Сбой брокера повторяем раньше, с пределом 60s.
+        // Пауза от 30 с до 15 мин при отсутствии подтверждения витрины не даёт повторным
+        // публикациям вытеснять свежие факты во время её отказа.
+        // После сбоя брокера повторяем раньше, с пределом 60 с.
         jdbc.update(
                 """
                 UPDATE analytics_inbox SET lease_token = NULL, lease_until = NULL,

@@ -22,11 +22,11 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public class ClickHouseActivityMart implements AutoCloseable {
-    // Один month из двух CQL partitions даёт не более 2000 исходных записей; 512KiB ограничивают
-    // serialisation memory.
+    // За месяц читаются две CQL-партиции, до 2000 исходных записей;
+    // размер сериализованного пакета ограничен 512 KiB.
     private static final int MAX_BATCH_BYTES = 524288;
-    // Один exporter использует одно соединение; 6s ограничивают всю async operation поверх
-    // socket/server timeouts.
+    // Один процесс экспорта использует одно соединение; 6 с ограничивают всю асинхронную
+    // операцию поверх таймаутов сокета и сервера.
     private static final int CONNECT_SECONDS = 1;
     private static final int IO_SECONDS = 4;
     private static final int RESPONSE_SECONDS = 6;
@@ -101,8 +101,7 @@ public class ClickHouseActivityMart implements AutoCloseable {
             byte[] bytes = payload.toString().getBytes(StandardCharsets.UTF_8);
             if (bytes.length > MAX_BATCH_BYTES)
                 throw new AnalyticsUnavailable(AnalyticsUnavailable.Category.PROJECTION_LIMIT);
-            // Client-v2 использует HTTP; это пакетный Cassandra-derived путь, а не новый TCP
-            // protocol.
+            // Официальный клиент v2 отправляет снимок Cassandra пакетным HTTP-запросом.
             operation =
                     client.insert(
                             "bank_analytics.activity_snapshots",

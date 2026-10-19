@@ -1,6 +1,7 @@
 """Exercise owned cluster lifecycle at the CLI/file boundary without Docker mutations."""
 
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,7 @@ from unittest.mock import patch
 
 import yaml
 
+import probe
 import runtime
 
 
@@ -151,6 +153,38 @@ class ClusterCreationTest(unittest.TestCase):
                 identity = json.loads((state / "cluster.json").read_text(encoding="utf-8"))
                 self.assertEqual(identity["nodes"], node_ids)
                 self.assertEqual(identity["network_id"], network_id)
+
+
+class KafkaProbeTest(unittest.TestCase):
+    def test_failure_reports_current_stage_instead_of_prior_expected_denial(self):
+        with tempfile.TemporaryDirectory() as directory:
+            identity = {"kubeconfig": str(Path(directory) / "kubeconfig")}
+            created = None
+
+            def fake_kubectl(cluster, *argv, **kwargs):
+                nonlocal created
+                if argv[:2] == ("get", "service"):
+                    return json.dumps({"spec": {"clusterIP": "10.96.0.10"}})
+                if argv[0] == "create":
+                    created = json.loads(kwargs["data"])
+                    created["metadata"]["uid"] = "owned-probe-fixture"
+                    return json.dumps(created)
+                if argv[:2] == ("get", "job"):
+                    return json.dumps({**created, "status": {"failed": 1}})
+                if argv[0] == "logs":
+                    return "TopicAuthorizationException\nBANK_PROBE_FAILURE hostname-mismatch 1 TimeoutException\nprivate diagnostic detail\n"
+                if argv[:2] == ("get", "secret"):
+                    return json.dumps({"data": {"password": base64.b64encode(b"private-test-password").decode()}})
+                if argv[:2] == ("delete", "job"):
+                    return ""
+                self.fail(f"Unexpected probe boundary command: {argv[:2]}")
+
+            with patch.object(probe, "kubectl", side_effect=fake_kubectl):
+                with self.assertRaisesRegex(RuntimeError, "phase=hostname-mismatch, exit=1") as failure:
+                    probe.job(identity, "accounts-service", "false")
+            self.assertNotIn("TopicAuthorizationException", str(failure.exception))
+            self.assertIn("category=TimeoutException", str(failure.exception))
+            self.assertNotIn("private diagnostic detail", str(failure.exception))
 
 
 if __name__ == "__main__":

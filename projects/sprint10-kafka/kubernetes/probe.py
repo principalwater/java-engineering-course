@@ -4,6 +4,7 @@ import argparse
 import base64
 import json
 from pathlib import Path
+import re
 import shlex
 import sys
 import time
@@ -16,7 +17,17 @@ from runtime import command, kubectl, owned_identity, private_file, project_dir,
 
 CLIENT = r'''set -euo pipefail
 umask 077
-trap 'result=$?; if [ "$result" -ne 0 ]; then for file in /tmp/describe /tmp/denied /tmp/group-denied /tmp/hostname-denied /tmp/publish /tmp/consumer; do if [ -f "$file" ]; then grep -Eo "SSLHandshakeException|SSLAuthenticationException|TopicAuthorizationException|GroupAuthorizationException|TimeoutException|No such file or directory" "$file" | head -20 || true; fi; done; fi; exit "$result"' EXIT
+phase=setup
+diagnostic=/tmp/setup
+trap 'result=$?
+if [ "$result" -ne 0 ]; then
+    category=
+    if [ -f "$diagnostic" ]; then
+        category="$(grep -Eo "SSLHandshakeException|SSLAuthenticationException|TopicAuthorizationException|GroupAuthorizationException|TimeoutException" "$diagnostic" | head -1 || true)"
+    fi
+    printf "BANK_PROBE_FAILURE %s %s %s\n" "$phase" "$result" "${category:-Other}"
+fi
+exit "$result"' EXIT
 password="$(cat /run/client/password)"
 password="${password//\\/\\\\}"
 password="${password//\"/\\\"}"
@@ -80,9 +91,10 @@ def job(identity: dict, user: str, body: str) -> None:
         if not state.get("status", {}).get("succeeded", 0):
             diagnostic = Path(identity["kubeconfig"]).parent / f"{name}.failure.log"
             private_file(diagnostic, logs)
-            known = next((kind for kind in ("SSLHandshakeException", "TopicAuthorizationException", "GroupAuthorizationException", "TimeoutException")
-                          if kind.encode() in logs), "JobFailed")
-            raise RuntimeError(f"Kafka probe for {user} failed: {known}; private diagnostic: {diagnostic}")
+            failed = re.search(rb"(?m)^BANK_PROBE_FAILURE ([a-z-]{1,32}) ([0-9]{1,3}) ([A-Za-z]{1,40})\r?$", logs)
+            reason = (f"phase={failed[1].decode()}, exit={failed[2].decode()}, category={failed[3].decode()}"
+                      if failed else "phase=unknown")
+            raise RuntimeError(f"Kafka probe for {user} failed: {reason}; private diagnostic: {diagnostic}")
     finally:
         current = json.loads(kubectl(identity, "get", "job", name, "-o", "json"))
         if current["metadata"]["uid"] != created["metadata"]["uid"] or current["metadata"]["labels"].get("bank10.io/probe") != name:
@@ -101,19 +113,23 @@ def security(identity: dict, analytics: bool) -> None:
         resource_ready(identity, "kafkauser", f"{service}-service")
         # TopicCommand also requests DescribeConfigs, which application principals do not need.
         topic_pattern = allowed.replace(".", r"\.")
-        script = f'''timeout 30s /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server "$bootstrap" --command-config /tmp/client.properties --topic {shlex.quote(allowed)} >/tmp/describe 2>&1
+        script = f'''phase=authorized-topic; diagnostic=/tmp/describe
+timeout 30s /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server "$bootstrap" --command-config /tmp/client.properties --topic {shlex.quote(allowed)} >/tmp/describe 2>&1
 test "$(grep -Ec '^{topic_pattern}:[0-9]+:[0-9]+$' /tmp/describe)" -eq 6
+phase=forbidden-write; diagnostic=/tmp/denied
 printf '%s\\n' 'bank10-forbidden-probe' | timeout 30s /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server "$bootstrap" --producer.config /tmp/client.properties --sync --topic {shlex.quote(forbidden)} >/tmp/denied 2>&1 || true
 grep -q TopicAuthorizationException /tmp/denied
 echo 'Kafka TLS/SCRAM and foreign-write denial verified'
 '''
         if consumer_topic:
-            script += f'''timeout 20s /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server "$bootstrap" --consumer.config /tmp/client.properties --consumer-property enable.auto.commit=false --group bank10-forbidden-probe --max-messages 1 --timeout-ms 3000 --topic {shlex.quote(consumer_topic)} >/tmp/group-denied 2>&1 || true
+            script += f'''phase=forbidden-group; diagnostic=/tmp/group-denied
+timeout 20s /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server "$bootstrap" --consumer.config /tmp/client.properties --consumer-property enable.auto.commit=false --group bank10-forbidden-probe --max-messages 1 --timeout-ms 3000 --topic {shlex.quote(consumer_topic)} >/tmp/group-denied 2>&1 || true
 grep -q GroupAuthorizationException /tmp/group-denied
 echo 'Foreign consumer group denied on an authorized input topic'
 '''
         if service == "accounts":
-            script += f'''timeout 30s /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server bank10-wrong-kafka.invalid:9093 --command-config /tmp/client.properties --topic {shlex.quote(allowed)} >/tmp/hostname-denied 2>&1 || true
+            script += f'''phase=hostname-mismatch; diagnostic=/tmp/hostname-denied
+timeout 30s /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server bank10-wrong-kafka.invalid:9093 --command-config /tmp/client.properties --topic {shlex.quote(allowed)} >/tmp/hostname-denied 2>&1 || true
 grep -Eq 'subject alternative|No name matching' /tmp/hostname-denied
 echo 'Kafka hostname mismatch rejected with the same trusted CA'
 '''
@@ -132,10 +148,12 @@ def probe_records(identity: dict, user: str, topic: str, group: str, message: st
                   expected_records: int = 1) -> None:
     script = ""
     if publish:
-        script += f'''printf '%s\\n' {shlex.quote(message)} | timeout 30s /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server "$bootstrap" --producer.config /tmp/client.properties --sync --topic {shlex.quote(topic)} >/tmp/publish 2>&1
+        script += f'''phase=publish; diagnostic=/tmp/publish
+printf '%s\\n' {shlex.quote(message)} | timeout 30s /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server "$bootstrap" --producer.config /tmp/client.properties --sync --topic {shlex.quote(topic)} >/tmp/publish 2>&1
 if grep -Eq 'ERROR|Exception' /tmp/publish; then exit 1; fi
 '''
-    script += f'''timeout 35s /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server "$bootstrap" --consumer.config /tmp/client.properties --group {shlex.quote(group)} --from-beginning --max-messages {expected_records} --timeout-ms 20000 --topic {shlex.quote(topic)} >/tmp/received 2>/tmp/consumer
+    script += f'''phase=consume; diagnostic=/tmp/consumer
+timeout 35s /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server "$bootstrap" --consumer.config /tmp/client.properties --group {shlex.quote(group)} --from-beginning --max-messages {expected_records} --timeout-ms 20000 --topic {shlex.quote(topic)} >/tmp/received 2>/tmp/consumer
 grep -Fxq {shlex.quote(message)} /tmp/received
 echo 'Retained probe record verified'
 '''

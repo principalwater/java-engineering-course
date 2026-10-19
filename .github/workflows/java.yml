@@ -16,6 +16,7 @@ jobs:
       sprint07: ${{ steps.detect.outputs.sprint07 }}
       sprint08: ${{ steps.detect.outputs.sprint08 }}
       sprint09: ${{ steps.detect.outputs.sprint09 }}
+      sprint10: ${{ steps.detect.outputs.sprint10 }}
       exercises: ${{ steps.detect.outputs.exercises }}
       observability: ${{ steps.detect.outputs.observability }}
       kafka: ${{ steps.detect.outputs.kafka }}
@@ -68,6 +69,11 @@ jobs:
             echo "sprint09=true" >> "$GITHUB_OUTPUT"
           else
             echo "sprint09=false" >> "$GITHUB_OUTPUT"
+          fi
+          if test -f projects/sprint10-kafka/build.gradle; then
+            echo "sprint10=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sprint10=false" >> "$GITHUB_OUTPUT"
           fi
           if test -f exercises/sprint01/junit5/pom.xml; then
             echo "exercises=true" >> "$GITHUB_OUTPUT"
@@ -122,20 +128,7 @@ jobs:
       - name: Install verified Kubernetes tools
         run: |
           echo "KUBECONFIG=$RUNNER_TEMP/sprint10/kubeconfig" >> "$GITHUB_ENV"
-          mkdir -p "$RUNNER_TEMP/sprint10-tools/bin" "$RUNNER_TEMP/sprint10"
-          cd "$RUNNER_TEMP/sprint10-tools"
-          curl --fail --location --retry 3 -o kind https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64
-          curl --fail --location --retry 3 -o kind.sha256sum https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64.sha256sum
-          sed 's/kind-linux-amd64/kind/' kind.sha256sum | sha256sum --check
-          curl --fail --location --retry 3 -O https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz
-          curl --fail --location --retry 3 -O https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz.sha256sum
-          sha256sum --check helm-v4.3.1-linux-amd64.tar.gz.sha256sum
-          tar -xzf helm-v4.3.1-linux-amd64.tar.gz
-          curl --fail --location --retry 3 -o kubectl https://dl.k8s.io/release/v1.34.11/bin/linux/amd64/kubectl
-          curl --fail --location --retry 3 -o kubectl.sha256 https://dl.k8s.io/release/v1.34.11/bin/linux/amd64/kubectl.sha256
-          printf '%s  kubectl\n' "$(cat kubectl.sha256)" | sha256sum --check
-          install -m 0755 kind kubectl linux-amd64/helm bin/
-          echo "$RUNNER_TEMP/sprint10-tools/bin" >> "$GITHUB_PATH"
+          bash .github/scripts/setup-kubernetes.sh
       - name: Deploy separate Helm releases to an isolated kind cluster
         run: |
           docker network create --subnet 10.251.10.32/27 java-sprint10-kind
@@ -275,6 +268,14 @@ jobs:
         run: |
           tofu fmt -check -recursive infra
           python3 -m unittest discover -s infra/tests -v
+      - name: Validate the independent Kubernetes deployment root
+        env:
+          TF_DATA_DIR: ${{ runner.temp }}/bank-tofu-validation
+        run: |
+          python3 -m unittest discover -s infra/kubernetes/tests -p 'test_*.py'
+          tofu -chdir=infra/kubernetes init -backend=false -input=false
+          tofu -chdir=infra/kubernetes validate
+          tofu -chdir=infra/kubernetes test
       - name: Plan the isolated Docker exercise
         run: |
           {
@@ -989,3 +990,98 @@ jobs:
             projects/sprint09-bank/*/build/generated-test-sources/contracts/
           if-no-files-found: ignore
           retention-days: 14
+
+  sprint10:
+    needs: projects
+    if: needs.projects.outputs.sprint10 == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BANK_ALLOW_PLAINTEXT_TEST_SECRETS: 'true'
+      TESTCONTAINERS_RYUK_CONTAINER_IMAGE: ghcr.io/testcontainers/ryuk@sha256:dd3f023a6ed7015b3f95a49ccd65a2daf0c56e681422c12952b19a810dfa6298
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select isolated deployment paths
+        run: |
+          free -m
+          nproc
+          df -h "$RUNNER_TEMP"
+          {
+            echo "BANK_SECRETS_DIR=$RUNNER_TEMP/bank10-secrets"
+            echo "BANK_STATE=$RUNNER_TEMP/bank10-state"
+          } >> "$GITHUB_ENV"
+      - name: Set up Java 21 and Gradle cache
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: |
+            projects/sprint10-kafka/**/*.gradle
+            projects/sprint10-kafka/gradle/wrapper/gradle-wrapper.properties
+      - name: Set up Node 24.4 for the Gradle-owned Astro build
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24.4.0'
+          cache: npm
+          cache-dependency-path: projects/sprint10-kafka/front/ui/package-lock.json
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: '1.11.6'
+          tofu_wrapper: false
+      - name: Install verified Kubernetes tools and deployment parser
+        run: |
+          bash .github/scripts/setup-kubernetes.sh
+          python3 -m venv "$RUNNER_TEMP/bank10-python"
+          "$RUNNER_TEMP/bank10-python/bin/pip" install -r projects/sprint10-kafka/kubernetes/requirements.txt
+          echo "$RUNNER_TEMP/bank10-python/bin" >> "$GITHUB_PATH"
+      - name: Check all services and real Kafka producer-consumer contracts
+        working-directory: projects/sprint10-kafka
+        run: ./gradlew --no-daemon --console=plain check packageDeployment
+      - name: Verify private secret lifecycle TLS and Helm contracts
+        working-directory: projects/sprint10-kafka
+        run: |
+          python3 -m unittest discover -s scripts
+          python3 -m unittest discover -s kubernetes -p 'test_*.py'
+          python3 scripts/init-secrets.py
+          python3 scripts/init-tls.py
+      - name: Bootstrap the isolated Kubernetes identity and file secrets
+        working-directory: projects/sprint10-kafka
+        run: |
+          python3 kubernetes/prepare.py --output-dir "$BANK_STATE" --superset
+          python3 kubernetes/runtime.py --state-dir "$BANK_STATE" create --secrets-dir "$BANK_SECRETS_DIR"
+          python3 kubernetes/runtime.py --state-dir "$BANK_STATE" secrets --secrets-dir "$BANK_SECRETS_DIR"
+          python3 kubernetes/runtime.py --state-dir "$BANK_STATE" load-images
+      - name: Review and apply the isolated Helm deployment plan
+        run: |
+          python3 infra/kubernetes/deploy.py plan --project-dir "$PWD/projects/sprint10-kafka" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+          python3 infra/kubernetes/deploy.py apply --project-dir "$PWD/projects/sprint10-kafka" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+          python3 projects/sprint10-kafka/kubernetes/runtime.py --state-dir "$BANK_STATE" ready
+      - name: Verify Kafka TLS ACLs and persistent data across broker restart
+        run: |
+          python3 projects/sprint10-kafka/kubernetes/probe.py --state-dir "$BANK_STATE" security
+          python3 projects/sprint10-kafka/kubernetes/probe.py --state-dir "$BANK_STATE" persistence
+      - name: Verify real bank UI API money notification and projection recovery
+        run: python3 projects/sprint10-kafka/scripts/verify-runtime.py --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR" --analytics --faults
+      - name: Verify the repeated deployment plan
+        run: python3 infra/kubernetes/deploy.py noop --project-dir "$PWD/projects/sprint10-kafka" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+      - name: Upload executable artifacts and contract evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sprint10-java21
+          path: |
+            projects/sprint10-kafka/build/deployment/*.jar
+            projects/sprint10-kafka/*/build/libs/*-stubs.jar
+            projects/sprint10-kafka/*/build/test-results/
+            projects/sprint10-kafka/*/build/reports/tests/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Stop only owned Kubernetes workloads and preserve persistent data
+        if: always()
+        run: |
+          if test -f "$BANK_STATE/cluster.json"; then
+            python3 projects/sprint10-kafka/kubernetes/runtime.py --state-dir "$BANK_STATE" stop
+          fi

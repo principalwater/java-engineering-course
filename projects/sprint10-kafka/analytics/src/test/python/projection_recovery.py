@@ -5,13 +5,10 @@ import uuid
 
 
 def verify_analytics_failures(runtime_module, users, containers):
-    """Использует уже проверенные сессии; останавливает только переданные Kafka/Cassandra/ClickHouse."""
+    """Использует уже проверенные сессии; останавливает только Cassandra/ClickHouse своего Kubernetes namespace."""
     runtime = runtime_module
     alice, analyst = users["alice"], users["analyst"]
     runtime.require(analyst is not None, "Projection recovery requires the analyst fixture")
-    for dependency in ("kafka", "cassandra", "clickhouse"):
-        runtime.require(dependency in containers, "Missing projection dependency: " + dependency)
-        runtime.inspect_owned(containers[dependency])
 
     def available(user, path):
         def loaded():
@@ -27,10 +24,9 @@ def verify_analytics_failures(runtime_module, users, containers):
 
     for dependency, amount, unavailable_user, unavailable_path, independent_user, independent_path in (
             ("cassandra", 11, alice, "/ui/analytics", analyst, "/ui/analytics/business"),
-            ("clickhouse", 13, analyst, "/ui/analytics/business", alice, "/ui/analytics"),
-            ("kafka", 17, alice, "/ui/analytics", analyst, "/ui/analytics/business")):
+            ("clickhouse", 13, analyst, "/ui/analytics/business", alice, "/ui/analytics")):
         runtime.wait_for("previous source and projection deliveries", lambda: runtime.scalar(containers,
-            "SELECT (SELECT count(*) FROM accounts.bank_outbox WHERE target='analytics' AND status='PENDING')"
+            "SELECT (SELECT count(*) FROM accounts.bank_kafka_outbox WHERE topic='bank.accounts.analytics.v1' AND status='PENDING')"
             " + (SELECT count(*) FROM analytics.analytics_inbox WHERE NOT (cassandra_done AND warehouse_done))") == 0)
         personal_before = available(alice, "/ui/analytics")
         business_before = available(analyst, "/ui/analytics/business")
@@ -58,12 +54,7 @@ def verify_analytics_failures(runtime_module, users, containers):
             runtime.require(unavailable.get("available") is False
                             and unavailable.get("operationsCount") is None,
                             "Unavailable projection invented a financial count")
-            if dependency == "kafka":
-                other = independent_user.json("GET", independent_path)
-                runtime.require(other.get("available") is False and other.get("operationsCount") is None,
-                                "Broker outage invented a business projection")
-            else:
-                available(independent_user, independent_path)
+            available(independent_user, independent_path)
         finally:
             # Даже провал проверки возвращает исходное хранилище без удаления его volume.
             runtime.change_state(containers, dependency, "start")

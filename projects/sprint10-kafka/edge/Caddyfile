@@ -1,0 +1,34 @@
+{
+    admin off
+    auto_https off
+}
+
+https://bank.valgrind-home.localhost:8450 {
+    tls /run/secrets/tls_certificate.pem /run/secrets/tls_private_key.pem
+    request_body {
+        max_size 32KB
+    }
+    header Referrer-Policy no-referrer
+    reverse_proxy front:8080 {
+        header_up -Forwarded
+        # Wildcard-удаление применяется после set и удалило бы доверенный Proto.
+        header_up -X-Forwarded-Prefix
+        header_up X-Forwarded-Host bank.valgrind-home.localhost:8450
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-Port 8450
+    }
+}
+
+https://auth-bank.valgrind-home.localhost:8450 {
+    tls /run/secrets/tls_certificate.pem /run/secrets/tls_private_key.pem
+    request_body {
+        max_size 32KB
+    }
+    reverse_proxy authorization:8080 {
+        header_up -Forwarded
+        header_up -X-Forwarded-Prefix
+        header_up X-Forwarded-Host auth-bank.valgrind-home.localhost:8450
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-Port 8450
+    }
+}

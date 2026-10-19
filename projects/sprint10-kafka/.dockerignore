@@ -1,0 +1,7 @@
+**
+!build/
+!build/deployment/
+!build/deployment/*.jar
+!Dockerfile
+!config/
+!config/jvm-network.security

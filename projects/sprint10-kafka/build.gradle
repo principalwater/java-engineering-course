@@ -1,0 +1,64 @@
+plugins {
+    id 'base'
+    id 'org.springframework.boot' version '3.5.16' apply false
+    id 'org.springframework.cloud.contract' version '4.3.4' apply false
+    id 'com.diffplug.spotless' version '8.10.4' apply false
+}
+
+allprojects {
+    group = 'dev.principalwater.bank'
+    version = '1.0.0'
+    repositories { mavenCentral() }
+}
+
+subprojects {
+    apply plugin: 'java-library'
+    apply plugin: 'pmd'
+    apply plugin: 'com.diffplug.spotless'
+    spotless {
+        java {
+            target 'src/**/*.java'
+            forbidWildcardImports()
+            googleJavaFormat('1.36.1').aosp()
+        }
+    }
+    java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+    dependencies {
+        api platform('org.springframework.boot:spring-boot-dependencies:3.5.16')
+        api platform('org.springframework.cloud:spring-cloud-dependencies:2025.0.3')
+        testImplementation 'org.springframework.boot:spring-boot-starter-test'
+        testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    }
+    pmd {
+        toolVersion = '7.13.0'
+        ruleSets = []
+        ruleSetFiles = rootProject.files('config/pmd/common.xml')
+        consoleOutput = true
+    }
+    tasks.named('pmdMain') { ruleSetFiles = rootProject.files('config/pmd/common.xml', 'config/pmd/main.xml') }
+    tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8'; options.compilerArgs += ['-parameters'] }
+    tasks.withType(Test).configureEach {
+        useJUnitPlatform()
+        maxHeapSize = '384m'
+        maxParallelForks = 1
+        environment 'BANK_CONFIG_IMPORT', 'optional:classpath:bank-common.properties'
+        testLogging { events 'failed', 'skipped'; exceptionFormat 'short' }
+    }
+    tasks.withType(AbstractArchiveTask).configureEach { preserveFileTimestamps = false; reproducibleFileOrder = true }
+    plugins.withId('org.springframework.boot') {
+        springBoot { buildInfo { excludes = ['time'] } }
+        tasks.named('bootJar') { archiveFileName = "${project.name}.jar" }
+    }
+}
+
+tasks.named('check') { dependsOn subprojects.collect { "${it.path}:check" } }
+tasks.named('build') { dependsOn subprojects.collect { "${it.path}:build" } }
+tasks.register('packageDeployment', Sync) {
+    group = 'build'
+    description = 'Prepare executable service artifacts for Docker and OpenTofu'
+    ['accounts', 'cash', 'transfer', 'notifications', 'front', 'gateway', 'analytics'].each { service ->
+        dependsOn ":${service}:bootJar"
+        from project(":${service}").layout.buildDirectory.file("libs/${service}.jar")
+    }
+    into layout.buildDirectory.dir('deployment')
+}

@@ -1,0 +1,13 @@
+<clickhouse>
+    <max_server_memory_usage>536870912</max_server_memory_usage>
+    <logger><level>warning</level><console>1</console><log remove="remove"/><errorlog remove="remove"/></logger>
+    <storage_configuration>
+        <disks><cold><path>/var/lib/clickhouse-cold/</path></cold></disks>
+        <policies>
+            <bank_tiered>
+                <volumes><hot><disk>default</disk></hot><cold><disk>cold</disk></cold></volumes>
+                <move_factor>0.1</move_factor>
+            </bank_tiered>
+        </policies>
+    </storage_configuration>
+</clickhouse>

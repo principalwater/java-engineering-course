@@ -1025,7 +1025,7 @@ jobs:
         with:
           node-version: '24.4.0'
           cache: npm
-          cache-dependency-path: projects/sprint10-kafka/front/ui/package-lock.json
+          cache-dependency-path: projects/sprint10-kafka/services/front/ui/package-lock.json
       - name: Set up OpenTofu
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
         with:
@@ -1035,7 +1035,7 @@ jobs:
         run: |
           bash .github/scripts/setup-kubernetes.sh
           python3 -m venv "$RUNNER_TEMP/bank10-python"
-          "$RUNNER_TEMP/bank10-python/bin/pip" install -r projects/sprint10-kafka/kubernetes/requirements.txt
+          "$RUNNER_TEMP/bank10-python/bin/pip" install -r projects/sprint10-kafka/deployment/kubernetes/requirements.txt
           echo "$RUNNER_TEMP/bank10-python/bin" >> "$GITHUB_PATH"
       - name: Check all services and real Kafka producer-consumer contracts
         working-directory: projects/sprint10-kafka
@@ -1043,28 +1043,28 @@ jobs:
       - name: Verify private secret lifecycle TLS and Helm contracts
         working-directory: projects/sprint10-kafka
         run: |
-          python3 -m unittest discover -s scripts
-          python3 -m unittest discover -s kubernetes -p 'test_*.py'
-          python3 scripts/init-secrets.py
-          python3 scripts/init-tls.py
+          python3 -m unittest discover -s deployment/scripts
+          python3 -m unittest discover -s deployment/kubernetes -p 'test_*.py'
+          python3 deployment/scripts/init-secrets.py
+          python3 deployment/scripts/init-tls.py
       - name: Bootstrap the isolated Kubernetes identity and file secrets
         working-directory: projects/sprint10-kafka
         run: |
-          python3 kubernetes/prepare.py --output-dir "$BANK_STATE" --superset
-          python3 kubernetes/runtime.py --state-dir "$BANK_STATE" create --secrets-dir "$BANK_SECRETS_DIR"
-          python3 kubernetes/runtime.py --state-dir "$BANK_STATE" secrets --secrets-dir "$BANK_SECRETS_DIR"
-          python3 kubernetes/runtime.py --state-dir "$BANK_STATE" load-images
+          python3 deployment/kubernetes/prepare.py --output-dir "$BANK_STATE" --superset
+          python3 deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" create --secrets-dir "$BANK_SECRETS_DIR"
+          python3 deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" secrets --secrets-dir "$BANK_SECRETS_DIR"
+          python3 deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" load-images
       - name: Review and apply the isolated Helm deployment plan
         run: |
           python3 infra/kubernetes/deploy.py plan --project-dir "$PWD/projects/sprint10-kafka" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
           python3 infra/kubernetes/deploy.py apply --project-dir "$PWD/projects/sprint10-kafka" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
-          python3 projects/sprint10-kafka/kubernetes/runtime.py --state-dir "$BANK_STATE" ready
+          python3 projects/sprint10-kafka/deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" ready
       - name: Verify Kafka TLS ACLs and persistent data across broker restart
         run: |
-          python3 projects/sprint10-kafka/kubernetes/probe.py --state-dir "$BANK_STATE" security
-          python3 projects/sprint10-kafka/kubernetes/probe.py --state-dir "$BANK_STATE" persistence
+          python3 projects/sprint10-kafka/deployment/kubernetes/probe.py --state-dir "$BANK_STATE" security
+          python3 projects/sprint10-kafka/deployment/kubernetes/probe.py --state-dir "$BANK_STATE" persistence
       - name: Verify real bank UI API money notification and projection recovery
-        run: python3 projects/sprint10-kafka/scripts/verify-runtime.py --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR" --analytics --faults
+        run: python3 projects/sprint10-kafka/deployment/scripts/verify-runtime.py --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR" --analytics --faults
       - name: Verify the repeated deployment plan
         run: python3 infra/kubernetes/deploy.py noop --project-dir "$PWD/projects/sprint10-kafka" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
       - name: Upload executable artifacts and contract evidence
@@ -1074,14 +1074,17 @@ jobs:
           name: sprint10-java21
           path: |
             projects/sprint10-kafka/build/deployment/*.jar
-            projects/sprint10-kafka/*/build/libs/*-stubs.jar
-            projects/sprint10-kafka/*/build/test-results/
-            projects/sprint10-kafka/*/build/reports/tests/
+            projects/sprint10-kafka/services/*/build/libs/*-stubs.jar
+            projects/sprint10-kafka/libraries/*/build/libs/*-stubs.jar
+            projects/sprint10-kafka/services/*/build/test-results/
+            projects/sprint10-kafka/libraries/*/build/test-results/
+            projects/sprint10-kafka/services/*/build/reports/tests/
+            projects/sprint10-kafka/libraries/*/build/reports/tests/
           if-no-files-found: ignore
           retention-days: 14
       - name: Stop only owned Kubernetes workloads and preserve persistent data
         if: always()
         run: |
           if test -f "$BANK_STATE/cluster.json"; then
-            python3 projects/sprint10-kafka/kubernetes/runtime.py --state-dir "$BANK_STATE" stop
+            python3 projects/sprint10-kafka/deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" stop
           fi

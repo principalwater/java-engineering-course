@@ -45,8 +45,8 @@ variable "project_dir" {
   type        = string
   nullable    = false
   validation {
-    condition     = startswith(var.project_dir, "/") && fileexists("${var.project_dir}/charts/bank/Chart.yaml")
-    error_message = "Project directory must contain charts/bank/Chart.yaml."
+    condition     = startswith(var.project_dir, "/") && fileexists("${var.project_dir}/deployment/charts/bank/Chart.yaml")
+    error_message = "Project directory must contain deployment/charts/bank/Chart.yaml."
   }
 }
 

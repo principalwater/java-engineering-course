@@ -21,7 +21,7 @@ class BankChartTest(unittest.TestCase):
             destination = Path(cls.directory.name) / f"{profile}-{analytics}"
             prepare(destination, environment="dev", profile=profile, analytics=analytics,
                     superset=superset, external_port=8450)
-            rendered = subprocess.run(["helm", "template", "bank", str(cls.project / "charts/bank"),
+            rendered = subprocess.run(["helm", "template", "bank", str(cls.project / "deployment/charts/bank"),
                                        "--namespace", "bank10-dev", "-f", str(destination / "public-values.yaml")],
                                       capture_output=True, text=True, check=True)
             cls.models[(profile, analytics)] = list(yaml.safe_load_all(rendered.stdout))
@@ -137,7 +137,7 @@ class BankChartTest(unittest.TestCase):
                 values["assets"][config_map][asset] += "\n"
                 override = Path(self.directory.name) / "changed-asset.yaml"
                 override.write_text(yaml.safe_dump(values), encoding="utf-8")
-                rendered = subprocess.run(["helm", "template", "bank", str(self.project / "charts/bank"),
+                rendered = subprocess.run(["helm", "template", "bank", str(self.project / "deployment/charts/bank"),
                                            "--namespace", "bank10-dev", "-f", str(override)],
                                           capture_output=True, text=True, check=True)
                 actual = {(item["kind"], item["metadata"]["name"]): item["spec"]["template"]
@@ -146,11 +146,11 @@ class BankChartTest(unittest.TestCase):
                 self.assertEqual({key for key in baseline if baseline[key] != actual[key]}, expected)
 
     def test_foreign_namespace_fails_before_any_cluster_contact(self):
-        result = subprocess.run(["helm", "template", "bank", str(self.project / "charts/bank"), "--namespace", "default",
+        result = subprocess.run(["helm", "template", "bank", str(self.project / "deployment/charts/bank"), "--namespace", "default",
                                  "-f", str(Path(self.directory.name) / "single-False/public-values.yaml")], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("release namespace must equal", result.stderr)
-        extra_replica = subprocess.run(["helm", "template", "bank", str(self.project / "charts/bank"), "--namespace", "bank10-dev",
+        extra_replica = subprocess.run(["helm", "template", "bank", str(self.project / "deployment/charts/bank"), "--namespace", "bank10-dev",
                                        "-f", str(Path(self.directory.name) / "single-False/public-values.yaml"),
                                        "--set", "apps.accounts.replicas=2"], capture_output=True, text=True)
         self.assertNotEqual(extra_replica.returncode, 0)

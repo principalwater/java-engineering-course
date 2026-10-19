@@ -50,7 +50,7 @@ resource "helm_release" "strimzi" {
 resource "helm_release" "bank" {
   name            = "bank"
   namespace       = local.namespace
-  chart           = "${var.project_dir}/charts/bank"
+  chart           = "${var.project_dir}/deployment/charts/bank"
   timeout         = 1200
   wait            = true
   wait_for_jobs   = true

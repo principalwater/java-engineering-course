@@ -58,7 +58,7 @@ def resource_ready(identity: dict, kind: str, name: str, *, timeout: int = 300) 
 
 def job(identity: dict, user: str, body: str) -> None:
     name = f"bank10-probe-{uuid.uuid4().hex[:12]}"
-    chart = yaml.safe_load((project_dir() / "charts/bank/charts/kafka/values.yaml").read_text(encoding="utf-8"))
+    chart = yaml.safe_load((project_dir() / "deployment/charts/bank/charts/kafka/values.yaml").read_text(encoding="utf-8"))
     labels = {"app.kubernetes.io/part-of": "bank10", "bank10.io/role": "probe", "bank10.io/probe": name}
     manifest = {"apiVersion": "batch/v1", "kind": "Job", "metadata": {"name": name, "labels": labels},
                 "spec": {"backoffLimit": 0, "activeDeadlineSeconds": 150, "template": {

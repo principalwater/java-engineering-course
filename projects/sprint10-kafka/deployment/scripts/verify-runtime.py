@@ -670,8 +670,8 @@ def main():
     parser.add_argument("--faults", action="store_true")
     arguments = parser.parse_args()
     # Bootstrap receipt проверяет exact kind IDs и Kubernetes UID; default context не используется.
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "kubernetes"))
-    specification = importlib.util.spec_from_file_location("bank_kubernetes", Path(__file__).resolve().parents[1] / "kubernetes/runtime.py")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "deployment/kubernetes"))
+    specification = importlib.util.spec_from_file_location("bank_kubernetes", Path(__file__).resolve().parents[2] / "deployment/kubernetes/runtime.py")
     cluster = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(cluster)
     identity = cluster.owned_identity(arguments.state_dir)
@@ -684,7 +684,7 @@ def main():
         if arguments.faults:
             verify_recovery(users["alice"], users["bob"], identity)
             if arguments.analytics:
-                path = Path(__file__).resolve().parents[1] / "analytics/src/test/python/projection_recovery.py"
+                path = Path(__file__).resolve().parents[2] / "services/analytics/src/test/python/projection_recovery.py"
                 specification = importlib.util.spec_from_file_location("bank_projection_recovery", path)
                 recovery = importlib.util.module_from_spec(specification)
                 specification.loader.exec_module(recovery)

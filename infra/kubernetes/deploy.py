@@ -115,10 +115,10 @@ def main() -> None:
     parser.add_argument("--operator-only", action="store_true", help="Bootstrap CRDs/operator before bank images are available")
     args = parser.parse_args()
     project = args.project_dir.expanduser().resolve()
-    if not (project / "kubernetes/runtime.py").is_file():
+    if not (project / "deployment/kubernetes/runtime.py").is_file():
         raise ValueError("Source project does not contain the owned Kubernetes runtime")
-    sys.path.insert(0, str(project / "kubernetes"))
-    specification = importlib.util.spec_from_file_location("bank_kubernetes", project / "kubernetes/runtime.py")
+    sys.path.insert(0, str(project / "deployment/kubernetes"))
+    specification = importlib.util.spec_from_file_location("bank_kubernetes", project / "deployment/kubernetes/runtime.py")
     runtime = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(runtime)
     state_dir = runtime.require_external(args.state_dir, project.parents[1])

@@ -13,32 +13,32 @@ import yaml
 APPS = ("accounts", "cash", "transfer", "notifications", "gateway", "front", "analytics")
 PUBLIC_ASSETS = {
     "bank10-setup": {
-        "start-database.sh": "scripts/start-database.sh",
-        "init-config.sh": "discovery/init-config.sh",
+        "start-database.sh": "deployment/scripts/start-database.sh",
+        "init-config.sh": "deployment/discovery/init-config.sh",
     },
-    "bank10-database": {"init-database.sh": "database/init-database.sh"},
+    "bank10-database": {"init-database.sh": "deployment/database/init-database.sh"},
     "bank10-authorization": {
-        "start-authorization.sh": "authorization/start-authorization.sh",
-        "bank-realm.json": "authorization/bank-realm.json",
+        "start-authorization.sh": "deployment/authorization/start-authorization.sh",
+        "bank-realm.json": "deployment/authorization/bank-realm.json",
     },
-    "bank10-edge": {"Caddyfile": "edge/Caddyfile"},
+    "bank10-edge": {"Caddyfile": "deployment/edge/Caddyfile"},
 }
 ANALYTICS_ASSETS = {
     "bank10-analytics-setup": {
-        "start-cassandra.sh": "scripts/start-cassandra.sh",
-        "init-cassandra.sh": "scripts/init-cassandra.sh",
-        "start-clickhouse.sh": "scripts/start-clickhouse.sh",
-        "init-clickhouse.sh": "scripts/init-clickhouse.sh",
-        "clickhouse-users.xml": "database/clickhouse-users.xml",
-        "clickhouse-storage.xml": "database/clickhouse-storage.xml",
-        "init-clickhouse.sql": "database/init-clickhouse.sql",
-        "activity-marts.sql": "analytics/src/main/resources/clickhouse/activity-marts.sql",
+        "start-cassandra.sh": "deployment/scripts/start-cassandra.sh",
+        "init-cassandra.sh": "deployment/scripts/init-cassandra.sh",
+        "start-clickhouse.sh": "deployment/scripts/start-clickhouse.sh",
+        "init-clickhouse.sh": "deployment/scripts/init-clickhouse.sh",
+        "clickhouse-users.xml": "deployment/database/clickhouse-users.xml",
+        "clickhouse-storage.xml": "deployment/database/clickhouse-storage.xml",
+        "init-clickhouse.sql": "deployment/database/init-clickhouse.sql",
+        "activity-marts.sql": "services/analytics/src/main/resources/clickhouse/activity-marts.sql",
     },
 }
 
 
 def project_dir() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return Path(__file__).resolve().parents[2]
 
 
 def require_external(directory: Path, repository: Path) -> Path:
@@ -56,7 +56,7 @@ def require_external(directory: Path, repository: Path) -> Path:
 
 
 def secret_bindings(project: Path, analytics: bool, superset: bool) -> dict:
-    bindings = json.loads((project / "kubernetes/secret-bindings.json").read_text(encoding="utf-8"))
+    bindings = json.loads((project / "deployment/kubernetes/secret-bindings.json").read_text(encoding="utf-8"))
     selected = {"database", "authorization", "edge", *APPS[:-1]}
     if analytics:
         selected.update({"analytics", "cassandra", "clickhouse"})
@@ -74,7 +74,7 @@ def image_reference(project: Path, name: str) -> str:
         hashed.update(artifact.read_bytes() + (project / "Dockerfile").read_bytes()
                       + (project / "config/jvm-network.security").read_bytes())
     else:
-        context = project / ("bank-bi/superset" if name == "superset" else name)
+        context = project / "deployment" / name
         for path in sorted(context.rglob("*")):
             if path.is_file() and "__pycache__" not in path.parts:
                 hashed.update(str(path.relative_to(context)).encode() + b"\0" + path.read_bytes())
@@ -83,20 +83,23 @@ def image_reference(project: Path, name: str) -> str:
 
 def chart_digest(project: Path) -> str:
     hashed = hashlib.sha256()
-    for path in sorted((project / "charts").rglob("*")):
+    charts = project / "deployment/charts"
+    for path in sorted(charts.rglob("*")):
         if path.is_file():
-            hashed.update(str(path.relative_to(project)).encode() + b"\0" + path.read_bytes())
+            # A source-only directory move must not roll every application Pod.
+            logical_path = Path("charts") / path.relative_to(charts)
+            hashed.update(str(logical_path).encode() + b"\0" + path.read_bytes())
     return hashed.hexdigest()
 
 
 def source_digest(project: Path, analytics: bool, superset: bool = False) -> str:
     files = {project / relative for sources in (PUBLIC_ASSETS | (ANALYTICS_ASSETS if analytics else {})).values()
              for relative in sources.values()}
-    files.update(path for directory in ("charts", "kubernetes") for path in (project / directory).rglob("*")
+    files.update(path for directory in ("deployment/charts", "deployment/kubernetes") for path in (project / directory).rglob("*")
                  if path.is_file() and "__pycache__" not in path.parts)
-    files.update(project / name for name in ("Dockerfile", "config/jvm-network.security", "authorization/Dockerfile", "edge/Dockerfile"))
+    files.update(project / name for name in ("Dockerfile", "config/jvm-network.security", "deployment/authorization/Dockerfile", "deployment/edge/Dockerfile"))
     if superset:
-        files.update(path for path in (project / "bank-bi/superset").rglob("*") if path.is_file() and "__pycache__" not in path.parts)
+        files.update(path for path in (project / "deployment/superset").rglob("*") if path.is_file() and "__pycache__" not in path.parts)
     hashed = hashlib.sha256()
     for path in sorted(files):
         hashed.update(str(path.relative_to(project)).encode() + b"\0" + path.read_bytes())

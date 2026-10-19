@@ -77,7 +77,7 @@ def require_private_source(directory: Path) -> Path:
     if directory.is_relative_to(project_dir().parents[1]) or directory.stat().st_mode & 0o077:
         raise ValueError("Secret directory must be private and outside the repository")
     if sys.platform == "darwin":
-        specification = importlib.util.spec_from_file_location("bank_secret_disk", project_dir() / "scripts/secret-disk.py")
+        specification = importlib.util.spec_from_file_location("bank_secret_disk", project_dir() / "deployment/scripts/secret-disk.py")
         disk = importlib.util.module_from_spec(specification)
         specification.loader.exec_module(disk)
         image = disk.disk_path(directory)
@@ -312,7 +312,7 @@ def load_images(args: argparse.Namespace) -> None:
         if name in APPS or name == "bank-bi":
             command(["docker", "build", "--tag", image, "--build-arg", f"SERVICE={name}", str(project)], timeout=300)
         else:
-            context = project / ("bank-bi/superset" if name == "superset" else name)
+            context = project / "deployment" / name
             command(["docker", "build", "--tag", image, str(context)], timeout=300)
         require_host_disk_space()
         command(["kind", "load", "docker-image", "--name", identity["cluster"], image], timeout=300)

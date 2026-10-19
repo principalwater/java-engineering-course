@@ -59,6 +59,6 @@ def secret_directory(repository):
 
 
 if __name__ == "__main__":
-    repository = Path(__file__).resolve().parents[3]
+    repository = Path(__file__).resolve().parents[4]
     initialize(secret_directory(repository), repository)
     print("Local bank secrets are ready; existing values were preserved")

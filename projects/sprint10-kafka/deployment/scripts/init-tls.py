@@ -26,7 +26,7 @@ def openssl_binary():
 
 def initialize(directory):
     directory = Path(directory).expanduser()
-    if directory.is_symlink() or directory.resolve().is_relative_to(Path(__file__).resolve().parents[3]):
+    if directory.is_symlink() or directory.resolve().is_relative_to(Path(__file__).resolve().parents[4]):
         raise ValueError("TLS material must remain outside the repository")
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     directory.chmod(0o700)
@@ -89,6 +89,6 @@ if __name__ == "__main__":
     specification = importlib.util.spec_from_file_location("init_secrets", Path(__file__).with_name("init-secrets.py"))
     secrets_module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(secrets_module)
-    directory = secrets_module.secret_directory(Path(__file__).resolve().parents[3])
+    directory = secrets_module.secret_directory(Path(__file__).resolve().parents[4])
     initialize(directory)
     print("Local bank TLS certificate is ready; existing keys were preserved")

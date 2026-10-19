@@ -210,6 +210,10 @@ final class SupersetAssets {
         params.put("time_grain_sqla", "P1D");
         params.put("row_limit", 1000);
         params.put("show_legend", true);
+        // В новом стенде данные одного дня: без маркера линия из одной точки не видна.
+        if (timeSeries) {
+            params.put("markerEnabled", true);
+        }
         params.put("query_mode", "aggregate");
         params.put("x_axis", "date");
         params.put("seriesType", "line");

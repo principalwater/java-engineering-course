@@ -35,7 +35,8 @@ password="${password//\"/\\\"}"
     printf '%s\n' 'security.protocol=SASL_SSL' 'sasl.mechanism=SCRAM-SHA-512'
     printf 'sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="%s" password="%s";\n' USERNAME "$password"
     printf '%s\n' 'ssl.truststore.type=PEM' 'ssl.truststore.location=/run/ca/ca.crt' 'ssl.endpoint.identification.algorithm=https'
-    printf '%s\n' 'request.timeout.ms=2000' 'default.api.timeout.ms=10000' 'max.block.ms=3000' 'delivery.timeout.ms=5000' 'linger.ms=0' 'acks=all' 'enable.idempotence=true'
+    # Cold, CPU-limited CLI clients need TLS/SCRAM and metadata time, independently of application deadlines.
+    printf '%s\n' 'request.timeout.ms=5000' 'default.api.timeout.ms=15000' 'max.block.ms=15000' 'delivery.timeout.ms=15000' 'linger.ms=0' 'acks=all' 'enable.idempotence=true'
 } > /tmp/client.properties
 unset password
 bootstrap=bank-kafka-kafka-bootstrap:9093
@@ -123,7 +124,7 @@ echo 'Kafka TLS/SCRAM and foreign-write denial verified'
 '''
         if consumer_topic:
             script += f'''phase=forbidden-group; diagnostic=/tmp/group-denied
-timeout 20s /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server "$bootstrap" --consumer.config /tmp/client.properties --consumer-property enable.auto.commit=false --group bank10-forbidden-probe --max-messages 1 --timeout-ms 3000 --topic {shlex.quote(consumer_topic)} >/tmp/group-denied 2>&1 || true
+timeout 20s /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server "$bootstrap" --consumer.config /tmp/client.properties --consumer-property enable.auto.commit=false --group bank10-forbidden-probe --max-messages 1 --topic {shlex.quote(consumer_topic)} >/tmp/group-denied 2>&1 || true
 grep -q GroupAuthorizationException /tmp/group-denied
 echo 'Foreign consumer group denied on an authorized input topic'
 '''

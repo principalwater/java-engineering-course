@@ -161,6 +161,7 @@ class OutboxReplayLauncherTest extends PostgresTestBase {
                                 "-cp",
                                 "application.jar",
                                 OutboxReplayApplication.class.getName(),
+                                "--BANK_CONFIG_IMPORT=optional:classpath:bank-common.properties",
                                 "--spring.config.import=classpath:bank-common.properties,optional:configtree:"
                                         + secrets
                                         + "/",
@@ -170,7 +171,7 @@ class OutboxReplayLauncherTest extends PostgresTestBase {
                         .directory(image.toFile())
                         .redirectErrorStream(true)
                         .redirectOutput(image.resolve("replay.log").toFile());
-        builder.environment().remove("BANK_CONFIG_IMPORT");
+        builder.environment().put("BANK_CONFIG_IMPORT", "zookeeper:");
         Process replay = builder.start();
         try {
             assertThat(replay.waitFor(30, TimeUnit.SECONDS)).isTrue();

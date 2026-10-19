@@ -29,7 +29,7 @@ AS SELECT event_date AS date,
     countIf(event_type IN ('DEPOSIT','WITHDRAW','TRANSFER_OUT')) AS operations_count,
     uniqExact(owner_id) AS accounts_count
 FROM bank_analytics.events FINAL
-WHERE event_date >= toStartOfMonth(today('UTC')) AND event_date < addMonths(toStartOfMonth(today('UTC')), 1)
+WHERE event_date >= toStartOfMonth(toDate(now('UTC'))) AND event_date < addMonths(toStartOfMonth(toDate(now('UTC'))), 1)
     AND event_type IN ('DEPOSIT','WITHDRAW','TRANSFER_OUT')
 GROUP BY event_date;
 
@@ -37,7 +37,7 @@ CREATE OR REPLACE VIEW bank_analytics.engagement_daily
 DEFINER = bank_writer SQL SECURITY DEFINER
 AS SELECT event_date AS date, source, event_type, section, sum(events_count) AS events_count
 FROM bank_analytics.activity_snapshots FINAL
-WHERE event_date >= toStartOfMonth(today('UTC')) AND event_date < addMonths(toStartOfMonth(today('UTC')), 1)
+WHERE event_date >= toStartOfMonth(toDate(now('UTC'))) AND event_date < addMonths(toStartOfMonth(toDate(now('UTC'))), 1)
     AND event_type IN ('CABINET_VIEW','PROFILE_UPDATED','SCREEN_OPENED','FORM_OPENED')
 GROUP BY event_date, source, event_type, section;
 
@@ -47,6 +47,6 @@ AS SELECT event_date AS date,
     sumIf(events_count, event_type = 'NOTIFICATION_AVAILABLE') AS available_count,
     sumIf(events_count, event_type = 'NOTIFICATION_READ') AS read_count
 FROM bank_analytics.activity_snapshots FINAL
-WHERE event_date >= toStartOfMonth(today('UTC')) AND event_date < addMonths(toStartOfMonth(today('UTC')), 1)
+WHERE event_date >= toStartOfMonth(toDate(now('UTC'))) AND event_date < addMonths(toStartOfMonth(toDate(now('UTC'))), 1)
     AND event_type IN ('NOTIFICATION_AVAILABLE','NOTIFICATION_READ')
 GROUP BY event_date;

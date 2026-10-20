@@ -1,0 +1,22 @@
+{{- $claims := dict "database-data" $.Values.platform.postgresStorage "discovery-data" $.Values.platform.discoveryStorage "discovery-log" $.Values.platform.discoveryStorage }}
+{{- if .Values.global.analyticsEnabled }}
+{{- $_ := set $claims "cassandra-data" .Values.platform.cassandraStorage }}
+{{- $_ := set $claims "analytics-hot" .Values.platform.clickhouseHotStorage }}
+{{- $_ := set $claims "analytics-cold" .Values.platform.clickhouseColdStorage }}
+{{- end }}
+{{- range $name, $size := $claims }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "bank.labels" $ | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ $.Values.global.storageClass }}
+  resources:
+    requests: {storage: {{ $size }}}
+{{- end }}

@@ -1,0 +1,49 @@
+apply plugin: 'org.springframework.boot'
+apply plugin: 'org.springframework.cloud.contract'
+
+configurations {
+    accountsContractStubs {
+        canBeConsumed = false
+        canBeResolved = true
+    }
+}
+dependencies {
+    implementation project(':bank-service-client')
+    testImplementation project(':bank-test-support')
+    testImplementation 'org.springframework.cloud:spring-cloud-contract-stub-runner:4.3.4'
+    accountsContractStubs project(path: ':accounts', configuration: 'verifiedContractStubs')
+    testRuntimeOnly files(configurations.accountsContractStubs)
+}
+tasks.named('test') {
+    dependsOn ':accounts:contractTest'
+    dependsOn configurations.accountsContractStubs
+    inputs.files(configurations.accountsContractStubs).withPropertyName('verifiedAccountsStubs')
+}
+
+sourceSets.contractTest {
+    compileClasspath += sourceSets.test.output
+    runtimeClasspath += sourceSets.test.output
+}
+dependencies {
+    contractTestImplementation project(':bank-test-support')
+    contractTestImplementation 'org.springframework.cloud:spring-cloud-starter-contract-verifier:4.3.4'
+}
+contracts {
+    testFramework = 'JUNIT5'
+    baseClassForTests = 'dev.principalwater.bank.cash.contract.NotificationContractBase'
+    basePackageForTests = 'dev.principalwater.bank.cash.contract.generated'
+}
+tasks.named('compileContractTestJava') { dependsOn tasks.named('testClasses') }
+tasks.named('contractTest') { useJUnitPlatform() }
+tasks.named('check') { dependsOn tasks.named('contractTest') }
+configurations {
+    verifiedContractStubs { canBeConsumed = true; canBeResolved = false }
+}
+artifacts { verifiedContractStubs tasks.named('verifierStubsJar') }
+tasks.named('pmdContractTest') { exclude '**/generated/**' }
+
+tasks.named('test') {
+    dependsOn tasks.named('bootJar')
+    inputs.file(tasks.named('bootJar').flatMap { it.archiveFile }).withPropertyName('replayServiceImageJar')
+    systemProperty 'bank.replay.service-jar', tasks.named('bootJar').get().archiveFile.get().asFile.absolutePath
+}

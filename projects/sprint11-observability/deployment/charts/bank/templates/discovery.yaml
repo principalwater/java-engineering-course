@@ -1,0 +1,111 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: discovery
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  selector: {app: discovery, bank10.io/instance: {{ .Release.Name }}}
+  ports: [{name: client, port: 2181, targetPort: 2181}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: discovery
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  serviceName: discovery
+  replicas: 1
+  selector:
+    matchLabels: {app: discovery, bank10.io/instance: {{ .Release.Name }}}
+  template:
+    metadata:
+      labels: {app: discovery, bank10.io/instance: {{ .Release.Name }}, bank10.io/role: storage}
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector:
+        {{- toYaml .Values.global.nodeSelector | nindent 8 }}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        fsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: discovery
+          image: {{ .Values.platform.zookeeperImage | quote }}
+          env:
+            - {name: ZOO_STANDALONE_ENABLED, value: "true"}
+            - {name: ZOO_ADMINSERVER_ENABLED, value: "false"}
+            - {name: ZOO_4LW_COMMANDS_WHITELIST, value: "srvr,ruok"}
+            - {name: JVMFLAGS, value: "-Xms64m -Xmx128m -XX:ActiveProcessorCount=2"}
+          ports: [{name: client, containerPort: 2181}]
+          startupProbe:
+            exec: {command: [bash, -ec, '[[ "$(echo ruok | nc -w 2 127.0.0.1 2181)" == imok ]]']}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 60
+          readinessProbe:
+            exec: {command: [bash, -ec, '[[ "$(echo srvr | nc -w 2 127.0.0.1 2181)" == *"Mode: standalone"* ]]']}
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec: {command: [bash, -ec, '[[ "$(echo ruok | nc -w 2 127.0.0.1 2181)" == imok ]]']}
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+          securityContext:
+            {{- include "bank.containerSecurity" . | nindent 12 }}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: "1", memory: 256Mi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: datalog, mountPath: /datalog}
+            - {name: logs, mountPath: /logs}
+            - {name: tmp, mountPath: /tmp}
+            - {name: conf, mountPath: /conf}
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: discovery-data}}
+        - {name: datalog, persistentVolumeClaim: {claimName: discovery-log}}
+        - {name: logs, emptyDir: {medium: Memory, sizeLimit: 16Mi}}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 32Mi}}
+        - {name: conf, emptyDir: {medium: Memory, sizeLimit: 1Mi}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: config-seed-{{ index .Values.assets "bank10-setup" "init-config.sh" | sha256sum | trunc 10 }}
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels: {app: config-seed, bank10.io/instance: {{ .Release.Name }}, bank10.io/role: initializer}
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: config-seed
+          image: {{ .Values.platform.zookeeperImage | quote }}
+          command: [sh, /setup/init-config.sh]
+          env: [{name: CLIENT_JVMFLAGS, value: "-Xms32m -Xmx64m -XX:ActiveProcessorCount=1"}]
+          securityContext:
+            {{- include "bank.containerSecurity" . | nindent 12 }}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 128Mi}
+          volumeMounts:
+            - {name: setup, mountPath: /setup, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: setup, configMap: {name: bank10-setup}}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 16Mi}}

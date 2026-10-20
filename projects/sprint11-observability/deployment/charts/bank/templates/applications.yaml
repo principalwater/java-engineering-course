@@ -1,0 +1,181 @@
+{{- range $name, $app := .Values.apps }}
+{{- if or (not $app.optional) $.Values.global.analyticsEnabled }}
+{{- $web := ne (toString $app.web) "false" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-client
+  labels:
+    {{- include "bank.labels" $ | nindent 4 }}
+data:
+  SPRING_APPLICATION_NAME: {{ $name | quote }}
+  SPRING_CLOUD_ZOOKEEPER_CONNECT_STRING: discovery:2181
+  SPRING_CLOUD_ZOOKEEPER_CONFIG_WATCH_ENABLED: "false"
+  SPRING_CLOUD_ZOOKEEPER_DISCOVERY_INSTANCE_HOST: {{ $name | quote }}
+  SPRING_CLOUD_ZOOKEEPER_DISCOVERY_INSTANCE_PORT: "8080"
+  BANK_SECURITY_ISSUER: {{ include "bank.issuer" $ | quote }}
+  BANK_SECURITY_JWK_SET_URI: http://authorization:8080/realms/bank/protocol/openid-connect/certs
+  {{- if $app.audience }}
+  BANK_SECURITY_AUDIENCE: {{ $app.audience | quote }}
+  {{- end }}
+  {{- if $app.jdbc }}
+  SPRING_DATASOURCE_URL: {{ printf "jdbc:postgresql://database:5432/bank?currentSchema=%s&connectTimeout=5&socketTimeout=15" $name | quote }}
+  SPRING_DATASOURCE_USERNAME: {{ $name | quote }}
+  {{- end }}
+  {{- if not $web }}
+  SPRING_MAIN_WEB_APPLICATION_TYPE: none
+  SPRING_CLOUD_ZOOKEEPER_DISCOVERY_ENABLED: "false"
+  BANK_PROBES_ENABLED: "true"
+  {{- else }}
+  SERVER_PORT: "8080"
+  {{- end }}
+  {{- if $app.kafka }}
+  SPRING_KAFKA_BOOTSTRAP_SERVERS: {{ printf "%s-kafka-bootstrap:9093" $.Values.global.kafkaCluster | quote }}
+  BANK_KAFKA_BOOTSTRAP_SERVERS: {{ printf "%s-kafka-bootstrap:9093" $.Values.global.kafkaCluster | quote }}
+  BANK_KAFKA_USER: {{ printf "%s-service" $name | quote }}
+  SPRING_KAFKA_SECURITY_PROTOCOL: SASL_SSL
+  SPRING_KAFKA_PROPERTIES_SASL_MECHANISM: SCRAM-SHA-512
+  SPRING_KAFKA_SSL_TRUSTSTORETYPE: PEM
+  SPRING_KAFKA_SSL_TRUSTSTORELOCATION: file:/run/kafka/ca.crt
+  SPRING_KAFKA_PROPERTIES_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM: https
+  {{- end }}
+  {{- if $app.oauthScope }}
+  SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_SERVICE_TOKEN_URI: http://authorization:8080/realms/bank/protocol/openid-connect/token
+  SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_SERVICE_PROVIDER: service
+  SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_SERVICE_AUTHORIZATION_GRANT_TYPE: client_credentials
+  SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_SERVICE_CLIENT_ID: {{ printf "%s-service" $name | quote }}
+  SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_SERVICE_SCOPE: {{ $app.oauthScope | quote }}
+  {{- end }}
+  {{- if eq $name "gateway" }}
+  SPRING_THREADS_VIRTUAL_ENABLED: "false"
+  {{- end }}
+  {{- if or (eq $name "accounts") (eq $name "front") }}
+  BANK_ANALYTICS_ENABLED: {{ $.Values.global.analyticsEnabled | quote }}
+  {{- end }}
+  {{- if eq $name "front" }}
+  SERVER_FORWARD_HEADERS_STRATEGY: framework
+  SERVER_SERVLET_SESSION_COOKIE_SECURE: "true"
+  SERVER_SERVLET_SESSION_COOKIE_NAME: __Host-bank-session
+  SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_BANK_ISSUER_URI: {{ include "bank.issuer" $ | quote }}
+  SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_BANK_TOKEN_URI: http://authorization:8080/realms/bank/protocol/openid-connect/token
+  SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_BANK_JWK_SET_URI: http://authorization:8080/realms/bank/protocol/openid-connect/certs
+  SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_BANK_USER_INFO_URI: http://authorization:8080/realms/bank/protocol/openid-connect/userinfo
+  SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_BANK_PROVIDER: bank
+  SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_BANK_CLIENT_ID: bank-front
+  SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_BANK_AUTHORIZATION_GRANT_TYPE: authorization_code
+  SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_BANK_SCOPE: openid,profile,accounts.read,accounts.write,cash.write,transfer.write,analytics.read,analytics.events
+  {{- end }}
+  {{- if eq $name "analytics" }}
+  BANK_CASSANDRA_HOST: cassandra
+  BANK_CLICKHOUSE_URL: http://clickhouse:8123
+  {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "bank.labels" $ | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: {{ $name }}, bank10.io/instance: {{ $.Release.Name }}}
+  template:
+    metadata:
+      labels: {app: {{ $name }}, bank10.io/instance: {{ $.Release.Name }}, bank10.io/role: application}
+      annotations:
+        checksum/shared-config: {{ index $.Values.assets "bank10-setup" "init-config.sh" | sha256sum }}
+        checksum/client: {{ toJson $app | sha256sum }}
+        checksum/options: {{ toJson $.Values.global | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      nodeSelector:
+        {{- toYaml $.Values.global.nodeSelector | nindent 8 }}
+      securityContext:
+        {{- include "bank.podSecurity" $ | nindent 8 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ $app.image | quote }}
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef: {name: {{ $name }}-client}
+          {{- if $web }}
+          ports: [{name: http, containerPort: 8080}]
+          startupProbe:
+            httpGet: {path: /actuator/health/liveness, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /actuator/health/readiness, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet: {path: /actuator/health/liveness, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
+          {{- else }}
+          startupProbe:
+            exec: {command: [test, -f, /tmp/bank-probes/live]}
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            exec: {command: [test, -f, /tmp/bank-probes/ready]}
+            periodSeconds: 5
+            timeoutSeconds: 2
+          livenessProbe:
+            exec: {command: [test, -f, /tmp/bank-probes/live]}
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
+          {{- end }}
+          securityContext:
+            {{- include "bank.containerSecurity" $ | nindent 12 }}
+          resources:
+            {{- toYaml $.Values.javaResources | nindent 12 }}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            {{- if $app.kafka }}
+            - {name: kafka-ca, mountPath: /run/kafka, readOnly: true}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {medium: Memory, sizeLimit: 64Mi}
+        - name: secrets
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: {{ printf "%s-%s" $.Values.global.secretPrefix $name }}
+              {{- if $app.kafka }}
+              - secret:
+                  name: {{ printf "%s-service" $name }}
+                  items: [{key: password, path: bank.kafka.password}]
+              {{- end }}
+        {{- if $app.kafka }}
+        - name: kafka-ca
+          secret:
+            secretName: {{ printf "%s-cluster-ca-cert" $.Values.global.kafkaCluster }}
+            items: [{key: ca.crt, path: ca.crt}]
+            defaultMode: 0444
+        {{- end }}
+{{- if $web }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "bank.labels" $ | nindent 4 }}
+spec:
+  selector: {app: {{ $name }}, bank10.io/instance: {{ $.Release.Name }}}
+  ports: [{name: http, port: 8080, targetPort: http}]
+{{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,86 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: database
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  selector: {app: database, bank10.io/instance: {{ .Release.Name }}}
+  ports: [{name: postgres, port: 5432, targetPort: 5432}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: database
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  serviceName: database
+  replicas: 1
+  selector:
+    matchLabels: {app: database, bank10.io/instance: {{ .Release.Name }}}
+  template:
+    metadata:
+      labels: {app: database, bank10.io/instance: {{ .Release.Name }}, bank10.io/role: storage}
+      annotations: {checksum/public-config: {{ dict "setup" (pick (index .Values.assets "bank10-setup") "start-database.sh") "database" (index .Values.assets "bank10-database") | toJson | sha256sum }}}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      nodeSelector:
+        {{- toYaml .Values.global.nodeSelector | nindent 8 }}
+      securityContext:
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: database
+          image: {{ .Values.platform.postgresImage | quote }}
+          command: [sh, /setup/start-database.sh]
+          args: [postgres, -c, max_connections=100, -c, shared_buffers=64MB]
+          env:
+            - {name: POSTGRES_DB, value: bank}
+            - {name: POSTGRES_USER, value: bank_owner}
+            - {name: POSTGRES_PASSWORD_FILE, value: /run/secrets/db_admin_password}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+          ports: [{name: postgres, containerPort: 5432}]
+          startupProbe:
+            exec: {command: [pg_isready, -h, 127.0.0.1, -U, bank_owner, -d, bank]}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 60
+          readinessProbe:
+            exec: {command: [pg_isready, -h, 127.0.0.1, -U, bank_owner, -d, bank]}
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec: {command: [pg_isready, -h, 127.0.0.1, -U, bank_owner, -d, bank]}
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests: {cpu: 100m, memory: 192Mi}
+            limits: {cpu: "1", memory: 384Mi}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: setup, mountPath: /setup, readOnly: true}
+            - {name: db-init, mountPath: /docker-entrypoint-initdb.d, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+            - {name: sockets, mountPath: /var/run/postgresql}
+            - {name: private, mountPath: /run/bank-secrets}
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: database-data}}
+        - {name: secrets, secret: {secretName: {{ printf "%s-database" .Values.global.secretPrefix }}, defaultMode: 0400}}
+        - name: setup
+          configMap:
+            name: bank10-setup
+            items: [{key: start-database.sh, path: start-database.sh}]
+        - name: db-init
+          configMap:
+            name: bank10-database
+            defaultMode: 0555
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 32Mi}}
+        - {name: sockets, emptyDir: {medium: Memory, sizeLimit: 8Mi}}
+        - {name: private, emptyDir: {medium: Memory, sizeLimit: 1Mi}}

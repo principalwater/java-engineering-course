@@ -1,0 +1,70 @@
+global:
+  environment: dev
+  externalPort: 8450
+  storageClass: standard
+  secretPrefix: bank10
+  kafkaCluster: bank-kafka
+  analyticsEnabled: false
+  chartRevision: ""
+  nodeSelector:
+    bank10.io/worker: "true"
+edge:
+  serviceType: NodePort
+  nodePort: 30450
+  image: bank10-edge:local
+authorization:
+  image: bank10-authorization:local
+apps:
+  accounts:
+    image: bank10-accounts:local
+    jdbc: true
+    kafka: true
+    audience: accounts-api
+  cash:
+    image: bank10-cash:local
+    jdbc: true
+    kafka: true
+    audience: cash-api
+    oauthScope: accounts.cash
+  transfer:
+    image: bank10-transfer:local
+    jdbc: true
+    kafka: true
+    audience: transfer-api
+    oauthScope: accounts.transfer
+  notifications:
+    image: bank10-notifications:local
+    jdbc: true
+    kafka: true
+    web: false
+  gateway:
+    image: bank10-gateway:local
+    audience: bank-api
+  front:
+    image: bank10-front:local
+  analytics:
+    image: bank10-analytics:local
+    jdbc: true
+    kafka: true
+    audience: analytics-api
+    oauthScope: accounts.resolve
+    optional: true
+javaResources:
+  requests: {cpu: 100m, memory: 256Mi}
+  limits: {cpu: "1", memory: 512Mi}
+platform:
+  postgresImage: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+  zookeeperImage: zookeeper:3.9.4@sha256:dfa9ba46d14bd52bcb3c1dac3ba91f179cf4cebf7ee576e1c2df09c68fc1d30d
+  cassandraImage: cassandra:5.0.9@sha256:8870ec4d9608abe9160a7d09b51a0f0c13c6a95ea0610266ea58eb7d30a144de
+  clickhouseImage: clickhouse/clickhouse-server:26.8-alpine@sha256:2ad322429c7965bde31e3a6389daa2df62db7e1898b1b91d50eb3a7bad716f1f
+  postgresStorage: 2Gi
+  discoveryStorage: 1Gi
+  cassandraStorage: 2Gi
+  clickhouseHotStorage: 2Gi
+  clickhouseColdStorage: 2Gi
+# Public source assets are supplied by kubernetes/prepare.py; never secret contents.
+assets: {}
+kafka:
+  profile: single
+superset:
+  enabled: false

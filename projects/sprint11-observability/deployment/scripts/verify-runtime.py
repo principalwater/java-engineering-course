@@ -336,10 +336,10 @@ def discovery(containers, analytics):
         return False
     if not all(len(row) == 1 and row[0] for row in rows[1:len(names) + 1]):
         return False
-    require("sprint10-v1" in output.splitlines(), "Distributed configuration revision is missing")
+    require("sprint11-v1" in output.splitlines(), "Distributed configuration revision is missing")
     for service in ("accounts", "cash", "transfer", *(("analytics",) if analytics else ())):
         logs = kube(containers, "logs", "deployment/" + service, "--tail=1000", timeout=15)
-        if "Shared bank configuration revision: sprint10-v1" not in logs:
+        if "Shared bank configuration revision: sprint11-v1" not in logs:
             return False
     print("PASS discovery: " + str(len(names)) + " single instances; Java shared configuration revision")
     return True
@@ -667,7 +667,7 @@ def main():
     parser = argparse.ArgumentParser(description="Verify the running Kubernetes bank over real HTTPS/OIDC")
     parser.add_argument("--state-dir", type=Path, required=True)
     parser.add_argument("--secrets-dir", type=Path, default=Path(os.environ.get(
-        "BANK_SECRETS_DIR", Path.home() / ".config/java-engineering-course/sprint10")))
+        "BANK_SECRETS_DIR", Path.home() / ".config/java-engineering-course/sprint11")))
     parser.add_argument("--analytics", action="store_true")
     parser.add_argument("--faults", action="store_true")
     arguments = parser.parse_args()

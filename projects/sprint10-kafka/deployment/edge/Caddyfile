@@ -1,0 +1,66 @@
+{
+    admin off
+    auto_https off
+    # В kind опубликован только TCP: не рекламируем недоступный клиенту QUIC/UDP.
+    servers {
+        protocols h1 h2
+    }
+}
+
+https://bank.valgrind-home.localhost:8450 {
+    tls /run/secrets/tls_certificate.pem /run/secrets/tls_private_key.pem
+    header Alt-Svc clear
+    request_body {
+        max_size 32KB
+    }
+    header Referrer-Policy no-referrer
+    @management path /actuator /actuator/*
+    respond @management 404
+    reverse_proxy front:8080 {
+        header_up -Forwarded
+        # Wildcard-удаление применяется после set и удалило бы доверенный Proto.
+        header_up -X-Forwarded-Prefix
+        header_up X-Forwarded-Host bank.valgrind-home.localhost:8450
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-Port 8450
+    }
+}
+
+# Только внутри Pod/кластера: без зависимости от Front, IdP и TLS SNI в kubelet.
+http://:8081 {
+    respond /healthz 200
+}
+
+https://auth-bank.valgrind-home.localhost:8450 {
+    tls /run/secrets/tls_certificate.pem /run/secrets/tls_private_key.pem
+    header Alt-Svc clear
+    request_body {
+        max_size 32KB
+    }
+    reverse_proxy authorization:8080 {
+        header_up -Forwarded
+        header_up -X-Forwarded-Prefix
+        header_up X-Forwarded-Host auth-bank.valgrind-home.localhost:8450
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-Port 8450
+    }
+}
+
+https://insights.valgrind-home.localhost:8450 {
+    tls /run/secrets/tls_certificate.pem /run/secrets/tls_private_key.pem
+    header Alt-Svc clear
+    request_body {
+        max_size 2MB
+    }
+    header Referrer-Policy no-referrer
+    reverse_proxy https://superset:8088 {
+        transport http {
+            tls_trusted_ca_certs /run/secrets/tls_ca.pem
+        }
+        header_up -Forwarded
+        header_up -X-Forwarded-Prefix
+        header_up X-Forwarded-Host insights.valgrind-home.localhost:8450
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-Port 8450
+    }
+}

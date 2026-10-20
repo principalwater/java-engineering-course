@@ -51,6 +51,10 @@ class LocalTlsTest(unittest.TestCase):
             # load_cert_chain проверяет также соответствие приватного ключа сертификату.
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.load_cert_chain(directory / "tls_certificate.pem", directory / "tls_private_key.pem")
+            for host in store_tls.HOSTS:
+                subprocess.run([store_tls.openssl_binary(), "verify", "-x509_strict", "-CAfile", str(directory / "tls_ca.pem"),
+                                "-verify_hostname", host, str(directory / "tls_certificate.pem")],
+                               check=True, capture_output=True)
             rejected = subprocess.run(["openssl", "verify", "-CAfile", str(directory / "tls_ca.pem"),
                                        "-verify_hostname", "foreign.example.test", str(directory / "tls_certificate.pem")],
                                       capture_output=True)

@@ -1,0 +1,67 @@
+<clickhouse>
+    <profiles>
+        <bank_writer>
+            <allow_ddl>0</allow_ddl>
+            <max_execution_time>5</max_execution_time>
+            <max_memory_usage>268435456</max_memory_usage>
+            <constraints><allow_ddl><const/></allow_ddl><max_execution_time><max>5</max></max_execution_time><max_memory_usage><max>268435456</max></max_memory_usage></constraints>
+        </bank_writer>
+        <bank_reader>
+            <readonly>1</readonly>
+            <max_execution_time>5</max_execution_time>
+            <max_memory_usage>268435456</max_memory_usage>
+            <max_result_rows>1000</max_result_rows>
+            <result_overflow_mode>throw</result_overflow_mode>
+            <constraints><readonly><const/></readonly><max_execution_time><const/></max_execution_time><max_memory_usage><const/></max_memory_usage><max_result_rows><const/></max_result_rows><result_overflow_mode><const/></result_overflow_mode></constraints>
+        </bank_reader>
+        <bank_bi>
+            <!-- readonly=2 разрешает драйверу форматные settings, но не изменения данных. -->
+            <readonly>2</readonly><allow_ddl>0</allow_ddl>
+            <max_execution_time>5</max_execution_time><max_memory_usage>67108864</max_memory_usage>
+            <!-- Driver bootstrap читает около 1800 system.settings; лимит графиков остаётся 1000. -->
+            <max_result_rows>4096</max_result_rows><result_overflow_mode>throw</result_overflow_mode>
+            <max_rows_to_read>100000</max_rows_to_read><read_overflow_mode>throw</read_overflow_mode>
+            <max_threads>2</max_threads>
+            <constraints>
+                <readonly><const/></readonly><allow_ddl><const/></allow_ddl>
+                <max_execution_time><min>1</min><max>5</max></max_execution_time>
+                <!-- Ноль означает unlimited: одного верхнего ограничения недостаточно. -->
+                <max_memory_usage><min>1</min><max>67108864</max></max_memory_usage>
+                <max_result_rows><min>1</min><max>4096</max></max_result_rows>
+                <result_overflow_mode><const/></result_overflow_mode>
+                <max_rows_to_read><min>1</min><max>100000</max></max_rows_to_read>
+                <read_overflow_mode><const/></read_overflow_mode><max_threads><min>1</min><max>2</max></max_threads>
+            </constraints>
+        </bank_bi>
+    </profiles>
+    <users>
+        <default remove="remove"/>
+        <bank_admin>
+            <password_sha256_hex>__admin_password_hash__</password_sha256_hex>
+            <networks><ip>::/0</ip></networks>
+            <profile>default</profile><quota>default</quota><access_management>1</access_management>
+        </bank_admin>
+        <bank_writer>
+            <password_sha256_hex>__writer_password_hash__</password_sha256_hex>
+            <networks><ip>::/0</ip></networks>
+            <profile>bank_writer</profile><quota>default</quota>
+            <grants><query>GRANT SELECT, INSERT ON bank_analytics.*</query></grants>
+        </bank_writer>
+        <bank_reader>
+            <password_sha256_hex>__reader_password_hash__</password_sha256_hex>
+            <networks><ip>::/0</ip></networks>
+            <profile>bank_reader</profile><quota>default</quota>
+            <grants><query>GRANT SELECT ON bank_analytics.*</query></grants>
+        </bank_reader>
+        <bank_bi>
+            <password_sha256_hex>__bi_password_hash__</password_sha256_hex>
+            <networks><ip>::/0</ip></networks>
+            <profile>bank_bi</profile><quota>default</quota>
+            <grants>
+                <query>GRANT SELECT ON bank_analytics.financial_daily</query>
+                <query>GRANT SELECT ON bank_analytics.engagement_daily</query>
+                <query>GRANT SELECT ON bank_analytics.notification_daily</query>
+            </grants>
+        </bank_bi>
+    </users>
+</clickhouse>

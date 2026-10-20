@@ -1,0 +1,13 @@
+dependencies {
+    api project(':bank-contracts')
+    api 'org.springframework.boot:spring-boot-starter-test'
+    api 'org.springframework.security:spring-security-test'
+    api 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    api 'org.springframework:spring-jdbc'
+    api 'org.flywaydb:flyway-core'
+    api 'org.testcontainers:postgresql'
+    api 'org.testcontainers:kafka'
+    api 'org.springframework.kafka:spring-kafka'
+    api 'org.springframework.cloud:spring-cloud-contract-verifier:4.3.4'
+    api 'org.testcontainers:junit-jupiter'
+}

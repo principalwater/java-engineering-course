@@ -26,7 +26,7 @@ tofu -chdir=infra/kubernetes validate
 tofu -chdir=infra/kubernetes test
 ```
 
-Mock-тесты root автономны: минимальный fixture chart не требует наличия учебного проекта в отдельном инфраструктурном PR. Рендер и runtime-проверки проекта выполняются после появления `projects/sprint10-kafka`; тесты chart запускаются через `/tmp/bank10-infra-venv/bin/python -m unittest discover -s projects/sprint10-kafka/kubernetes -p 'test_*.py'`.
+Mock-тесты root автономны: минимальный fixture chart не требует наличия учебного проекта в отдельном инфраструктурном PR. Рендер и runtime-проверки проекта выполняются после появления `projects/sprint10-kafka`; тесты chart запускаются через `/tmp/bank10-infra-venv/bin/python -m unittest discover -s projects/sprint10-kafka/deployment/kubernetes -p 'test_*.py'`.
 
 ## Локальный запуск
 
@@ -37,19 +37,19 @@ STATE="$HOME/Documents/study/java-runtime/sprint10-bank-single"
 SECRETS="$HOME/.config/java-engineering-course/sprint10"
 PROJECT="$PWD/projects/sprint10-kafka"
 PY=/tmp/bank10-infra-venv/bin/python
-$PY "$PROJECT/kubernetes/prepare.py" --output-dir "$STATE" --profile single --superset
-$PY "$PROJECT/kubernetes/runtime.py" --state-dir "$STATE" create --profile single --secrets-dir "$SECRETS"
-$PY "$PROJECT/kubernetes/runtime.py" --state-dir "$STATE" secrets --secrets-dir "$SECRETS"
-$PY "$PROJECT/kubernetes/runtime.py" --state-dir "$STATE" load-images
+$PY "$PROJECT/deployment/kubernetes/prepare.py" --output-dir "$STATE" --profile single --superset
+$PY "$PROJECT/deployment/kubernetes/runtime.py" --state-dir "$STATE" create --profile single --secrets-dir "$SECRETS"
+$PY "$PROJECT/deployment/kubernetes/runtime.py" --state-dir "$STATE" secrets --secrets-dir "$SECRETS"
+$PY "$PROJECT/deployment/kubernetes/runtime.py" --state-dir "$STATE" load-images
 $PY infra/kubernetes/deploy.py plan --project-dir "$PROJECT" --state-dir "$STATE" --secrets-dir "$SECRETS"
 # Проверить JSON/receipt: apply использует именно сохранённый проверенный бинарный plan.
 $PY infra/kubernetes/deploy.py apply --project-dir "$PROJECT" --state-dir "$STATE" --secrets-dir "$SECRETS"
-$PY "$PROJECT/kubernetes/runtime.py" --state-dir "$STATE" ready
-$PY "$PROJECT/kubernetes/probe.py" --state-dir "$STATE" security
-$PY "$PROJECT/kubernetes/probe.py" --state-dir "$STATE" persistence
+$PY "$PROJECT/deployment/kubernetes/runtime.py" --state-dir "$STATE" ready
+$PY "$PROJECT/deployment/kubernetes/probe.py" --state-dir "$STATE" security
+$PY "$PROJECT/deployment/kubernetes/probe.py" --state-dir "$STATE" persistence
 $PY infra/kubernetes/deploy.py noop --project-dir "$PROJECT" --state-dir "$STATE" --secrets-dir "$SECRETS"
-$PY "$PROJECT/kubernetes/runtime.py" --state-dir "$STATE" stop
-BANK_SECRETS_DIR="$SECRETS" $PY "$PROJECT/scripts/init-secrets.py" --lock
+$PY "$PROJECT/deployment/kubernetes/runtime.py" --state-dir "$STATE" stop
+BANK_SECRETS_DIR="$SECRETS" $PY "$PROJECT/deployment/scripts/init-secrets.py" --lock
 ```
 
 HA core: отдельный `STATE=.../sprint10-bank-test-ha`, `prepare --environment test --profile ha` без optional flags и `create --environment test --profile ha`. Перед resume разблокировать тот же AES source, затем `runtime.py --state-dir ... resume`. Helpers проверяют cluster UID, exact node/network identities и namespace ownership, сохраняют completed Jobs и восстанавливают исходный cordon state без изменения replica counts. Старт и штатная остановка чужих kind-кластеров не выполняются.

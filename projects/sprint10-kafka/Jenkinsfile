@@ -1,0 +1,87 @@
+pipeline {
+    agent { label 'bank-kubernetes' }
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        timeout(time: 75, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+    environment {
+        BANK_ALLOW_PLAINTEXT_TEST_SECRETS = 'true'
+        TESTCONTAINERS_RYUK_CONTAINER_IMAGE = 'ghcr.io/testcontainers/ryuk@sha256:dd3f023a6ed7015b3f95a49ccd65a2daf0c56e681422c12952b19a810dfa6298'
+    }
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    env.BANK_STATE = "${pwd(tmp: true)}/bank10-state"
+                    env.BANK_SECRETS_DIR = "${pwd(tmp: true)}/bank10-secrets"
+                    env.BANK_PYTHON = "${pwd(tmp: true)}/bank10-python/bin/python"
+                }
+            }
+        }
+        stage('Build and test') {
+            steps {
+                dir('projects/sprint10-kafka') {
+                    sh './gradlew --no-daemon --console=plain check packageDeployment'
+                }
+            }
+        }
+        stage('Validate deployment') {
+            steps {
+                sh 'python3 -m venv "$BANK_STATE/../bank10-python"'
+                sh '"$BANK_PYTHON" -m pip install -r projects/sprint10-kafka/deployment/kubernetes/requirements.txt'
+                dir('projects/sprint10-kafka') {
+                    sh '''
+                        "$BANK_PYTHON" -m unittest discover -s deployment/scripts
+                        "$BANK_PYTHON" -m unittest discover -s deployment/kubernetes -p 'test_*.py'
+                        "$BANK_PYTHON" deployment/scripts/init-secrets.py
+                        "$BANK_PYTHON" deployment/scripts/init-tls.py
+                        "$BANK_PYTHON" deployment/kubernetes/prepare.py --output-dir "$BANK_STATE" --superset
+                        if test -f "$BANK_STATE/cluster.json"; then
+                            "$BANK_PYTHON" deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" resume
+                        else
+                            "$BANK_PYTHON" deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" create --secrets-dir "$BANK_SECRETS_DIR"
+                        fi
+                        "$BANK_PYTHON" deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" secrets --secrets-dir "$BANK_SECRETS_DIR"
+                        "$BANK_PYTHON" deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" load-images
+                    '''
+                }
+            }
+        }
+        stage('Deploy reviewed plan') {
+            steps {
+                sh '''
+                    "$BANK_PYTHON" infra/kubernetes/deploy.py plan --project-dir "$PWD/projects/sprint10-kafka" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+                    "$BANK_PYTHON" infra/kubernetes/deploy.py apply --project-dir "$PWD/projects/sprint10-kafka" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+                    "$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" ready
+                '''
+            }
+        }
+        stage('Verify real services and recovery') {
+            steps {
+                sh '''
+                    "$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/probe.py --state-dir "$BANK_STATE" security
+                    "$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/probe.py --state-dir "$BANK_STATE" persistence
+                    "$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/probe.py --state-dir "$BANK_STATE" lifecycle
+                    "$BANK_PYTHON" projects/sprint10-kafka/deployment/scripts/verify-runtime.py --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR" --analytics --faults
+                    "$BANK_PYTHON" infra/kubernetes/deploy.py noop --project-dir "$PWD/projects/sprint10-kafka" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+                '''
+            }
+        }
+    }
+    post {
+        always {
+            junit testResults: 'projects/sprint10-kafka/**/build/test-results/**/*.xml', allowEmptyResults: true
+            archiveArtifacts artifacts: 'projects/sprint10-kafka/build/deployment/*.jar,projects/sprint10-kafka/**/build/libs/*-stubs.jar', allowEmptyArchive: true
+        }
+        cleanup {
+            sh '''
+                if test -n "${BANK_STATE:-}" && test -f "$BANK_STATE/cluster.json"; then
+                    "$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" stop
+                fi
+            '''
+        }
+    }
+}

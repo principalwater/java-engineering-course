@@ -41,11 +41,12 @@ public class GatewaySecurity {
     @Bean
     ReactiveJwtDecoder gatewayDecoder(
             @Value("${bank.security.issuer}") String issuer,
-            @Value("${bank.security.jwk-set-uri}") String jwks) {
+            @Value("${bank.security.jwk-set-uri}") String jwks,
+            WebClient.Builder webClients) {
         NimbusReactiveJwtDecoder decoder =
                 NimbusReactiveJwtDecoder.withJwkSetUri(jwks)
                         .jwsAlgorithm(SignatureAlgorithm.RS256)
-                        .webClient(jwkClient())
+                        .webClient(jwkClient(webClients))
                         .build();
         decoder.setJwtValidator(
                 new DelegatingOAuth2TokenValidator<>(
@@ -63,7 +64,13 @@ public class GatewaySecurity {
     }
 
     private void configureRoutes(ServerHttpSecurity.AuthorizeExchangeSpec access) {
-        access.pathMatchers(HttpMethod.GET, ProbePaths.LIVENESS, ProbePaths.READINESS).permitAll();
+        // Метрики открыты только точным GET-путём; остальные пути Actuator закрыты denyAll ниже.
+        access.pathMatchers(
+                        HttpMethod.GET,
+                        ProbePaths.LIVENESS,
+                        ProbePaths.READINESS,
+                        ProbePaths.PROMETHEUS)
+                .permitAll();
         access.pathMatchers(API_PATH).access(this::authorizeBankFront).anyExchange().denyAll();
     }
 
@@ -81,12 +88,14 @@ public class GatewaySecurity {
                 new OAuth2Error(OAuth2ErrorCodes.INVALID_TOKEN, "Invalid audience", null));
     }
 
-    private WebClient jwkClient() {
+    // Builder внедряется Boot и несёт наблюдение клиента (метрика и span запроса JWK Set);
+    // собственный коннектор сохраняет тайм-ауты.
+    private WebClient jwkClient(WebClient.Builder webClients) {
         HttpClient http =
                 HttpClient.create()
                         .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, JWK_CONNECT_TIMEOUT_MILLIS)
                         .responseTimeout(JWK_READ_TIMEOUT);
-        return WebClient.builder().clientConnector(new ReactorClientHttpConnector(http)).build();
+        return webClients.clientConnector(new ReactorClientHttpConnector(http)).build();
     }
 
     private boolean isBankFront(Authentication authentication) {

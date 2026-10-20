@@ -1,6 +1,7 @@
 package dev.principalwater.bank.front.config;
 
 import dev.principalwater.bank.runtime.security.HttpRequests;
+import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -26,14 +27,20 @@ import org.springframework.security.oauth2.jwt.JwtDecoderFactory;
 import org.springframework.security.oauth2.jwt.JwtTimestampValidator;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestTemplate;
 
 @Configuration(proxyBeanMethods = false)
 public class OAuthHttpConfiguration {
     private final JdkClientHttpRequestFactory requests;
+    private final RestTemplateBuilder restTemplates;
+    private final RestClient.Builder restClients;
 
-    public OAuthHttpConfiguration() {
+    // Внедрённые builders Boot несут наблюдение клиента (метрики и trace span запросов к IdP);
+    // общая JDK-фабрика сохраняет тайм-ауты и пул соединений.
+    public OAuthHttpConfiguration(
+            RestTemplateBuilder restTemplates, RestClient.Builder restClients) {
         requests = HttpRequests.create();
+        this.restTemplates = restTemplates;
+        this.restClients = restClients;
     }
 
     @Bean
@@ -64,9 +71,11 @@ public class OAuthHttpConfiguration {
     @Bean
     OidcUserService bankOidcUserService() {
         DefaultOAuth2UserService userInfo = new DefaultOAuth2UserService();
-        RestTemplate http = new RestTemplate(requests);
-        http.setErrorHandler(new OAuth2ErrorResponseErrorHandler());
-        userInfo.setRestOperations(http);
+        userInfo.setRestOperations(
+                restTemplates
+                        .requestFactory(() -> requests)
+                        .errorHandler(new OAuth2ErrorResponseErrorHandler())
+                        .build());
         OidcUserService oidc = new OidcUserService();
         oidc.setOauth2UserService(userInfo);
         return oidc;
@@ -79,7 +88,7 @@ public class OAuthHttpConfiguration {
         NimbusJwtDecoder decoder =
                 NimbusJwtDecoder.withJwkSetUri(bank.getProviderDetails().getJwkSetUri())
                         .jwsAlgorithm(SignatureAlgorithm.RS256)
-                        .restOperations(new RestTemplate(requests))
+                        .restOperations(restTemplates.requestFactory(() -> requests).build())
                         .build();
         decoder.setClaimSetConverter(OidcIdTokenDecoderFactory.createDefaultClaimTypeConverter());
         decoder.setJwtValidator(
@@ -98,7 +107,8 @@ public class OAuthHttpConfiguration {
     }
 
     private RestClient tokenClient() {
-        return RestClient.builder()
+        return restClients
+                .clone()
                 .requestFactory(requests)
                 .messageConverters(
                         converters -> {

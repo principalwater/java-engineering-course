@@ -41,6 +41,7 @@ import org.springframework.security.oauth2.client.InMemoryOAuth2AuthorizedClient
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.registration.InMemoryClientRegistrationRepository;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
+import org.springframework.web.client.RestClient;
 
 class ServiceClientTest {
     private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
@@ -104,6 +105,7 @@ class ServiceClientTest {
                                 registrations,
                                 new InMemoryOAuth2AuthorizedClientService(registrations),
                                 mapper,
+                                RestClient.builder(),
                                 Duration.ofSeconds(1),
                                 Duration.ofSeconds(5));
     }

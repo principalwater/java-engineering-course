@@ -16,12 +16,16 @@ import dev.principalwater.bank.contract.OperationResult;
 import dev.principalwater.bank.contract.OperationStatus;
 import dev.principalwater.bank.contract.OperationType;
 import dev.principalwater.bank.messaging.KafkaOutbox;
+import dev.principalwater.bank.observability.DeferredTrace;
 import dev.principalwater.bank.runtime.client.RemoteUnavailable;
 import dev.principalwater.bank.runtime.client.ServiceClient;
 import dev.principalwater.bank.runtime.error.BankError;
 import dev.principalwater.bank.runtime.error.BankException;
 import dev.principalwater.bank.testing.BankFixtures;
+import dev.principalwater.bank.testing.MigrationFixture;
 import dev.principalwater.bank.testing.PostgresTestBase;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -40,6 +44,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataAccessException;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -55,10 +60,13 @@ import org.springframework.transaction.support.TransactionTemplate;
             "spring.config.import=classpath:bank-common.properties",
             "spring.flyway.locations=classpath:db/workflow,classpath:db/delivery,classpath:db/kafka"
         })
+@AutoConfigureObservability
 class MoneyWorkflowTest extends PostgresTestBase {
     private static final Instant NOW = Instant.parse("2026-10-17T12:00:00Z");
     private static final UUID ACCOUNT = UUID.fromString("0e3cd699-67b1-48a1-b60a-fae32a67ce42");
     @Autowired private PlatformTransactionManager transactions;
+    @Autowired private Tracer tracer;
+    @Autowired private DeferredTrace trace;
     private ServiceClient client;
     private IntentRepository intents;
     private KafkaOutbox outbox;
@@ -77,6 +85,100 @@ class MoneyWorkflowTest extends PostgresTestBase {
         kafka = mock(KafkaTemplate.class);
         outbox = new KafkaOutbox(jdbc, mapper, kafka);
         workflow = restarted();
+    }
+
+    @Test
+    void restartedIntentAndCompletionOutboxRetainOriginalRequestTrace() {
+        InternalOperation command = BankFixtures.deposit(BankFixtures.actor("alice"), 400);
+        Span request = tracer.nextSpan().name("original-money-request").start();
+        UUID intentId;
+        try (Tracer.SpanInScope ignored = tracer.withSpan(request)) {
+            intentId = new IntentRepository(jdbc, mapper, trace).reserve(command).id();
+        } finally {
+            request.end();
+        }
+        String originalTrace = request.context().traceId();
+        when(client.post(eq("accounts"), any(), eq(command), eq(OperationResult.class)))
+                .thenAnswer(
+                        call -> {
+                            assertThat(tracer.currentSpan().context().traceId())
+                                    .isEqualTo(originalTrace);
+                            return success(command);
+                        });
+        KafkaOutbox tracedOutbox = new KafkaOutbox(jdbc, mapper, kafka, trace);
+        new MoneyWorkflow(
+                        new IntentRepository(jdbc, mapper, trace),
+                        client,
+                        tracedOutbox,
+                        new TransactionTemplate(transactions),
+                        Clock.fixed(NOW, ZoneOffset.UTC),
+                        trace)
+                .recover(intentId);
+        assertThat(jdbc.queryForObject("SELECT traceparent FROM bank_kafka_outbox", String.class))
+                .contains(originalTrace);
+        assertThat(tracer.currentSpan()).isNull();
+    }
+
+    @Test
+    void traceUpgradePreservesExistingS10IntentsAndKafkaFactsWithoutOutOfOrderMigration()
+            throws Exception {
+        try (MigrationFixture fixture =
+                new MigrationFixture(
+                        jdbc.getDataSource(),
+                        "classpath:db/workflow",
+                        "classpath:db/delivery",
+                        "classpath:db/kafka")) {
+            fixture.migrate("1100");
+            assertThat(
+                            fixture.jdbc()
+                                    .queryForObject(
+                                            """
+                    SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema()
+                    AND table_name='bank_intent' AND column_name='traceparent'
+                    """,
+                                            Integer.class))
+                    .isZero();
+            UUID id = UUID.randomUUID();
+            fixture.jdbc()
+                    .update(
+                            """
+                    INSERT INTO bank_intent(id,issuer,subject,operation_type,request_id,payload)
+                    VALUES (?,'issuer','subject','DEPOSIT',?,'{"amountMinor":100}'::jsonb)
+                    """,
+                            id,
+                            UUID.randomUUID());
+            fixture.jdbc()
+                    .update(
+                            """
+                    INSERT INTO bank_kafka_outbox(id,topic,message_key,message_id,payload,status)
+                    VALUES (?,'bank.cash.notifications.v1','owner','historical','{"amountMinor":100}'::jsonb,'PUBLISHED')
+                    """,
+                            id);
+            fixture.migrate("latest");
+            assertThat(
+                            fixture.jdbc()
+                                    .queryForObject(
+                                            "SELECT payload->>'amountMinor' FROM bank_intent",
+                                            String.class))
+                    .isEqualTo("100");
+            assertThat(
+                            fixture.jdbc()
+                                    .queryForObject(
+                                            "SELECT traceparent IS NULL FROM bank_intent",
+                                            Boolean.class))
+                    .isTrue();
+            assertThat(
+                            fixture.jdbc()
+                                    .queryForObject(
+                                            "SELECT status FROM bank_kafka_outbox", String.class))
+                    .isEqualTo("PUBLISHED");
+            assertThat(
+                            fixture.jdbc()
+                                    .queryForObject(
+                                            "SELECT traceparent IS NULL FROM bank_kafka_outbox",
+                                            Boolean.class))
+                    .isTrue();
+        }
     }
 
     @Test

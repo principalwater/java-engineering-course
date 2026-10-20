@@ -8,6 +8,7 @@ import dev.principalwater.bank.contract.OperationStatus;
 import dev.principalwater.bank.contract.OperationType;
 import dev.principalwater.bank.messaging.KafkaOutbox;
 import dev.principalwater.bank.messaging.RecoverableDelivery;
+import dev.principalwater.bank.observability.DeferredTrace;
 import dev.principalwater.bank.runtime.client.RemoteUnavailable;
 import dev.principalwater.bank.runtime.client.ServiceClient;
 import dev.principalwater.bank.runtime.error.BankException;
@@ -24,6 +25,7 @@ public class MoneyWorkflow implements RecoverableDelivery {
     private final KafkaOutbox outbox;
     private final TransactionTemplate transaction;
     private final Clock clock;
+    private final DeferredTrace trace;
 
     public MoneyWorkflow(
             IntentRepository intents,
@@ -31,11 +33,22 @@ public class MoneyWorkflow implements RecoverableDelivery {
             KafkaOutbox outbox,
             TransactionTemplate transaction,
             Clock clock) {
+        this(intents, accounts, outbox, transaction, clock, DeferredTrace.disabled());
+    }
+
+    public MoneyWorkflow(
+            IntentRepository intents,
+            ServiceClient accounts,
+            KafkaOutbox outbox,
+            TransactionTemplate transaction,
+            Clock clock,
+            DeferredTrace trace) {
         this.intents = intents;
         this.accounts = accounts;
         this.outbox = outbox;
         this.transaction = transaction;
         this.clock = clock;
+        this.trace = trace;
     }
 
     public OperationResult execute(InternalOperation operation) {
@@ -64,6 +77,14 @@ public class MoneyWorkflow implements RecoverableDelivery {
         if (intent == null) {
             return;
         }
+        // Аренда может перейти к другому процессу: продолжаем сохранённую трассу, а не фоновую.
+        try (DeferredTrace.Relay ignored =
+                trace.resume(intent.parent(), "bank.money.workflow", "accounts")) {
+            processClaimed(intent);
+        }
+    }
+
+    private void processClaimed(IntentRepository.Intent intent) {
         OperationResult result;
         try {
             // Здесь нет открытой JDBC-транзакции; downstream ID и actor сохранены до HTTP.
@@ -137,6 +158,7 @@ public class MoneyWorkflow implements RecoverableDelivery {
                 command.type().name() + "_" + result.status().name(),
                 command.amountMinor(),
                 result.balanceMinor(),
-                occurredAt);
+                occurredAt,
+                command.actor().login());
     }
 }

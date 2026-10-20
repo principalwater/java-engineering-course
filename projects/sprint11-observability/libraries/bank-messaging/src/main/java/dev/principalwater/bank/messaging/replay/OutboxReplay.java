@@ -51,10 +51,11 @@ public final class OutboxReplay {
                     int requeued = 0;
                     for (Row row : rows) {
                         // Повторная публикация сохраняет содержимое, ключ, ID и текущую аренду
-                        // записи.
+                        // записи. Ручной replay начинает новую трассу, а не приписывается старому
+                        // запросу.
                         requeued +=
                                 jdbc.update(
-                                        "UPDATE bank_kafka_outbox SET status='PENDING',next_attempt_at=now() WHERE id=? AND status='PUBLISHED'",
+                                        "UPDATE bank_kafka_outbox SET status='PENDING',next_attempt_at=now(),traceparent=NULL,tracestate=NULL WHERE id=? AND status='PUBLISHED'",
                                         row.id());
                     }
                     return new Page(

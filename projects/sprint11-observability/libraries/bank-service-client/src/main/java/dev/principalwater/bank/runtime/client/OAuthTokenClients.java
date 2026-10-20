@@ -9,9 +9,11 @@ import org.springframework.web.client.RestClient;
 public final class OAuthTokenClients {
     private OAuthTokenClients() {}
 
-    public static RestClient create(JdkClientHttpRequestFactory requests) {
-        return RestClient.builder()
-                .requestFactory(requests)
+    // Builder внедряется Boot и несёт наблюдение клиента; собственная фабрика запросов сохраняет
+    // тайм-ауты и пул соединений.
+    public static RestClient create(
+            RestClient.Builder builder, JdkClientHttpRequestFactory requests) {
+        return builder.requestFactory(requests)
                 .messageConverters(
                         converters -> {
                             converters.clear();

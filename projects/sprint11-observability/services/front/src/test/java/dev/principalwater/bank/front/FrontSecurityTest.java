@@ -1,5 +1,6 @@
 package dev.principalwater.bank.front;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -12,16 +13,19 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrlPattern;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import dev.principalwater.bank.contract.ProbePaths;
 import dev.principalwater.bank.front.client.GatewayClient;
 import dev.principalwater.bank.testing.ServletSecurityTestBase;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -40,6 +44,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
             "spring.config.import=classpath:bank-common.properties",
             "bank.login.client-secret=fixture-secret"
         })
+// Наблюдаемость включена явно: Boot отключает экспорт метрик в тестах по умолчанию.
+@AutoConfigureObservability
 class FrontSecurityTest extends ServletSecurityTestBase {
     @Autowired private ClientRegistrationRepository registrations;
     @Autowired private JwtDecoderFactory<ClientRegistration> decoders;
@@ -57,6 +63,20 @@ class FrontSecurityTest extends ServletSecurityTestBase {
                 .andExpect(status().is3xxRedirection())
                 .andExpect(redirectedUrlPattern("**/login"));
         http.perform(get("/ui/account")).andExpect(status().isUnauthorized());
+        verifyNoInteractions(gateway);
+    }
+
+    @Test
+    void metricsAreScrapableAnonymouslyOnlyOnTheExactGetPath() throws Exception {
+        http.perform(get(ProbePaths.PROMETHEUS))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("jvm_memory_used_bytes")));
+        // Остальные пути Actuator и любой другой метод остаются за входом через Keycloak.
+        http.perform(post(ProbePaths.PROMETHEUS).with(csrf()))
+                .andExpect(status().is3xxRedirection());
+        for (String path : List.of(ProbePaths.PROMETHEUS + "/extra", "/actuator/env")) {
+            http.perform(get(path)).andExpect(status().is3xxRedirection());
+        }
         verifyNoInteractions(gateway);
     }
 
@@ -185,7 +205,8 @@ class FrontSecurityTest extends ServletSecurityTestBase {
                                 .with(csrf())
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
-                                        "{\"fullName\":\"Alice Example\",\"birthDate\":\"1990-06-15\",\"version\":0}"))
+                                        "{\"fullName\":\"Alice"
+                                                + " Example\",\"birthDate\":\"1990-06-15\",\"version\":0}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.version").value(1));
     }

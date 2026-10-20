@@ -38,8 +38,9 @@ public class FrontSecurity {
     private static final String LOGIN_PATH = "/login";
     private static final String PROTOCOL = "/protocol/openid-connect";
     private static final String CSP =
-            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
-                    + "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;"
+                    + " connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none';"
+                    + " frame-ancestors 'none'";
 
     @Bean
     ClientRegistrationRepository bankRegistration(LoginProperties properties) {
@@ -108,7 +109,11 @@ public class FrontSecurity {
     private void configureRoutes(
             AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry
                     routes) {
-        routes.requestMatchers(HttpMethod.GET, ProbePaths.LIVENESS, ProbePaths.READINESS)
+        routes.requestMatchers(
+                        HttpMethod.GET,
+                        ProbePaths.LIVENESS,
+                        ProbePaths.READINESS,
+                        ProbePaths.PROMETHEUS)
                 .permitAll();
         routes.requestMatchers(
                         LOGIN_PATH,

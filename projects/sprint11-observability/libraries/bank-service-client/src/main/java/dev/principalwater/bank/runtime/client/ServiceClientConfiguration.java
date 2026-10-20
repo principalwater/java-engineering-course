@@ -27,6 +27,7 @@ public class ServiceClientConfiguration {
             ClientRegistrationRepository registrations,
             OAuth2AuthorizedClientService authorizedClients,
             ObjectMapper mapper,
+            RestClient.Builder restClients,
             @Value("${bank.client.connect-timeout:" + HttpRequests.DEFAULT_CONNECT_TIMEOUT + "}")
                     Duration connectTimeout,
             @Value("${bank.client.read-timeout:" + HttpRequests.DEFAULT_READ_TIMEOUT + "}")
@@ -34,7 +35,9 @@ public class ServiceClientConfiguration {
         JdkClientHttpRequestFactory requests = HttpRequests.create(connectTimeout, readTimeout);
         RestClientClientCredentialsTokenResponseClient tokenClient =
                 new RestClientClientCredentialsTokenResponseClient();
-        tokenClient.setRestClient(OAuthTokenClients.create(requests));
+        // Builder Boot имеет prototype-область, но используется дважды: токен-клиент получает
+        // копию.
+        tokenClient.setRestClient(OAuthTokenClients.create(restClients.clone(), requests));
         AuthorizedClientServiceOAuth2AuthorizedClientManager manager =
                 new AuthorizedClientServiceOAuth2AuthorizedClientManager(
                         registrations, authorizedClients);
@@ -44,7 +47,7 @@ public class ServiceClientConfiguration {
                                 credentials -> credentials.accessTokenResponseClient(tokenClient))
                         .build());
         return new ServiceClient(
-                discovery, manager, RestClient.builder().requestFactory(requests).build(), mapper);
+                discovery, manager, restClients.requestFactory(requests).build(), mapper);
     }
 
     static final class Enabled extends AnyNestedCondition {

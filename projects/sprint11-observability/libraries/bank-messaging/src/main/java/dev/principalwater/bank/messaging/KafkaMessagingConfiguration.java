@@ -2,6 +2,8 @@ package dev.principalwater.bank.messaging;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.principalwater.bank.contract.BankTopics;
+import dev.principalwater.bank.observability.DeferredTrace;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.validation.Validator;
 import java.time.Duration;
 import java.util.List;
@@ -10,10 +12,12 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -23,6 +27,8 @@ import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.core.MicrometerConsumerListener;
+import org.springframework.kafka.core.MicrometerProducerListener;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
@@ -39,6 +45,7 @@ public class KafkaMessagingConfiguration {
     @Bean
     ProducerFactory<String, String> bankProducerFactory(
             KafkaProperties properties,
+            ObjectProvider<MeterRegistry> meters,
             @Value("${bank.kafka.user}") String user,
             @Value("${bank.kafka.password}") String password) {
         DefaultKafkaProducerFactory<String, String> factory =
@@ -46,12 +53,17 @@ public class KafkaMessagingConfiguration {
                         KafkaClientProperties.secured(
                                 properties.buildProducerProperties(), user, password));
         factory.setPhysicalCloseTimeout(5);
+        // Собственная фабрика не получает клиентские метрики Boot автоматически.
+        meters.ifAvailable(
+                registry -> factory.addListener(new MicrometerProducerListener<>(registry)));
         return factory;
     }
 
     @Bean
     KafkaTemplate<String, String> bankKafkaTemplate(ProducerFactory<String, String> factory) {
         KafkaTemplate<String, String> template = new KafkaTemplate<>(factory);
+        // Наблюдение передаёт traceparent в заголовках записи и делает отправку span-потомком.
+        template.setObservationEnabled(true);
         template.setProducerListener(
                 new ProducerListener<>() {
                     @Override
@@ -68,11 +80,16 @@ public class KafkaMessagingConfiguration {
     @Bean
     ConsumerFactory<String, String> bankConsumerFactory(
             KafkaProperties properties,
+            ObjectProvider<MeterRegistry> meters,
             @Value("${bank.kafka.user}") String user,
             @Value("${bank.kafka.password}") String password) {
-        return new DefaultKafkaConsumerFactory<>(
-                KafkaClientProperties.secured(
-                        properties.buildConsumerProperties(), user, password));
+        DefaultKafkaConsumerFactory<String, String> factory =
+                new DefaultKafkaConsumerFactory<>(
+                        KafkaClientProperties.secured(
+                                properties.buildConsumerProperties(), user, password));
+        meters.ifAvailable(
+                registry -> factory.addListener(new MicrometerConsumerListener<>(registry)));
+        return factory;
     }
 
     @Bean
@@ -86,6 +103,9 @@ public class KafkaMessagingConfiguration {
         listeners.setConcurrency(1);
         listeners.setAutoStartup(properties.getListener().isAutoStartup());
         listeners.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        // Обработка записи идёт внутри наблюдения-потомка трассы из заголовков; JDBC и повторная
+        // публикация получают его как родителя. Режим подтверждения не меняется.
+        listeners.getContainerProperties().setObservationEnabled(true);
         listeners.getContainerProperties().setPollTimeout(1000);
         listeners.getContainerProperties().setAuthExceptionRetryInterval(Duration.ofSeconds(10));
         DeadLetterPublishingRecoverer dlt =
@@ -122,8 +142,17 @@ public class KafkaMessagingConfiguration {
 
     @Bean
     KafkaOutbox kafkaOutbox(
-            JdbcTemplate jdbc, ObjectMapper mapper, KafkaTemplate<String, String> kafka) {
-        return new KafkaOutbox(jdbc, mapper, kafka);
+            JdbcTemplate jdbc,
+            ObjectMapper mapper,
+            KafkaTemplate<String, String> kafka,
+            ObjectProvider<DeferredTrace> trace,
+            ApplicationEventPublisher events) {
+        return new KafkaOutbox(
+                jdbc,
+                mapper,
+                kafka,
+                trace.getIfAvailable(DeferredTrace::disabled),
+                events::publishEvent);
     }
 
     @Bean(initMethod = "start", destroyMethod = "close")

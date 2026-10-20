@@ -30,12 +30,15 @@ public class GatewayClient {
 
     public GatewayClient(
             DiscoveryClient discovery,
+            RestClient.Builder restClients,
             @Value("${bank.client.connect-timeout:" + HttpRequests.DEFAULT_CONNECT_TIMEOUT + "}")
                     Duration connect,
             @Value("${bank.front.gateway-timeout:8s}") Duration read) {
         this.discovery = discovery;
         JdkClientHttpRequestFactory requests = HttpRequests.create(connect, read);
-        http = RestClient.builder().requestFactory(requests).build();
+        // Builder Boot несёт наблюдение: вызов Gateway становится span-потомком запроса Front и
+        // передаёт traceparent; тайм-ауты задаёт собственная фабрика.
+        http = restClients.requestFactory(requests).build();
     }
 
     public ResponseEntity<byte[]> exchange(

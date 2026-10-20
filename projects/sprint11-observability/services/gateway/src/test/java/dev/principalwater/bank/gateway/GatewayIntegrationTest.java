@@ -2,6 +2,8 @@ package dev.principalwater.bank.gateway;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.net.httpserver.HttpServer;
 import dev.principalwater.bank.contract.ProbePaths;
@@ -18,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.availability.AvailabilityChangeEvent;
 import org.springframework.boot.availability.ReadinessState;
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ConfigurableApplicationContext;
@@ -26,10 +29,15 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+// Наблюдаемость включена явно: Boot отключает метрики и трассировку в тестах по умолчанию.
+@SpringBootTest(
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "management.tracing.sampling.probability=1.0")
 @AutoConfigureWebTestClient
+@AutoConfigureObservability
 class GatewayIntegrationTest extends SecurityTestBase {
     private static final AtomicReference<String> RECEIVED_TOKEN = new AtomicReference<>();
+    private static final AtomicReference<String> RECEIVED_TRACEPARENT = new AtomicReference<>();
     private static final AtomicBoolean RECEIVED_OWNER_HEADER = new AtomicBoolean();
     private static final HttpServer ACCOUNTS = accountsServer();
     @Autowired private WebTestClient client;
@@ -59,6 +67,45 @@ class GatewayIntegrationTest extends SecurityTestBase {
         }
         client.get().uri(ProbePaths.READINESS).exchange().expectStatus().isOk();
         client.get().uri("/actuator/env").exchange().expectStatus().isUnauthorized();
+    }
+
+    @Test
+    void metricsAreOpenOnlyOnTheExactGetPathWhileOtherManagementPathsStayClosed() {
+        client.get()
+                .uri(ProbePaths.PROMETHEUS)
+                .exchange()
+                .expectStatus()
+                .isOk()
+                .expectBody(String.class)
+                .value(body -> assertTrue(body.contains("jvm_memory_used_bytes")));
+        client.post().uri(ProbePaths.PROMETHEUS).exchange().expectStatus().isUnauthorized();
+        for (String path :
+                List.of(
+                        ProbePaths.PROMETHEUS + "/extra",
+                        "/actuator/metrics",
+                        "/actuator/heapdump",
+                        "/actuator/threaddump")) {
+            client.get().uri(path).exchange().expectStatus().isUnauthorized();
+        }
+    }
+
+    @Test
+    void inboundTraceparentContinuesToTheRoutedServiceAsAChildSpan() {
+        String traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+        String callerSpan = "00f067aa0ba902b7";
+        client.get()
+                .uri("/api/accounts/me")
+                .header(
+                        HttpHeaders.AUTHORIZATION,
+                        "Bearer " + JWT.user("alice", "alice", "accounts.read"))
+                .header("traceparent", "00-" + traceId + "-" + callerSpan + "-01")
+                .exchange()
+                .expectStatus()
+                .isOk();
+        String forwarded = RECEIVED_TRACEPARENT.get();
+        assertNotNull(forwarded);
+        assertTrue(forwarded.startsWith("00-" + traceId + "-"), forwarded);
+        assertFalse(forwarded.contains("-" + callerSpan + "-"), forwarded);
     }
 
     @DynamicPropertySource
@@ -171,6 +218,8 @@ class GatewayIntegrationTest extends SecurityTestBase {
                     exchange -> {
                         RECEIVED_TOKEN.set(
                                 exchange.getRequestHeaders().getFirst(HttpHeaders.AUTHORIZATION));
+                        RECEIVED_TRACEPARENT.set(
+                                exchange.getRequestHeaders().getFirst("traceparent"));
                         RECEIVED_OWNER_HEADER.set(
                                 exchange.getRequestHeaders().containsKey("X-Owner-Id")
                                         || exchange.getRequestHeaders()

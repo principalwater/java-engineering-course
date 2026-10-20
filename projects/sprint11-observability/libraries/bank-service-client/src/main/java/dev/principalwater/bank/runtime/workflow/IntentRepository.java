@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.principalwater.bank.contract.InternalOperation;
 import dev.principalwater.bank.contract.OperationResult;
+import dev.principalwater.bank.observability.DeferredTrace;
 import dev.principalwater.bank.runtime.delivery.DeliveryPolicy;
 import dev.principalwater.bank.runtime.error.BankError;
 import dev.principalwater.bank.runtime.error.BankException;
@@ -17,19 +18,26 @@ import org.springframework.jdbc.core.JdbcTemplate;
 public class IntentRepository {
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
+    private final DeferredTrace trace;
 
     public IntentRepository(JdbcTemplate jdbc, ObjectMapper mapper) {
+        this(jdbc, mapper, DeferredTrace.disabled());
+    }
+
+    public IntentRepository(JdbcTemplate jdbc, ObjectMapper mapper, DeferredTrace trace) {
         this.jdbc = jdbc;
         this.mapper = mapper;
+        this.trace = trace;
     }
 
     public Intent reserve(InternalOperation operation) {
+        DeferredTrace.Stored parent = trace.capture();
         // Конкурентный повтор сохраняет первое содержимое; ниже сверяем неизменяемые параметры
         // команды.
         jdbc.update(
                 """
-                INSERT INTO bank_intent(id, issuer, subject, operation_type, request_id, payload)
-                VALUES (?, ?, ?, ?, ?, ?::jsonb)
+                INSERT INTO bank_intent(id, issuer, subject, operation_type, request_id, payload, traceparent, tracestate)
+                VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?)
                 ON CONFLICT (issuer, subject, operation_type, request_id) DO NOTHING
                 """,
                 UUID.randomUUID(),
@@ -37,11 +45,13 @@ public class IntentRepository {
                 operation.actor().subject(),
                 operation.type().name(),
                 operation.operationId(),
-                encode(operation));
+                encode(operation),
+                parent.traceparent(),
+                parent.tracestate());
         Intent intent =
                 jdbc.queryForObject(
                         """
-                SELECT id, payload::text, result::text, lease_token FROM bank_intent
+                SELECT id, payload::text, result::text, lease_token, traceparent, tracestate FROM bank_intent
                 WHERE issuer = ? AND subject = ? AND operation_type = ? AND request_id = ?
                 """,
                         this::read,
@@ -60,7 +70,7 @@ public class IntentRepository {
 
     public Intent find(UUID id) {
         return jdbc.queryForObject(
-                "SELECT id, payload::text, result::text, lease_token FROM bank_intent WHERE id = ?",
+                "SELECT id, payload::text, result::text, lease_token, traceparent, tracestate FROM bank_intent WHERE id = ?",
                 this::read,
                 id);
     }
@@ -82,7 +92,7 @@ public class IntentRepository {
                 UPDATE bank_intent SET lease_token = ?, lease_until = now() + make_interval(secs => ?)
                 WHERE id = ? AND result IS NULL AND next_attempt_at <= now()
                 AND (lease_until IS NULL OR lease_until < now())
-                RETURNING id, payload::text, result::text, lease_token
+                RETURNING id, payload::text, result::text, lease_token, traceparent, tracestate
                 """,
                         this::read,
                         UUID.randomUUID(),
@@ -121,7 +131,9 @@ public class IntentRepository {
                 row.getObject("id", UUID.class),
                 decode(row.getString("payload"), InternalOperation.class),
                 result == null ? null : decode(result, OperationResult.class),
-                row.getObject("lease_token", UUID.class));
+                row.getObject("lease_token", UUID.class),
+                new DeferredTrace.Stored(
+                        row.getString("traceparent"), row.getString("tracestate")));
     }
 
     private String encode(Object value) {
@@ -141,5 +153,9 @@ public class IntentRepository {
     }
 
     public record Intent(
-            UUID id, InternalOperation operation, OperationResult result, UUID lease) {}
+            UUID id,
+            InternalOperation operation,
+            OperationResult result,
+            UUID lease,
+            DeferredTrace.Stored parent) {}
 }

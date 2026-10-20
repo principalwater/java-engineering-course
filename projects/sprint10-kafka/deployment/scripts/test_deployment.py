@@ -73,6 +73,10 @@ class LocalTlsTest(unittest.TestCase):
             tls.initialize(directory)
             self.assertEqual(initial, {path.name: path.read_bytes() for path in directory.iterdir()})
             ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(directory / "tls_certificate.pem", directory / "tls_private_key.pem")
+            for host in tls.HOSTS:
+                subprocess.run([openssl, "verify", "-x509_strict", "-CAfile", str(directory / "tls_ca.pem"),
+                                "-verify_hostname", host, str(directory / "tls_certificate.pem")],
+                               check=True, capture_output=True)
             wrong_host = subprocess.run([openssl, "verify", "-CAfile", str(directory / "tls_ca.pem"), "-verify_hostname", "other.localhost", str(directory / "tls_certificate.pem")], capture_output=True)
             self.assertNotEqual(0, wrong_host.returncode)
             (directory / "tls_private_key.pem").unlink()

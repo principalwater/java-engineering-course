@@ -71,7 +71,7 @@ def initialize(directory):
             raise ValueError("TLS files are incomplete; restore the certificate, key and CA together")
         for host in HOSTS:
             # x509 -checkhost в OpenSSL 3.0 возвращает успех даже при несовпадении имени.
-            subprocess.run([openssl, "verify", "-CAfile", str(authority), "-verify_hostname", host, str(certificate)],
+            subprocess.run([openssl, "verify", "-x509_strict", "-CAfile", str(authority), "-verify_hostname", host, str(certificate)],
                            check=True, stdout=subprocess.PIPE)
         ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(certificate, key)
         for path in (certificate, key, authority):
@@ -92,12 +92,16 @@ def initialize(directory):
         else:
             # В CI доверяем только этому CA через cafile, глобальное trust store не меняется.
             root_key = staging / "ca-key.pem"
+            # Python 3.13+ проверяет назначение ключа CA по строгому профилю X.509.
             subprocess.run([openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "30",
                             "-subj", "/CN=Local storefront verification CA", "-addext", "basicConstraints=critical,CA:TRUE",
+                            "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+                            "-addext", "subjectKeyIdentifier=hash",
                             "-keyout", str(root_key), "-out", str(ca)], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             request = staging / "leaf.csr"
             extensions = staging / "leaf.ext"
             extensions.write_text("subjectAltName=" + ",".join("DNS:" + host for host in HOSTS)
+                                  + "\nbasicConstraints=critical,CA:FALSE\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer"
                                   + "\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n")
             subprocess.run([openssl, "req", "-new", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=" + HOSTS[0],
                             "-keyout", str(private), "-out", str(request)], check=True,

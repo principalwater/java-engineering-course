@@ -1,13 +1,13 @@
-# Банк: Apache Kafka
+# Банк: наблюдаемость и защита конфигурации
 
-Продолжение банка спринта 9. Денежные команды сохраняют REST-контракты и атомарную запись в Accounts; уведомления переходят на Kafka. Notifications работает без HTTP-сервера, а кабинет читает отдельную проекцию уведомлений в Accounts.
+Продолжение доработки Kafka-контура под приложение банка из спринта 10: HTTP-запрос, SQL и доставка события связаны одной трассой; метрики, логи и финансовые отказы доступны оператору без доступа к пользовательской сессии. Денежные команды, transactional outbox и сохранённые уведомления продолжают работать независимо от аналитики.
 
-[Структура](#структура) · [Архитектура](#архитектура) · [Kafka](#доставка-событий) · [Кабинет](#кабинет) · [Аналитика](#аналитика) · [Деплой](#деплой) · [Проверки](#проверки) · [Ограничения](#границы-стенда)
+[Структура](#структура) · [Архитектура](#архитектура) · [Наблюдаемость](#наблюдаемость) · [Kafka](#доставка-событий) · [Кабинет](#кабинет) · [Аналитика](#аналитика) · [OpenBao](#секреты-openbao) · [Деплой](#деплой) · [Проверки](#проверки) · [Ограничения](#границы-стенда)
 
 ## Структура
 
 ```text
-sprint10-kafka/
+sprint11-observability/
 ├── services/                 # восемь приложений, включая Java-инициализатор BI
 │   ├── accounts/             # профиль, баланс, история и проекция уведомлений
 │   ├── cash/, transfer/      # денежные команды
@@ -16,12 +16,15 @@ sprint10-kafka/
 │   └── analytics/, bank-bi/  # аналитические проекции и настройка Superset
 ├── libraries/                # общие Java-модули и тестовая поддержка
 │   ├── bank-contracts/, bank-runtime/, bank-service-client/
-│   └── bank-messaging/, bank-test-support/
+│   ├── bank-messaging/, bank-test-support/
+│   └── bank-observability/, bank-secrets/
 ├── deployment/               # исходные файлы деплоя, отдельно от Java-кода
 │   ├── charts/bank/          # Helm, включая Kafka и Superset
 │   ├── kubernetes/           # подготовка, управление kind и проверки Kafka
 │   ├── scripts/              # секреты, TLS, запуск зависимостей и HTTP-проверки
-│   └── authorization/, database/, discovery/, edge/, superset/
+│   └── authorization/, database/, discovery/, edge/, superset/, jenkins/
+├── zipkin/, prometheus/       # трассировка, сбор метрик и правила алертов
+├── grafana/, elk/             # дашборды, Logstash, Elasticsearch и Kibana
 ├── config/                   # правила PMD и настройки JVM
 ├── gradle/, gradlew          # единая сборка Gradle
 ├── Jenkinsfile              # альтернативный CI/CD на выделенном агенте
@@ -69,9 +72,47 @@ flowchart LR
 | [bank-messaging](libraries/bank-messaging/) | Невебовые Kafka/JDBC-механизмы и ограниченная доставка |
 | [bank-runtime](libraries/bank-runtime/), [bank-service-client](libraries/bank-service-client/) | HTTP/JWT-инфраструктура и отдельно REST-клиенты с Client Credentials |
 | [bank-test-support](libraries/bank-test-support/) | Общие тестовые фикстуры PostgreSQL/JWT/Kafka и адаптер контрактных Kafka-тестов |
+| [bank-observability](libraries/bank-observability/), [bank-secrets](libraries/bank-secrets/) | Общие метрики, трассировка, безопасный лог-энкодер и штатный ConfigData-клиент OpenBao |
 | [analytics](services/analytics/), [bank-bi](services/bank-bi/) | Дополнительные проекции событий и Java-инициализация дашборда Superset |
 
 > Разделение общих модулей позволяет исключить MVC/WebFlux из Notifications, не копируя доставку и JDBC-код. OAuth-клиент подключён только там, где остались исходящие REST-вызовы; Kafka не требует получать HTTP access token перед каждой публикацией.
+
+## Наблюдаемость
+
+Один запрос проходит Front → Gateway → Cash/Transfer → Accounts. Micrometer Tracing с Brave передаёт W3C trace context через штатные HTTP-клиенты; инструментированный DataSource добавляет дочерние JDBC spans. Отложенная публикация outbox сохраняет контекст в PostgreSQL, поэтому перезапуск процесса не обрывает связь с исходным запросом. Kafka producer, consumer и DLT используют наблюдаемость Spring Kafka.
+
+На локальном стенде выбирается 100% трасс для воспроизводимой проверки; профиль `prod` использует 10%. Заголовки авторизации, параметры SQL, содержимое форм и query string не включаются в экспорт. Повторная операторская публикация outbox начинает новую трассу, сохраняя идентификатор бизнес-события.
+
+### Метрики и дашборды
+
+Prometheus собирает HTTP RPS, 4xx/5xx, гистограммы задержки, JVM/GC, HikariCP и Kafka-клиентов. Для Notifications сохранён невебовый запуск: отдельный ограниченный JDK scrape-server слушает внутренний порт 9400, без MVC/WebFlux. Его очередь, соединения и время чтения/записи ограничены.
+
+| Дашборды Grafana | Что показывают |
+| --- | --- |
+| Обзор, HTTP, JVM | Доступность сервисов, RPS, ошибки, p50/p90/p95/p99, heap/non-heap, GC и пулы |
+| Kafka health / topics | Брокеры, контроллеры, ISR, диски, потоки сообщений и lag групп |
+| Бизнес и pipeline | Отклонённые денежные команды, недоставка уведомлений и состояние контура наблюдаемости |
+| ClickHouse | Доступность, вставки, запросы и состояние хранилища дополнительной аналитики |
+| Prometheus / Grafana | Scrape, TSDB, оценка правил и работа самих средств мониторинга |
+| Логи и трассы | Структурированные события Elasticsearch и переход по traceId в Zipkin |
+
+Всего предусмотрено 11 дашбордов и 35 правил. Отсутствующие данные не подменяются `vector(0)`: отключённая аналитика и ещё не возникшее событие отличаются от исправного компонента с нулевым значением. У счётчиков отказов учтено первое наблюдение серии, до появления предыдущего scrape.
+
+Снятие, перевод и доставка уведомлений имеют отдельные счётчики. Login, отправитель и получатель определяются сервером; пользовательские значения не принимаются как произвольные метки. Метрики с login доступны только оператору и требуют контроля кардинальности при росте числа клиентов. В Telegram уходят агрегированные алерты без login и сумм.
+
+### Логи и финансовые сигналы
+
+Нативный Logback appender отправляет ограниченную JSON-очередь по TLS в Logstash; затем события поступают в Elasticsearch с ILM и доступны в Kibana/Grafana. Поля `service`, `level`, `logger_name`, `event`, `traceId`, `spanId` позволяют связать запись с трассой. Фильтр маскирует токены, пароли и закрытые ключи; длинные сообщения обрезаются. Сырой MDC и тела исключений не экспортируются. Переполнение очереди не блокирует денежную транзакцию; пропуски логов требуют внимания оператора.
+
+Успешная денежная операция журналируется только после commit; rollback и идемпотентный повтор не создают ложного сообщения об успехе. Финансовый отказ записывается в собственный outbox и отдельный аналитический топик. Это запрошенная, но отклонённая сумма, а не проведённый оборот. Недоставка уведомления учитывается после сохранения retry; если и БД недоступна, отдельный gap-счётчик и предупреждение показывают невозможность сохранить аналитический факт.
+
+### Доступ оператора и алерты
+
+- `https://grafana-bank.valgrind-home.localhost:8460` — Grafana; `bank11-operator` имеет роль Viewer, `bank11-admin` администрирует.
+- `https://kibana-bank.valgrind-home.localhost:8460` — Kibana; `bank11_operator` читает логи банка.
+- Prometheus, Alertmanager, Zipkin и API Elasticsearch доступны только внутри кластера или через явный `kubectl port-forward`. Публичный Caddy блокирует `/actuator/*` и служебные API.
+
+Пароли читаются из OpenBao. Telegram включается отдельным `prepare.py --telegram` после предоставления `telegram_bot_token` и `telegram_chat_id` во внешнем зашифрованном источнике. Alertmanager отправляет срабатывание и восстановление в заданный чат; в CI этот канал выключен, настоящих токенов и сообщений в пользовательский чат нет.
 
 ## Доставка событий
 
@@ -96,14 +137,13 @@ Accounts, Cash и Transfer публикуют в собственные топи
 
 ```bash
 java -cp application.jar dev.principalwater.bank.messaging.replay.OutboxReplayApplication \
-  --BANK_CONFIG_IMPORT=optional:classpath:bank-common.properties \
-  --spring.config.import=classpath:bank-common.properties \
+  --spring.config.import=classpath:bank-common.properties,classpath:bank-kafka.properties,vault:///kv/bank11-dev/accounts \
   --bank.outbox.replay.after=0 --bank.outbox.replay.limit=1000
 ```
 
-Каждый вызов обрабатывает не более 1000 записей; следующий получает возвращённый `nextSequence`, до `count=0`. Сроки действующей аренды записей не сбрасываются. Источник ограничен именем приложения: Accounts публикует свои топики уведомлений и аналитики, Cash и Transfer — свои уведомления, Notifications — квитанции. HTTP-сервер и слушатели Kafka в этом процессе не запускаются.
+Пример использует роль и ServiceAccount Accounts в `bank11-dev`; для другого источника выбирается его точный разрешённый KV-путь и окружение. Каждый вызов обрабатывает не более 1000 записей; следующий получает возвращённый `nextSequence`, до `count=0`. Сроки действующей аренды записей не сбрасываются. Источник ограничен именем приложения: Accounts публикует свои топики уведомлений и аналитики, Cash и Transfer — свои уведомления, Notifications — квитанции. HTTP-сервер и слушатели Kafka в этом процессе не запускаются.
 
-Если нужно восстановить исходящие события из сохранённых квитанций Notifications, отдельный профиль того же образа повторно ставит их в исходящий outbox:
+Для восстановления исходящих событий из сохранённых квитанций Notifications отдельный профиль того же образа повторно ставит их в исходящий outbox:
 
 ```bash
 java -jar application.jar --spring.profiles.active=notification-replay \
@@ -118,13 +158,12 @@ java -jar application.jar --spring.profiles.active=notification-replay \
 
 Список и отметка прочтения проверяют владельца на сервере. Подмена `ownerId`, идентификатора уведомления или параметров браузера не выбирает чужой счёт. `GET /api/accounts/notifications` использует ограниченную пагинацию по ключу `before/limit`; новые записи не сдвигают уже открытые страницы. `POST /api/accounts/notifications/read` принимает `{source, eventId}` и требует `accounts.write`. Front проксирует их через `GET /ui/notifications` и `POST /ui/notifications/read`; изменение требует проверки CSRF.
 
-![Квитанция Notifications и сохранённое время прочтения](../../screenshots/sprint10-kafka/01-notifications-kafka.png)
 
 ## Аналитика
 
 > Решил дополнительно разобрать интеграцию аналитического контура с Java: от явного действия в кабинете и завершённой денежной операции до пользовательской проекции и отдельного BI-дашборда. Этот контур включается отдельно и не участвует в проведении платежа.
 
-Есть два вида входных данных:
+Два вида входных данных:
 
 - **Серверные события:** завершённые денежные операции, изменение профиля, появление уведомления и первое прочтение. Владелец и финансовые значения определяются сервером.
 - **События интерфейса:** фактическое открытие раздела или формы. Клиент передаёт UUID события и ограниченный тип действия; сервер добавляет владельца и время. Содержимое форм, токены и клиентские денежные суммы в эти события не попадают. Клиентские UUID преобразуются в отдельное пространство с учётом владельца и маршрута API: пользователь не может заранее занять идентификатор финансового события. Лимит просмотров и UI-действий — 1000 новых событий на владельца в месяц; идемпотентный повтор квоту не расходует.
@@ -141,192 +180,178 @@ Accounts сначала доставляет события в устойчив�
 
 Личная аналитика в кабинете фильтруется по месяцу и типу операции; D3 показывает фактические поступления и списания с доступной табличной альтернативой.
 
-![Личная аналитика по выполненным операциям](../../screenshots/sprint10-kafka/02-personal-analytics.png)
 
 ### Superset
 
-Отдельный адрес — `https://insights.valgrind-home.localhost:8450`. Вход проходит через существующий Keycloak и разрешён роли `analyst`. Обычный клиент банка не получает доступ к внутреннему BI.
+Отдельный адрес — `https://insights.valgrind-home.localhost:8460`. Вход проходит через существующий Keycloak и разрешён роли `analyst`. Обычный клиент банка не получает доступ к внутреннему BI.
 
 Java-модуль `bank-bi` импортирует дашборд через HTTPS API Superset со стабильными UUID, назначает права на три набора данных и выполняет запросы графиков. Повторная инициализация обновляет активы, не создавая копий. Python в образе Superset используется только для его штатной конфигурации и запуска; ETL остаётся в Java.
 
 BI-пользователь ClickHouse читает только три месячных агрегатных представления: денежные операции, взаимодействия и уведомления. Идентификаторы владельцев в них не выдаются. Перевод считается по `TRANSFER_OUT`; зачисление получателю не удваивает число переводов или их объём. Денежный оборот не называется выручкой банка. Число активных счетов уникально внутри дня, поэтому дневные значения не суммируются в месячное число уникальных счетов.
 
-![Денежные операции из Kafka на дашборде Superset](../../screenshots/sprint10-kafka/03-superset-financials.png)
 
 <details>
 <summary>UI-события, доставка и прочтение уведомлений</summary>
 
 Шесть графиков и таблиц показывают реальные операции проверочного стенда. Открытие разделов приходит с фронта, изменение профиля и статусы уведомлений — с бэкенда. Для единственного дня наблюдений включены маркеры: одна точка не превращается в пустой линейный график.
 
-![Действия в кабинете и фактические статусы уведомлений](../../screenshots/sprint10-kafka/05-superset-engagement-notifications.png)
 
 </details>
+
+## Секреты OpenBao
+
+Java-приложения получают секреты через Spring Cloud Vault / ConfigData по совместимому Vault API OpenBao. Каждому приложению назначены отдельные ServiceAccount, Kubernetes auth role и точный KV v2 путь `kv/<namespace>/<service>`. Проецируемый токен имеет audience `openbao` и срок 600 с; API Kubernetes проверяет его при входе. Роль другого сервиса, namespace или audience не даёт доступ. Общего root-токена в приложениях нет.
+
+Для PostgreSQL, Kafka SCRAM, Keycloak, Grafana, ELK, TLS и остальных платформенных компонентов External Secrets Operator получает только явно перечисленные значения и создаёт файловые Kubernetes Secret. Java читает конфигурацию непосредственно из OpenBao; платформенные процессы используют свои файловые проекции. Значения не передаются Helm/OpenTofu и не попадают в state. Strimzi PKI, короткоживущие ServiceAccount-токены и клиентские OAuth-сессии остаются производными идентичностями соответствующих систем.
+
+Первичный CA, recovery/unseal-материал и начальные значения хранятся вне Git в AES-256 томе macOS; пароль тома — в Keychain. Иначе хранилище секретов зависело бы от собственного закрытого recovery-ключа. OpenBao использует TLS, сохраняемый Raft и HMAC-аудит. Начальный импорт проверяет версию KV и отказывается незаметно перезаписывать существующее значение.
+
+> Локальный OpenBao имеет одну реплику и ручной unseal. Продление и отзыв токена проверяются отдельно от ротации пароля БД: отзыв токена не отзывает уже прочитанный статический пароль. После изменения прикладных секретов нужен управляемый перезапуск. Автоматическая ротация DB credentials и HA самого OpenBao здесь не заявляются. Импорт Keycloak рассчитан на новую БД; существующий realm изменяется через IdP без сброса данных.
 
 ## Деплой
 
-Основной путь спринта — Kubernetes + Helm через отдельную корневую конфигурацию OpenTofu. Второй Compose-деплой для этого проекта не поддерживается: предыдущие спринты сохраняют свои способы запуска.
+Основной путь — Kubernetes + Helm через [корневой OpenTofu](../../infra/kubernetes/). Java 21, Gradle 8.14.3, Spring Boot 3.5.16 и Spring Cloud 2025.0.3; образы закреплены digest, прикладные образы именуются по содержимому готовых JAR. Нужны Docker/OrbStack, Python 3/venv, kind, kubectl, Helm, OpenTofu, OpenSSL и доверенный локальный CA (`mkcert` на macOS).
 
-Нужны Java 21, Docker/OrbStack, Python 3, `kind`, `kubectl`, Helm, OpenTofu и локальный доверенный CA (`mkcert` на macOS). Версии образов и зависимостей закреплены в исходниках; образы приложений получают имя по содержимому собранных JAR.
+Сборку и холодный запуск следует выполнять последовательно: память гостевой VM не заменяет память хоста. Особенно заметна конкуренция ELK, IDE и Docker на Mac с 16 ГБ. Порог 5 GiB свободного диска перед сборкой/загрузкой образов — только аварийный минимум; полный набор образов, PVC и отдельный Docker-демон Jenkins требуют дополнительного места.
 
-Образы и кеш каждой kind-ноды занимают дополнительное место на хосте. Перед каждой сборкой и загрузкой `runtime.py` требует не менее 5 GiB свободного места. Это аварийный нижний порог, а не расчёт ёмкости всего стенда; при его достижении загрузка останавливается до очистки неиспользуемого кеша или увеличения диска.
+### Подготовка
 
-Начальная подготовка ниже показана для macOS/Homebrew; на Linux укажите `JAVA_HOME` своего JDK 21.
+Из каталога проекта; `JAVA_HOME` ниже — путь Homebrew, на Linux укажите свой JDK 21:
 
 ```bash
-cd projects/sprint10-kafka
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
-./gradlew --no-daemon check packageDeployment
-python3 -m venv ~/.venvs/bank10-kubernetes
-~/.venvs/bank10-kubernetes/bin/pip install -r deployment/kubernetes/requirements.txt
+./gradlew --no-daemon --max-workers=2 check packageDeployment
+python3 -m venv ~/.venvs/bank11-kubernetes
+~/.venvs/bank11-kubernetes/bin/pip install -r deployment/kubernetes/requirements.txt
 python3 deployment/scripts/init-secrets.py
 python3 deployment/scripts/init-tls.py
-```
-
-Секреты на macOS находятся в AES-256 томе, пароль — в Keychain. Kubernetes получает отдельные Secret с файловыми проекциями только нужных сервису значений. Содержимое Secret не передаётся Helm/OpenTofu и не попадает в state. Etcd шифрует Secret; локальные PVC защищены шифрованием хоста. Это разные уровни защиты.
-
-Клиенты читают секреты при запуске: после ротации нужен управляемый перезапуск соответствующих сервисов в рамках окна обслуживания. Импорт Keycloak рассчитан на новую БД; существующий realm меняется через администрирование IdP, без сброса базы авторизации.
-
-> Для реального окружения источник секретов следует заменить внешним Vault/Secret Manager с управляемой ротацией, а локальные hostPath PVC — подходящим StorageClass и резервным копированием. Kubernetes Secret сам по себе не является внешним хранилищем секретов.
-
-### Одна нода
-
-```bash
-export BANK_STATE="$HOME/Documents/study/java-runtime/sprint10-bank-single"
-export BANK_SECRETS_DIR="$HOME/.config/java-engineering-course/sprint10"
-export BANK_PYTHON="$HOME/.venvs/bank10-kubernetes/bin/python"
-"$BANK_PYTHON" deployment/kubernetes/prepare.py --output-dir "$BANK_STATE" --profile single --superset
+python3 deployment/scripts/init-internal-tls.py
+export BANK_ROOT="$(git rev-parse --show-toplevel)"
+export BANK_PROJECT="$BANK_ROOT/projects/sprint11-observability"
+export BANK_STATE="$HOME/Documents/study/java-runtime/sprint11-bank-single"
+export BANK_SECRETS_DIR="$HOME/.config/java-engineering-course/sprint11"
+export BANK_PYTHON="$HOME/.venvs/bank11-kubernetes/bin/python"
+"$BANK_PYTHON" deployment/kubernetes/prepare.py --output-dir "$BANK_STATE" --profile single
 "$BANK_PYTHON" deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" create --secrets-dir "$BANK_SECRETS_DIR" --profile single
 "$BANK_PYTHON" deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" secrets --secrets-dir "$BANK_SECRETS_DIR"
-"$BANK_PYTHON" deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" load-images
+"$BANK_PYTHON" deployment/kubernetes/bao.py --state-dir "$BANK_STATE" tls --secrets-dir "$BANK_SECRETS_DIR"
 ```
 
-Из корня репозитория:
+Добавьте `--analytics` к подготовке для Cassandra/ClickHouse; `--superset` включает также BI. Telegram выбирается независимо. По умолчанию эти дополнительные контуры выключены.
+
+### Три фазы OpenTofu
+
+Сначала Cilium/Strimzi, затем OpenBao/ESO, после инициализации секретов — приложения. Для каждой фазы создаётся сохранённый plan; перед apply проверяются его действия, хеши исходников/артефактов и UID кластера. Destroy и замена ресурсов этим путём запрещены.
 
 ```bash
-"$BANK_PYTHON" infra/kubernetes/deploy.py plan --project-dir "$PWD/projects/sprint10-kafka" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
-# Проверить сохранённый plan и перечень действий до apply.
-"$BANK_PYTHON" infra/kubernetes/deploy.py apply --project-dir "$PWD/projects/sprint10-kafka" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
-"$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" ready
+for phase in --operator-only --secrets-only; do
+  "$BANK_PYTHON" "$BANK_ROOT/infra/kubernetes/deploy.py" plan "$phase" --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+  # Проверить план выбранной фазы перед apply.
+  "$BANK_PYTHON" "$BANK_ROOT/infra/kubernetes/deploy.py" apply "$phase" --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+done
+for operation in bootstrap configure import; do
+  "$BANK_PYTHON" deployment/kubernetes/bao.py --state-dir "$BANK_STATE" "$operation" --secrets-dir "$BANK_SECRETS_DIR"
+done
+"$BANK_PYTHON" deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" load-images
+"$BANK_PYTHON" "$BANK_ROOT/infra/kubernetes/deploy.py" plan --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+# Проверить план приложения перед apply.
+"$BANK_PYTHON" "$BANK_ROOT/infra/kubernetes/deploy.py" apply --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+"$BANK_PYTHON" deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" ready
 ```
 
-Внешний порт опубликован только на loopback по TCP; Caddy использует HTTP/1.1 и HTTP/2, не рекламируя недоступный через этот проброс QUIC/HTTP/3. Внутренние Kafka-клиенты используют TLS, SCRAM и индивидуальные ACL; настройки подключения лежат в ConfigMap, пароли — в отдельных Secret.
+`load-images` использует уже упакованные JAR и не запускает Gradle. Перед обновлением приложений OpenTofu проверяет, что OpenBao распечатан. Веб-сервисы используют одну реплику и `Recreate`: перед Flyway завершается прежний писатель, обновление требует окна обслуживания. HPA и одновременная работа старой/новой версий не поддерживаются.
 
-![Нода банка в OrbStack: loopback HTTPS и отдельные постоянные тома](../../screenshots/sprint10-kafka/04-orbstack-kubernetes.png)
+### Сеть и TLS
 
-### Несколько нод
+Cilium исполняет NetworkPolicy в dual-stack kind. Сервисы имеют IPv4/IPv6; приложения слушают оба семейства. По умолчанию вход запрещён, исходящие соединения приложений ограничены DNS, OpenBao и явными зависимостями. Это ограничение прикладного контура, а не универсальная политика egress для всего кластера.
+
+Front/Gateway/Accounts/Cash/Transfer и Keycloak общаются по HTTPS с проверкой имени и внутреннего CA. Kubelet читает только health/Prometheus endpoints по внутреннему HTTP. Kafka использует TLS, SCRAM и отдельные ACL; appender Logstash также проверяет TLS/имя. Caddy публикует только loopback HTTPS; HTTP/1.1 и HTTP/2, без рекламы недоступного через TCP-проброс QUIC.
+
+`probe.py network` проверяет успешный обмен по IPv4 и IPv6 с сохранением TLS SNI, запрещённые направления и отказ при неверном имени сертификата. HTTP-порт диагностики не является альтернативным незащищённым банковским API.
+
+### Одна и несколько нод
 
 | Параметр | `single` | `ha` |
 | --- | --- | --- |
-| Kubernetes | Одна kind-нода | Три kind-ноды: узел управления с рабочей ролью и два рабочих узла |
-| Kafka | Один совмещённый брокер/контроллер | Три отдельных контроллера и три брокера |
+| Kubernetes | Одна kind-нода | Узел управления с рабочей ролью + два рабочих узла |
+| Kafka | Совмещённый брокер/контроллер | Три брокера и три отдельных контроллера |
 | Репликация / min ISR | `1 / 1` | `3 / 2` |
-| Назначение | Полный локальный стенд, аналитика и BI | Проверка кворума и отказа одного рабочего узла |
-| Kafka при отказе ноды | Сервис временно недоступен | Запись возможна при сохранении min ISR и кворума |
+| Назначение | Локальная функциональная проверка | Проверка кворума и отказа одного рабочего узла |
 
-Deployment приложений использует одну реплику и `Recreate`: старый процесс записи завершается перед Flyway нового Pod. Для обновлений требуется окно обслуживания; параллельная работа старой и новой версии и HPA в этом стенде не поддерживаются.
+Для HA нужны отдельные state, `--environment test --profile ha` и другой порт при одновременной работе. Смена топологии не переключает существующий кластер. Все kind-ноды остаются в одной VM: это проверка процессов/рабочей ноды, без независимых физических дисков и датацентров. OpenBao и прикладные сервисы от выбора HA Kafka многорепличными не становятся.
 
-Совмещение узла управления с рабочей ролью уменьшает накладные расходы локальной VM, сохраняя три хоста для разнесения Kafka-процессов. Это учебная топология; выделенная отказоустойчивая плоскость управления для промышленного окружения требует отдельного расчёта ресурсов. Проверка отказа останавливает рабочий узел, сохраняя доступ к Kubernetes API.
+Kafka PVC — 2 GiB на Pod. Хранение событий семь дней не гарантирует вместимость такого диска: нужны расчёт потока, запас места и расширение. Контролируемая проверка `probe.py persistence` создаёт собственные топики/пользователей, проверяет запись при отказе брокера и возвращает рабочую ноду в `finally`, сохраняя PVC.
 
-На снимке отдельный кластер `bank10-test-ha`: три ноды работают, single-стенд остановлен. HTTPS доступен на loopback-порту `8450`.
-
-![Три HA-ноды банка в OrbStack и loopback HTTPS](../../screenshots/sprint10-kafka/06-orbstack-ha.png)
-
-Для `ha` используются другой state-каталог, профиль и отдельная идентичность кластера. Смена топологии кворума не является переключателем существующего кластера. Вызовы `prepare.py` и `runtime.py create` принимают `--environment dev|test|prod`; namespace имеет вид `bank10-dev`, `bank10-test` или `bank10-prod`.
-
-<details>
-<summary>Команды отдельного HA-профиля из корня репозитория</summary>
-
-Сначала остановить single, затем использовать отдельный state:
+### Остановка и продолжение
 
 ```bash
-"$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" stop
-export BANK_STATE="$HOME/Documents/study/java-runtime/sprint10-bank-test-ha"
-"$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/prepare.py --output-dir "$BANK_STATE" --environment test --profile ha
-"$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" create --environment test --profile ha --secrets-dir "$BANK_SECRETS_DIR"
-"$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" secrets --secrets-dir "$BANK_SECRETS_DIR"
-"$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" load-images
-"$BANK_PYTHON" infra/kubernetes/deploy.py plan --project-dir "$PWD/projects/sprint10-kafka" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
-# Проверить план перед apply.
-"$BANK_PYTHON" infra/kubernetes/deploy.py apply --project-dir "$PWD/projects/sprint10-kafka" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
-"$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" ready
-"$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/probe.py --state-dir "$BANK_STATE" persistence
+"$BANK_PYTHON" deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" stop
+python3 deployment/scripts/init-secrets.py --lock
+# Перед продолжением разблокировать тот же зашифрованный источник.
+python3 deployment/scripts/init-secrets.py
+"$BANK_PYTHON" deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" resume
 ```
 
-Проверка `persistence` создаёт собственные временные топики и пользователей Kafka, подтверждает запись, останавливает один рабочий узел с брокером/контроллером, проверяет запись при двух оставшихся брокерах/контроллерах и чтение после восстановления. В `finally` рабочий узел возвращается в исходное рабочее состояние; PVC сохраняются. Это отдельный контролируемый сценарий отказа, не шаг обычного запуска.
-
-</details>
-
-> При лимите OrbStack 12 ГБ полный аналитический стенд и HA-профиль запускаются последовательно. Все kind-ноды находятся в одной VM: это проверка отказа процессов и локальных рабочих узлов, без независимых дисков, датацентров или физической отказоустойчивости. Само имя namespace `prod` этих свойств не добавляет.
-
-Kafka PVC в учебном профиле — 2 GiB на Pod. Семидневный срок хранения не гарантирует, что поток поместится на таком диске: перед увеличением нагрузки нужны расчёт ёмкости, запас свободного места и план расширения хранилища.
-
-### Повторный запуск и остановка
-
-```bash
-"$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" stop
-python3 projects/sprint10-kafka/deployment/scripts/init-secrets.py --lock
-# Перед следующим запуском разблокировать источник секретов.
-python3 projects/sprint10-kafka/deployment/scripts/init-secrets.py
-"$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" resume
-```
-
-Остановка ограничена сохранённой идентичностью собственного кластера; приложения завершаются до хранилищ. PVC, образы, конфигурация и state сохраняются. Чужие стенды и контексты не выбираются автоматически.
+Останавливаются только собственные приложения, затем хранилища и kind-ноды. PVC, state, образы и идентичности сохраняются; ноды не запускаются сами после рестарта Docker. Resume восстанавливает прежнее планирование и распечатывает сохранённый OpenBao, не создавая новый Raft поверх прежнего.
 
 ## Проверки
 
 ```bash
-cd projects/sprint10-kafka
-./gradlew --no-daemon check packageDeployment
-python3 -m unittest discover -s deployment/scripts
+./gradlew --no-daemon --max-workers=2 check packageDeployment
+"$BANK_PYTHON" -m unittest discover -s deployment/scripts
 "$BANK_PYTHON" -m unittest discover -s deployment/kubernetes -p 'test_*.py'
-"$BANK_PYTHON" deployment/kubernetes/probe.py --state-dir "$BANK_STATE" lifecycle
+"$BANK_PYTHON" -m unittest discover -s deployment/jenkins -p 'test_*.py'
+"$BANK_PYTHON" deployment/kubernetes/bao.py --state-dir "$BANK_STATE" verify --secrets-dir "$BANK_SECRETS_DIR" --exercise-seal
+for probe in network security persistence lifecycle; do
+  "$BANK_PYTHON" deployment/kubernetes/probe.py --state-dir "$BANK_STATE" "$probe"
+done
 "$BANK_PYTHON" deployment/scripts/verify-runtime.py --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR" --analytics --faults
+"$BANK_PYTHON" deployment/scripts/verify-observability.py --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+"$BANK_PYTHON" "$BANK_ROOT/infra/kubernetes/deploy.py" noop --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
 ```
 
-Java-проверки включают деньги и откат транзакций, повторные команды, JWT с настоящими подписями и HTTP JWK Set, права сервисов и владельцев, Kafka-доставку и контрактные сообщения. Общие Spring-контексты переиспользуются без `@DirtiesContext`. Инфраструктура отдельно проверяет рендеринг Helm, допустимые планы OpenTofu и реальное сохранение Kafka-данных после отказа.
+`--analytics` в runtime-проверке выбирается только для стенда с включённой аналитикой. Проверка создаёт реальный трафик двух пользователей через HTTPS/OIDC, деньги/повторы/rollback, уведомления, изоляцию владельцев и конечную конкурентную нагрузку. Отказ хранилища восстанавливается после сценария. Логи, трассы и ответы API проверяются отдельно от статического разбора конфигураций.
 
-Runtime-проверка проходит через HTTPS, Keycloak, Front/Gateway и настоящие хранилища: два пользователя, CSRF, баланс, перевод, история, уведомления, первое прочтение и конечная конкурентная нагрузка.
+Java-тесты сохраняют настоящие подписанные JWT и HTTP JWK Set, общие кешированные Spring TestContext без `@DirtiesContext`, PostgreSQL/Kafka и контрактные сообщения. Новые регрессии проверяют наследование trace context через outbox/перезапуск, отсутствие SQL/query-секретов, неверный TLS SAN, недоставку/восстановление аналитического факта и журналирование только зафиксированных денежных операций.
 
-### Жизненный цикл Pod
+`verify-observability.py` обращается к настоящим Prometheus, Alertmanager, Grafana, Zipkin, Elasticsearch и Kibana. Проверяются scrape targets, значения графиков, связь parent/child HTTP/JDBC/Kafka spans, корреляция логов по traceId/spanId, операторские права и отсутствие секретов в экспортированных данных. Выключенные контуры и отсутствующие события перечисляются как пропуски, а не выдаются за успешные проверки. Закрытый отчёт остаётся вне Git; конфигурационные проверки используют официальные promtool/amtool.
 
-У веб-сервисов startup/liveness проверяют `/actuator/health/liveness`, readiness — `/actuator/health/readiness` на основном HTTP-порту. Разрешены только эти два GET без деталей зависимостей; Caddy не публикует `/actuator/*` наружу. Общая БД и Kafka исключены из liveness/readiness-групп: ограниченные ошибки, circuit breaker и сохранённый outbox позволяют пережить их отказ без каскадного рестарта всех JVM. Startup даёт приложению до пяти минут на старт, затем liveness допускает минуту временной недоступности.
+### Жизненный цикл
 
-Notifications остаётся без MVC/WebFlux и HTTP-порта. События `ApplicationAvailability` создают и снимают exec-маркеры; перед каждой JVM entrypoint удаляет маркеры предыдущего процесса из сохраняемого `emptyDir`. Прогон `lifecycle` на `single` и `ha` подтвердил снятие readiness без рестарта, восстановление контейнера по liveness и сохранение идентичности PVC. Конечные init/BI Jobs завершаются по своему результату и не получают probes.
+У веб-приложений startup/liveness проверяют `/actuator/health/liveness`, readiness — `/actuator/health/readiness` на внутреннем порту 8080; банковский HTTPS — 8443. Startup допускает до десяти минут холодного запуска, liveness — минуту временной недоступности. БД/Kafka исключены из liveness: отказ общей зависимости не должен перезапускать все JVM. Notifications использует exec-маркеры `ApplicationAvailability`, удаляемые перед новой JVM; его метрики читаются отдельно по 9400.
 
-Для PostgreSQL используется `pg_isready` по TCP, ZooKeeper — ответы `ruok/srvr`, Keycloak — штатные `/health/started`, `/health/live`, `/health/ready` на внутреннем порту 9000. ClickHouse проверяется через `/ping`, Superset — через HTTPS `/health`. Cassandra readiness проверяет ответ CQL `OPTIONS/SUPPORTED` без секретов и дополнительной JVM, с ограничением времени и размера кадра. Это готовность протокола; работу авторизации, таблиц и проекций отдельно проверяет runtime-сценарий. Startup/liveness проверяют собственный CQL-порт. Caddy отвечает на внутреннем HTTP `/healthz`, не зависящем от Front/IdP и TLS SNI kubelet; этот порт не опубликован Service. Kafka/оператор используют probes Strimzi.
+PostgreSQL использует `pg_isready`, ZooKeeper — `ruok/srvr`, Keycloak — штатные health endpoints на 9000. Cassandra readiness проверяет ограниченный CQL `OPTIONS/SUPPORTED`, без второй JVM и пароля; авторизация/таблицы проверяются реальным сценарием. Kafka использует probes Strimzi. Конечные bootstrap/BI Jobs завершаются по результату и не получают бессмысленную liveness-пробу.
 
-### Jenkins
+### Отдельный Jenkins-агент
 
-[Jenkinsfile](Jenkinsfile) задаёт тот же путь: Gradle `check packageDeployment` → Python/Helm-проверки → kind и файловые Secret → сохранённый план OpenTofu и его apply → Kafka TLS/ACL, перезапуск брокера, lifecycle, банковские сценарии и отказ хранилищ → пустой повторный план. JUnit и JAR/контрактные артефакты сохраняются; `post/cleanup` останавливает собственный стенд с сохранением PVC/state даже при ошибке архивации.
+[Jenkinsfile](Jenkinsfile) выполняет тот же полный цикл на агенте `bank-kubernetes` с одним executor. У контроллера нет executors; его HTTPS доступен на loopback. Агент Java 21 работает через inbound WebSocket и использует отдельный Docker daemon с TLS, без Docker socket хоста. Privileged требуется только изолированному DinD-демону для kind/Cilium.
 
-В Jenkins Pipeline from SCM указывается Script Path `projects/sprint10-kafka/Jenkinsfile`. Нужны плагины Pipeline, Git и JUnit, выделенный Linux x86_64 агент `bank-kubernetes` с одним executor и собственным Docker daemon, Java 21, Node 24.4.0, Python/venv, OpenTofu 1.11.6, Helm 4.3.1, kind 0.33.0, kubectl 1.34.11, `mkcert` и `openssl`. Docker socket такого агента не разделяется с другими окружениями. Plaintext-источник тестовых секретов допустим только на этом изолированном Linux CI-агенте; для промышленной среды нужны внешнее хранилище секретов и шифрованный StorageClass.
+```bash
+export BANK_JENKINS_SECRETS_DIR="$BANK_SECRETS_DIR"
+python3 deployment/jenkins/ci.py init
+python3 deployment/jenkins/ci.py up
+python3 deployment/jenkins/ci.py build
+python3 deployment/jenkins/ci.py status
+python3 deployment/jenkins/ci.py stop
+```
 
-GitHub Actions остаётся основным автоматическим прогоном. В нём Jenkinsfile отдельно проверяется официальным Jenkins Declarative Linter с закреплённым digest, без внешнего контроллера; команды pipeline выполняются теми же проверочными скриптами. Эта валидация синтаксиса не подменяет запуск job на настроенном Jenkins-агенте.
+Перед сборкой публикуется локальный снимок только чистого закоммиченного HEAD с историей; проверяются фактический SHA и имя агента. Pipeline собирает Gradle, проверяет конфигурации, создаёт собственный кластер, инициализирует OpenBao, проверяет реальный банк/телеметрию/отказы и пустой повторный plan. JUnit и JAR сохраняются; секреты, state и полные runtime-журналы не архивируются. Cleanup останавливает свой стенд даже после ошибки.
 
-На локальном single-стенде прошли TLS/OIDC, изоляция двух владельцев, доставка и прочтение уведомлений, шесть запросов BI и независимое восстановление Cassandra/ClickHouse. Конечная нагрузка — 24 команды от четырёх клиентов и 24 повтора, наблюдаемый p95 — 0,414 с после прогрева и 4,331 с после обновления сервисов при одновременной работе BI. Это замеры двух конечных прогонов на общем стенде, без заявления SLO или предельной пропускной способности.
-
-На HA-стенде при остановленном рабочем узле остались два брокера и два контроллера: новая запись с `acks=all` подтвердилась, после возврата ноды прежние сообщения прочитались. Все девять PVC и их тома сохранили идентичность, OOM не зафиксирован. После восстановления прошли банковские сценарии с двумя владельцами, деньгами, повторами команд и Kafka-уведомлениями.
-
-После восстановления открыл кабинет через HTTPS/OIDC: баланс, история и Kafka-уведомления доступны. В деталях уведомления показан остаток на момент события, отдельно от текущего баланса.
-
-![Кабинет HA-стенда: сохранённое Kafka-уведомление после восстановления](../../screenshots/sprint10-kafka/07-ha-notifications.png)
+На macOS Jenkins TLS и пароль также находятся во внешнем AES-источнике; используется существующий доверенный CA. Изолированный Linux CI получает только собственные одноразовые seed/recovery-секреты и сертификаты. Промышленный агент требует отдельного доверенного хоста, защищённого хранилища, резервного копирования и ограниченной сетевой зоны. Проверка Declarative Linter в GitHub Actions дополняет запуск настоящего Jenkins pipeline, а не заменяет его.
 
 ## Границы стенда
 
-- События доставляются как минимум один раз; единая транзакция PostgreSQL и Kafka не заявляется.
-- Денежные значения передаются целым количеством минимальных денежных единиц. Аналитика не проводит операции и может отставать.
-- Текущий BI-дашборд ограничен месяцем UTC; личная аналитика доступна за текущий и три предыдущих месяца. Чтение одной партиции Cassandra ограничено 1000 событиями: при превышении аналитика показывает недоступность, а не неполную сумму; банковская история и проведение денег продолжают работать. Для большего объёма нужны временные партиции меньшего размера и инкрементальные агрегаты.
-- Горячее и холодное хранилища ClickHouse здесь — каталоги одного сохраняемого PVC, без независимых физических носителей.
-- Локальный CA, hostPath и внутренние HTTP-вызовы авторизации требуют другой настройки для внешнего промышленного окружения.
-- Исполнение NetworkPolicy в стандартном kind CNI не подтверждено; изоляция сетевыми политиками здесь не заявляется. Kafka отдельно проверяет TLS, SCRAM и ACL.
-- Срок хранения Kafka и локальный сохраняемый PVC не заменяют резервную копию и проверенное восстановление из него.
+- PostgreSQL и Kafka не образуют общей транзакции; доставка как минимум один раз, повтор защищён идемпотентными квитанциями.
+- Деньги — целое число минимальных денежных единиц. Аналитика может отставать и не проводит операции; отклонённые суммы не смешиваются с оборотом.
+- Trace sampling, ограниченная очередь логов и срок хранения — управляемые компромиссы. Наблюдаемость не заменяет финансовый журнал PostgreSQL.
+- Месячные Cassandra-партиции ограничены 1000 событиями: при превышении показывается недоступность, а не неполная сумма. Для большего потока нужны более короткие разделы и инкрементальные агрегаты.
+- ClickHouse hot/cold — каталоги одного PVC; hostPath, одна VM, локальный CA и однорепличные службы не обеспечивают физическую HA.
+- PVC, Kafka retention и Raft snapshot OpenBao не заменяют политику резервного копирования и проверку восстановления всего банка.
 
 ## Источники
 
-- [Spring Kafka: обработка ошибок и подтверждённая публикация в DLT](https://docs.spring.io/spring-kafka/reference/kafka/annotation-error-handling.html).
-- [Strimzi 1.3: KRaft, KafkaNodePool и постоянное хранилище](https://strimzi.io/docs/operators/1.3.0/deploying).
-- [Superset: импорт активов через API](https://superset.apache.org/developer-docs/api/import-export/).
-- [Caddy: выбор протоколов публичного HTTP-сервера](https://caddyserver.com/docs/caddyfile/options#protocols).
-- [Spring Boot 3.5: состояния приложения и probes](https://docs.spring.io/spring-boot/3.5/reference/actuator/endpoints.html#actuator.endpoints.kubernetes-probes).
+- [Spring Boot 3.5: наблюдаемость](https://docs.spring.io/spring-boot/3.5/reference/actuator/observability.html).
+- [Spring Kafka: наблюдаемость Micrometer](https://docs.spring.io/spring-kafka/reference/kafka/micrometer.html).
+- [OpenBao: Kubernetes auth](https://openbao.org/docs/auth/kubernetes/) и [External Secrets: OpenBao](https://external-secrets.io/latest/provider/openbao/).
 - [Kubernetes: startup, readiness и liveness](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/).
 - [Jenkins: проверка Declarative Pipeline](https://www.jenkins.io/doc/book/pipeline/development/#linter).

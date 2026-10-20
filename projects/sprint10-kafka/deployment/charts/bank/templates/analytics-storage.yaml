@@ -3,6 +3,9 @@
 {{- range $store := $stores }}
 {{- $initialization := index $.Values.assets "bank10-analytics-setup" (printf "init-%s.sh" $store.name) }}
 {{- $startup := pick (index $.Values.assets "bank10-analytics-setup") (printf "start-%s.sh" $store.name) }}
+{{- if eq $store.name "cassandra" }}
+{{- $startup = pick (index $.Values.assets "bank10-analytics-setup") "start-cassandra.sh" "probe-cassandra.py" }}
+{{- end }}
 {{- if eq $store.name "clickhouse" }}
 {{- $initialization = printf "%s\n%s\n%s" $initialization (index $.Values.assets "bank10-analytics-setup" "init-clickhouse.sql") (index $.Values.assets "bank10-analytics-setup" "activity-marts.sql") }}
 {{- $startup = pick (index $.Values.assets "bank10-analytics-setup") "start-clickhouse.sh" "clickhouse-users.xml" "clickhouse-storage.xml" }}
@@ -62,9 +65,32 @@ spec:
           env: [{name: CLICKHOUSE_SKIP_USER_SETUP, value: "1"}]
           {{- end }}
           ports: [{name: client, containerPort: {{ $store.port }}}]
-          readinessProbe:
+          startupProbe:
+            {{- if eq $store.name "cassandra" }}
             tcpSocket: {port: client}
+            {{- else }}
+            httpGet: {path: /ping, port: client}
+            {{- end }}
             periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 120
+          readinessProbe:
+            {{- if eq $store.name "cassandra" }}
+            exec: {command: [python3, /setup/probe-cassandra.py]}
+            {{- else }}
+            httpGet: {path: /ping, port: client}
+            {{- end }}
+            periodSeconds: 15
+            timeoutSeconds: 5
+          livenessProbe:
+            {{- if eq $store.name "cassandra" }}
+            tcpSocket: {port: client}
+            {{- else }}
+            httpGet: {path: /ping, port: client}
+            {{- end }}
+            periodSeconds: 15
+            timeoutSeconds: 2
+            failureThreshold: 6
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

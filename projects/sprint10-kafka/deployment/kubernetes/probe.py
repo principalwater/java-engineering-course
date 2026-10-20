@@ -262,17 +262,67 @@ def persistence(identity: dict, state_dir: Path, *, ha: bool) -> None:
             kubectl(identity, "delete", kind, prefix, "--wait=true", "--timeout=120s", timeout=150)
 
 
+def lifecycle(identity: dict, state_dir: Path) -> None:
+    """Prove that kubelet withdraws readiness and restarts an unhealthy non-web worker."""
+    volumes = pvc_snapshot(identity)
+    pods = json.loads(kubectl(identity, "get", "pods", "-l", "app=notifications", "-o", "json"))["items"]
+    if len(pods) != 1:
+        raise RuntimeError("Expected one owned notification worker")
+    pod = pods[0]
+    name, uid = pod["metadata"]["name"], pod["metadata"]["uid"]
+    container = pod["spec"]["containers"][0]
+    if any(probe not in container for probe in ("startupProbe", "readinessProbe", "livenessProbe")):
+        raise RuntimeError("Notification worker has incomplete lifecycle probes")
+    restarts = pod["status"]["containerStatuses"][0]["restartCount"]
+
+    def status() -> dict:
+        current = json.loads(kubectl(identity, "get", "pod", name, "-o", "json"))
+        if current["metadata"]["uid"] != uid:
+            raise RuntimeError("Pod was replaced instead of recovering its container")
+        return current["status"]["containerStatuses"][0]
+
+    kubectl(identity, "exec", name, "--", "rm", "-f", "/tmp/bank-probes/ready")
+    try:
+        deadline = time.monotonic() + 40
+        while status()["ready"]:
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Kubelet did not withdraw worker readiness")
+            time.sleep(2)
+        if status()["restartCount"] != restarts:
+            raise RuntimeError("Readiness failure restarted a healthy worker")
+    finally:
+        kubectl(identity, "exec", name, "--", "touch", "/tmp/bank-probes/ready")
+    kubectl(identity, "wait", "--for=condition=Ready", f"pod/{name}", "--timeout=60s")
+
+    kubectl(identity, "exec", name, "--", "rm", "-f", "/tmp/bank-probes/live")
+    deadline = time.monotonic() + 240
+    while time.monotonic() < deadline:
+        current = status()
+        if current["restartCount"] > restarts and current.get("started") and current["ready"]:
+            break
+        time.sleep(2)
+    else:
+        raise RuntimeError("Kubelet did not restart and ready the unhealthy worker")
+    if pvc_snapshot(identity) != volumes:
+        raise RuntimeError("Lifecycle recovery changed retained storage identity")
+    save_receipt(state_dir / "lifecycle-proof.json", {"readiness_withdrawn": True,
+                 "liveness_recovered": True, "storage_preserved": True})
+    print("Lifecycle passed: readiness withdrawal without restart, liveness recovery and retained PVCs")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state-dir", type=Path, required=True)
-    parser.add_argument("operation", choices=("security", "persistence"))
+    parser.add_argument("operation", choices=("security", "persistence", "lifecycle"))
     args = parser.parse_args()
     identity = owned_identity(args.state_dir)
     source = json.loads((args.state_dir / "source.json").read_text(encoding="utf-8"))
     if args.operation == "security":
         security(identity, source["analytics"])
-    else:
+    elif args.operation == "persistence":
         persistence(identity, args.state_dir, ha=identity["profile"] == "ha")
+    else:
+        lifecycle(identity, args.state_dir)
 
 
 if __name__ == "__main__":

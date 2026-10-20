@@ -1,10 +1,12 @@
 package dev.principalwater.bank.front.config;
 
+import dev.principalwater.bank.contract.ProbePaths;
 import dev.principalwater.bank.contract.security.OAuthScope;
 import java.util.Map;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AuthorizeHttpRequestsConfigurer;
@@ -106,6 +108,8 @@ public class FrontSecurity {
     private void configureRoutes(
             AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry
                     routes) {
+        routes.requestMatchers(HttpMethod.GET, ProbePaths.LIVENESS, ProbePaths.READINESS)
+                .permitAll();
         routes.requestMatchers(
                         LOGIN_PATH,
                         "/login.html",

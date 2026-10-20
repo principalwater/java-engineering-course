@@ -626,6 +626,8 @@ def verify(base_url, secrets_dir, containers, analytics=False, superset=False):
         return wait_for(label, condition, timeout=startup_deadline - time.monotonic())
     anonymous = User(base_url, secrets_dir)
     ready("bank TLS/login readiness", lambda: anonymous.request("GET", "/login")[0] == 200)
+    for path in ("/actuator/health/liveness", "/actuator/health/readiness", "/actuator/env"):
+        require(anonymous.request("GET", path)[0] == 404, "Edge exposed a management endpoint")
     with anonymous.http.open(Request(base_url + "/login", method="HEAD"), timeout=HTTP_TIMEOUT) as response:
         require(response.status == 200 and "h3=" not in response.headers.get("Alt-Svc", ""),
                 "TCP-only ingress advertised unsupported HTTP/3")

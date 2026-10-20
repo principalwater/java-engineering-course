@@ -46,9 +46,20 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
-          readinessProbe:
-            tcpSocket: {port: http}
+          startupProbe:
+            httpGet: {path: /health, port: http, scheme: HTTPS}
             periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 120
+          readinessProbe:
+            httpGet: {path: /health, port: http, scheme: HTTPS}
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: {path: /health, port: http, scheme: HTTPS}
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:

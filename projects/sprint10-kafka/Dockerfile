@@ -11,7 +11,8 @@ COPY --from=layers /extract/extracted/spring-boot-loader/ ./
 COPY --from=layers /extract/extracted/snapshot-dependencies/ ./
 COPY --from=layers /extract/extracted/application/ ./
 COPY config/jvm-network.security /app/network.security
+COPY config/entrypoint.sh /app/entrypoint.sh
 USER 10001:10001
 EXPOSE 8080
 # Heap оставляет запас для metaspace, JIT, виртуальных потоков и Netty Gateway.
-ENTRYPOINT ["java", "-Djava.security.properties=/app/network.security", "-XX:MaxRAMPercentage=45.0", "-XX:MaxDirectMemorySize=48m", "-XX:ActiveProcessorCount=2", "-XX:+ExitOnOutOfMemoryError", "-jar", "application.jar"]
+ENTRYPOINT ["sh", "/app/entrypoint.sh"]

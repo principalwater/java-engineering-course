@@ -39,10 +39,23 @@ spec:
           image: {{ .Values.edge.image | quote }}
           imagePullPolicy: IfNotPresent
           args: [caddy, run, --config, /etc/caddy/Caddyfile, --adapter, caddyfile]
-          ports: [{name: https, containerPort: {{ .Values.global.externalPort }}}]
-          readinessProbe:
-            tcpSocket: {port: https}
+          ports: [{name: https, containerPort: {{ .Values.global.externalPort }}}, {name: health, containerPort: 8081}]
+          startupProbe:
+            httpGet: &edgeHealth
+              path: /healthz
+              port: health
             periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: *edgeHealth
+            periodSeconds: 5
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet: *edgeHealth
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
           securityContext:
             {{- include "bank.containerSecurity" . | nindent 12 }}
           resources:

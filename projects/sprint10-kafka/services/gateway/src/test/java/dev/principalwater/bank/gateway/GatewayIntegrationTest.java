@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import com.sun.net.httpserver.HttpServer;
+import dev.principalwater.bank.contract.ProbePaths;
 import dev.principalwater.bank.testing.JwtFixture;
 import dev.principalwater.bank.testing.SecurityTestBase;
 import java.io.IOException;
@@ -15,8 +16,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.availability.AvailabilityChangeEvent;
+import org.springframework.boot.availability.ReadinessState;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -29,6 +33,33 @@ class GatewayIntegrationTest extends SecurityTestBase {
     private static final AtomicBoolean RECEIVED_OWNER_HEADER = new AtomicBoolean();
     private static final HttpServer ACCOUNTS = accountsServer();
     @Autowired private WebTestClient client;
+    @Autowired private ConfigurableApplicationContext context;
+
+    @Test
+    void probesReportReadinessWithoutCredentialsOrDependencyDetails() {
+        client.get()
+                .uri(ProbePaths.LIVENESS)
+                .exchange()
+                .expectStatus()
+                .isOk()
+                .expectBody()
+                .json("{\"status\":\"UP\"}");
+        try {
+            AvailabilityChangeEvent.publish(context, ReadinessState.REFUSING_TRAFFIC);
+            client.get()
+                    .uri(ProbePaths.READINESS)
+                    .exchange()
+                    .expectStatus()
+                    .isEqualTo(503)
+                    .expectBody()
+                    .json("{\"status\":\"OUT_OF_SERVICE\"}");
+            client.get().uri(ProbePaths.LIVENESS).exchange().expectStatus().isOk();
+        } finally {
+            AvailabilityChangeEvent.publish(context, ReadinessState.ACCEPTING_TRAFFIC);
+        }
+        client.get().uri(ProbePaths.READINESS).exchange().expectStatus().isOk();
+        client.get().uri("/actuator/env").exchange().expectStatus().isUnauthorized();
+    }
 
     @DynamicPropertySource
     static void discoveredAccount(DynamicPropertyRegistry properties) {

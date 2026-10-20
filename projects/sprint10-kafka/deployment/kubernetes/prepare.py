@@ -26,6 +26,7 @@ PUBLIC_ASSETS = {
 ANALYTICS_ASSETS = {
     "bank10-analytics-setup": {
         "start-cassandra.sh": "deployment/scripts/start-cassandra.sh",
+        "probe-cassandra.py": "deployment/scripts/probe-cassandra.py",
         "init-cassandra.sh": "deployment/scripts/init-cassandra.sh",
         "start-clickhouse.sh": "deployment/scripts/start-clickhouse.sh",
         "init-clickhouse.sh": "deployment/scripts/init-clickhouse.sh",
@@ -72,7 +73,8 @@ def image_reference(project: Path, name: str) -> str:
         if not artifact.is_file():
             raise ValueError(f"Packaged Gradle artifact missing: {name}.jar")
         hashed.update(artifact.read_bytes() + (project / "Dockerfile").read_bytes()
-                      + (project / "config/jvm-network.security").read_bytes())
+                      + (project / "config/jvm-network.security").read_bytes()
+                      + (project / "config/entrypoint.sh").read_bytes())
     else:
         context = project / "deployment" / name
         for path in sorted(context.rglob("*")):

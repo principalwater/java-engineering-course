@@ -1,5 +1,6 @@
 package dev.principalwater.bank.gateway.config;
 
+import dev.principalwater.bank.contract.ProbePaths;
 import dev.principalwater.bank.contract.security.BankTokenProfile;
 import io.netty.channel.ChannelOption;
 import java.time.Duration;
@@ -7,6 +8,7 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.config.Customizer;
@@ -61,6 +63,7 @@ public class GatewaySecurity {
     }
 
     private void configureRoutes(ServerHttpSecurity.AuthorizeExchangeSpec access) {
+        access.pathMatchers(HttpMethod.GET, ProbePaths.LIVENESS, ProbePaths.READINESS).permitAll();
         access.pathMatchers(API_PATH).access(this::authorizeBankFront).anyExchange().denyAll();
     }
 

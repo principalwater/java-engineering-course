@@ -44,10 +44,21 @@ spec:
             - {name: KC_PROXY_HEADERS, value: xforwarded}
             - {name: KC_CACHE, value: local}
             - {name: JAVA_OPTS_APPEND, value: "-Xms128m -Xmx384m -XX:ActiveProcessorCount=2"}
-          ports: [{name: http, containerPort: 8080}]
-          readinessProbe:
-            tcpSocket: {port: http}
+          ports: [{name: http, containerPort: 8080}, {name: management, containerPort: 9000}]
+          startupProbe:
+            httpGet: {path: /health/started, port: management}
             periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /health/ready, port: management}
+            periodSeconds: 5
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet: {path: /health/live, port: management}
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
           securityContext:
             {{- include "bank.containerSecurity" . | nindent 12 }}
           resources:

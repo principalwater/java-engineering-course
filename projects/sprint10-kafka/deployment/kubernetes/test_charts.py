@@ -125,6 +125,7 @@ class BankChartTest(unittest.TestCase):
             ("bank10-database", "init-database.sh", {("StatefulSet", "database")}),
             ("bank10-authorization", "bank-realm.json", {("Deployment", "authorization")}),
             ("bank10-analytics-setup", "start-cassandra.sh", {("StatefulSet", "cassandra")}),
+            ("bank10-analytics-setup", "probe-cassandra.py", {("StatefulSet", "cassandra")}),
             ("bank10-analytics-setup", "start-clickhouse.sh", {("StatefulSet", "clickhouse")}),
             ("bank10-analytics-setup", "clickhouse-users.xml", {("StatefulSet", "clickhouse")}),
             ("bank10-analytics-setup", "clickhouse-storage.xml", {("StatefulSet", "clickhouse")}),
@@ -155,6 +156,29 @@ class BankChartTest(unittest.TestCase):
                                        "--set", "apps.accounts.replicas=2"], capture_output=True, text=True)
         self.assertNotEqual(extra_replica.returncode, 0)
         self.assertIn("replicas", extra_replica.stderr)
+
+    def test_long_running_workloads_have_application_level_lifecycle_probes(self):
+        for profile, analytics in self.models:
+            workloads = {**self.resources(profile, analytics, kind="Deployment"),
+                         **self.resources(profile, analytics, kind="StatefulSet")}
+            for name, workload in workloads.items():
+                with self.subTest(profile=profile, analytics=analytics, workload=name):
+                    container = workload["spec"]["template"]["spec"]["containers"][0]
+                    for probe in ("startupProbe", "readinessProbe", "livenessProbe"):
+                        self.assertIn(probe, container)
+                        self.assertGreater(container[probe].get("timeoutSeconds", 1), 0)
+                    self.assertNotIn("tcpSocket", container["readinessProbe"])
+            applications = self.resources(profile, analytics, kind="Deployment")
+            for name in ("accounts", "cash", "transfer", "front", "gateway", "analytics"):
+                if name in applications:
+                    container = applications[name]["spec"]["template"]["spec"]["containers"][0]
+                    self.assertEqual(container["readinessProbe"]["httpGet"]["path"],
+                                     "/actuator/health/readiness")
+                    self.assertEqual(container["livenessProbe"]["httpGet"]["path"],
+                                     "/actuator/health/liveness")
+            worker = applications["notifications"]["spec"]["template"]["spec"]["containers"][0]
+            self.assertIn("exec", worker["readinessProbe"])
+            self.assertNotIn("ports", worker)
 
 
 if __name__ == "__main__":

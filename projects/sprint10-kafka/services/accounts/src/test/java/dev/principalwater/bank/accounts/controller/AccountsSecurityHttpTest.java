@@ -19,6 +19,7 @@ import dev.principalwater.bank.contract.NotificationRead;
 import dev.principalwater.bank.contract.NotificationReceipt;
 import dev.principalwater.bank.contract.NotificationSource;
 import dev.principalwater.bank.contract.OperationType;
+import dev.principalwater.bank.contract.ProbePaths;
 import dev.principalwater.bank.testing.BankFixtures;
 import dev.principalwater.bank.testing.JwtFixture;
 import java.time.Instant;
@@ -37,6 +38,18 @@ class AccountsSecurityHttpTest extends AccountsTestBase {
     @Autowired private MoneyService money;
     @Autowired private ProfileService profiles;
     @Autowired private AccountNotifications notifications;
+
+    @Test
+    void probesAreAnonymousButOtherManagementAndBusinessRoutesRemainProtected() throws Exception {
+        for (String path : List.of(ProbePaths.LIVENESS, ProbePaths.READINESS)) {
+            http.perform(get(path))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("UP"))
+                    .andExpect(jsonPath("$.components").doesNotExist());
+        }
+        http.perform(get("/actuator/env")).andExpect(status().isUnauthorized());
+        assertThat(count("account")).isZero();
+    }
 
     @Test
     void anonymousCannotProvisionAccount() throws Exception {

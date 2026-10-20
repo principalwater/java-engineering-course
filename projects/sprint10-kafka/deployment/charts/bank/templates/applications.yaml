@@ -26,6 +26,7 @@ data:
   {{- if not $web }}
   SPRING_MAIN_WEB_APPLICATION_TYPE: none
   SPRING_CLOUD_ZOOKEEPER_DISCOVERY_ENABLED: "false"
+  BANK_PROBES_ENABLED: "true"
   {{- else }}
   SERVER_PORT: "8080"
   {{- end }}
@@ -103,10 +104,35 @@ spec:
             - configMapRef: {name: {{ $name }}-client}
           {{- if $web }}
           ports: [{name: http, containerPort: 8080}]
-          readinessProbe:
-            tcpSocket: {port: http}
+          startupProbe:
+            httpGet: {path: /actuator/health/liveness, port: http}
             periodSeconds: 5
-            timeoutSeconds: 1
+            timeoutSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /actuator/health/readiness, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet: {path: /actuator/health/liveness, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
+          {{- else }}
+          startupProbe:
+            exec: {command: [test, -f, /tmp/bank-probes/live]}
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            exec: {command: [test, -f, /tmp/bank-probes/ready]}
+            periodSeconds: 5
+            timeoutSeconds: 2
+          livenessProbe:
+            exec: {command: [test, -f, /tmp/bank-probes/live]}
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
           {{- end }}
           securityContext:
             {{- include "bank.containerSecurity" $ | nindent 12 }}

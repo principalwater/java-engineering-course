@@ -137,7 +137,7 @@ class OutboxReplayLauncherTest extends PostgresTestBase {
                         directory.resolve("private"),
                         PosixFilePermissions.asFileAttribute(
                                 PosixFilePermissions.fromString("rwx------")));
-        HikariDataSource database = (HikariDataSource) jdbc.getDataSource();
+        HikariDataSource database = jdbc.getDataSource().unwrap(HikariDataSource.class);
         writeSecret(secrets, "spring.datasource.url", database.getJdbcUrl());
         writeSecret(secrets, "spring.datasource.username", database.getUsername());
         writeSecret(secrets, "spring.datasource.password", database.getPassword());

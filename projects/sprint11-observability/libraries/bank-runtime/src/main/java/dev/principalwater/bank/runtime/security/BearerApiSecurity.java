@@ -14,17 +14,23 @@ public final class BearerApiSecurity {
     public static HttpSecurity stateless(HttpSecurity http) throws Exception {
         // Эти API принимают только bearer: browser session и CSRF остаются у Front.
         return http.csrf(AbstractHttpConfigurer::disable)
-                .authorizeHttpRequests(BearerApiSecurity::allowProbes)
+                .authorizeHttpRequests(BearerApiSecurity::allowManagement)
                 .requestCache(AbstractHttpConfigurer::disable)
                 .sessionManagement(
                         session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .oauth2ResourceServer(resource -> resource.jwt(Customizer.withDefaults()));
     }
 
-    private static void allowProbes(
+    // Метрики открываются точным GET-путём без токена: Prometheus не получает JWT, а доступ
+    // ограничивают сетевая политика и внешний прокси. Остальные пути Actuator остаются закрытыми.
+    private static void allowManagement(
             AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry
                     routes) {
-        routes.requestMatchers(HttpMethod.GET, ProbePaths.LIVENESS, ProbePaths.READINESS)
+        routes.requestMatchers(
+                        HttpMethod.GET,
+                        ProbePaths.LIVENESS,
+                        ProbePaths.READINESS,
+                        ProbePaths.PROMETHEUS)
                 .permitAll();
     }
 }

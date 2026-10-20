@@ -3,6 +3,7 @@ package dev.principalwater.bank.runtime.security;
 import dev.principalwater.bank.contract.security.BankTokenProfile;
 import java.util.List;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -16,18 +17,19 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
-import org.springframework.web.client.RestTemplate;
 
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(JwtProperties.class)
 public class ApiJwtConfiguration {
     @Bean
-    JwtDecoder jwtDecoder(JwtProperties properties) {
+    JwtDecoder jwtDecoder(JwtProperties properties, RestTemplateBuilder restTemplates) {
         JdkClientHttpRequestFactory requests = HttpRequests.create();
+        // Внедрённый builder несёт наблюдение Boot (метрика и span запроса JWK Set); собственная
+        // фабрика сохраняет тайм-ауты и пул соединений JDK-клиента.
         NimbusJwtDecoder decoder =
                 NimbusJwtDecoder.withJwkSetUri(properties.jwkSetUri().toString())
                         .jwsAlgorithm(SignatureAlgorithm.RS256)
-                        .restOperations(new RestTemplate(requests))
+                        .restOperations(restTemplates.requestFactory(() -> requests).build())
                         .build();
         OAuth2TokenValidator<Jwt> audience =
                 jwt -> {

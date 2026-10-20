@@ -17,6 +17,8 @@ import org.springframework.test.context.DynamicPropertySource;
         properties = {
             "spring.config.import=classpath:bank-common.properties,classpath:bank-kafka.properties",
             "spring.kafka.security.protocol=PLAINTEXT",
+            // Один контекст на модуль: факт отказа пишется только при сбое публикации receipt.
+            "bank.analytics.enabled=true",
             "stubrunner.cloud.enabled=false"
         })
 public abstract class NotificationsTestBase extends PostgresTestBase {

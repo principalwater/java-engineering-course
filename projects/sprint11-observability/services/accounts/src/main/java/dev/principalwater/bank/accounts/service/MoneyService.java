@@ -32,18 +32,21 @@ public class MoneyService {
     private final KafkaOutbox outbox;
     private final Clock clock;
     private final boolean analyticsEnabled;
+    private final MoneySignals signals;
 
     public MoneyService(
             AccountDao accounts,
             OperationDao operations,
             KafkaOutbox outbox,
             Clock clock,
-            @Value("${bank.analytics.enabled:false}") boolean analyticsEnabled) {
+            @Value("${bank.analytics.enabled:false}") boolean analyticsEnabled,
+            MoneySignals signals) {
         this.accounts = accounts;
         this.operations = operations;
         this.outbox = outbox;
         this.clock = clock;
         this.analyticsEnabled = analyticsEnabled;
+        this.signals = signals;
     }
 
     @Transactional
@@ -60,6 +63,7 @@ public class MoneyService {
         Account recipient = locked.get(command.recipientId());
         BankError rejection = MoneyRules.rejection(source, recipient, command);
         if (rejection != null) {
+            signals.rejected(command, source, recipient, rejection, now);
             return operations.finish(source.id(), command, rejection, source.balanceMinor(), now);
         }
         long delta =
@@ -83,7 +87,9 @@ public class MoneyService {
                     source.id(),
                     now);
         }
-        return operations.finish(source.id(), command, null, balance, now);
+        OperationResult result = operations.finish(source.id(), command, null, balance, now);
+        signals.accepted(command.type());
+        return result;
     }
 
     private Map<UUID, Account> lockParticipants(UUID source, UUID recipient) {

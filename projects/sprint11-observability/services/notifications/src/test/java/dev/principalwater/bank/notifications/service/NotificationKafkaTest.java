@@ -7,13 +7,18 @@ import static org.awaitility.Awaitility.await;
 import com.zaxxer.hikari.HikariDataSource;
 import dev.principalwater.bank.contract.BankEvent;
 import dev.principalwater.bank.contract.BankTopics;
+import dev.principalwater.bank.contract.BusinessFailureEvent;
+import dev.principalwater.bank.contract.BusinessFailureType;
 import dev.principalwater.bank.contract.NotificationKind;
 import dev.principalwater.bank.contract.NotificationReceipt;
 import dev.principalwater.bank.contract.NotificationSource;
 import dev.principalwater.bank.messaging.KafkaOutbox;
+import dev.principalwater.bank.messaging.MessageCodec;
 import dev.principalwater.bank.notifications.NotificationsApplication;
 import dev.principalwater.bank.notifications.NotificationsTestBase;
 import dev.principalwater.bank.testing.KafkaFixture;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.sql.Connection;
 import java.sql.Statement;
 import java.time.Instant;
@@ -39,8 +44,12 @@ import org.springframework.kafka.listener.MessageListener;
 
 @ExtendWith(OutputCaptureExtension.class)
 class NotificationKafkaTest extends NotificationsTestBase {
+    private static final String LOGIN = "notification-owner";
+    private static final String RECEIPT_PUBLISH_FAILED = "receipt_publish_failed";
     @Autowired private KafkaTemplate<String, String> kafka;
     @Autowired private KafkaOutbox outbox;
+    @Autowired private MessageCodec codec;
+    @Autowired private MeterRegistry meters;
     @Autowired private ApplicationContext context;
     @Autowired private NotificationService notifications;
     @Autowired private NotificationReplay replay;
@@ -130,6 +139,7 @@ class NotificationKafkaTest extends NotificationsTestBase {
     @Test
     void malformedForgedSourceKeyAndChangedPayloadGoToDurableDltBeforeNextValidEvent(
             CapturedOutput output) throws Exception {
+        double rejected = failures("_unknown", "event_rejected");
         startConsumers();
         BankEvent original = event("DEPOSIT_SUCCEEDED");
         send(NotificationSource.CASH, original);
@@ -186,6 +196,9 @@ class NotificationKafkaTest extends NotificationsTestBase {
                         KafkaFixture.records(
                                 NotificationSource.CASH.getTopic() + BankTopics.DLT_SUFFIX, 6))
                 .hasSize(6);
+        // Каждая отброшенная запись считается один раз; логин берётся только из проверенного
+        // события, поэтому отказы остаются под неизвестным логином.
+        assertThat(failures("_unknown", "event_rejected") - rejected).isEqualTo(6);
         assertThat(output.getAll())
                 .doesNotContain(
                         original.ownerId().toString(),
@@ -204,6 +217,7 @@ class NotificationKafkaTest extends NotificationsTestBase {
             throws Exception {
         BankEvent event = event("DEPOSIT_SUCCEEDED");
         long offset = KafkaFixture.endOffset(NotificationSource.CASH.getTopic());
+        double unavailable = failures(LOGIN, "receive_unavailable");
         try (Connection blocker = jdbc.getDataSource().getConnection()) {
             blocker.setAutoCommit(false);
             try (Statement statement = blocker.createStatement()) {
@@ -233,6 +247,12 @@ class NotificationKafkaTest extends NotificationsTestBase {
                                         .isLessThanOrEqualTo(offset);
                             });
             stopConsumers();
+            // Сбой попытки виден метрикой, хотя ошибка ушла в retry без DLT и без подтверждения.
+            await().atMost(KafkaFixture.WAIT)
+                    .untilAsserted(
+                            () ->
+                                    assertThat(failures(LOGIN, "receive_unavailable"))
+                                            .isGreaterThan(unavailable));
             blocker.rollback();
         }
         startConsumers();
@@ -394,11 +414,11 @@ class NotificationKafkaTest extends NotificationsTestBase {
     }
 
     @Test
-    void operatedReplayProfileQueuesOnePageAndClosesOnlyItsOwnApplication() {
+    void operatedReplayProfileQueuesOnePageAndClosesOnlyItsOwnApplication() throws Exception {
         BankEvent event = event("DEPOSIT_SUCCEEDED");
         notifications.receive(NotificationSource.CASH, event);
         outbox.pendingIds().forEach(outbox::recover);
-        HikariDataSource database = (HikariDataSource) jdbc.getDataSource();
+        HikariDataSource database = jdbc.getDataSource().unwrap(HikariDataSource.class);
         StandardEnvironment environment = new StandardEnvironment();
         environment
                 .getPropertySources()
@@ -437,6 +457,125 @@ class NotificationKafkaTest extends NotificationsTestBase {
                 .isEqualTo("PENDING");
     }
 
+    @Test
+    void unpublishedReceiptIsCountedByLoginWithOneFactAndRecoversWithoutDuplicate(
+            CapturedOutput output) throws Exception {
+        String receipts = BankTopics.NOTIFICATION_RECEIPTS;
+        BankEvent event = event("DEPOSIT_SUCCEEDED");
+        double failed = failures(LOGIN, RECEIPT_PUBLISH_FAILED);
+        double gaps = factGaps();
+        try (Admin admin = KafkaFixture.admin()) {
+            admin.deleteTopics(List.of(receipts)).all().get(10, TimeUnit.SECONDS);
+            await().atMost(KafkaFixture.WAIT)
+                    .until(
+                            () ->
+                                    !admin.listTopics()
+                                            .names()
+                                            .get(10, TimeUnit.SECONDS)
+                                            .contains(receipts));
+            try {
+                notifications.receive(NotificationSource.CASH, event);
+                // БД отвергает только факт отказа: исходный receipt обязан остаться в outbox на
+                // повтор, а пропуск факта - стать видимым счётчиком.
+                jdbc.execute(
+                        "ALTER TABLE bank_kafka_outbox ADD CONSTRAINT fixture_no_facts CHECK(topic<>'"
+                                + BankTopics.BUSINESS_FAILURES
+                                + "')");
+                try {
+                    deliverPending();
+                } finally {
+                    jdbc.execute("ALTER TABLE bank_kafka_outbox DROP CONSTRAINT fixture_no_facts");
+                }
+                assertThat(failures(LOGIN, RECEIPT_PUBLISH_FAILED)).isEqualTo(failed + 1);
+                assertThat(factGaps()).isEqualTo(gaps + 1);
+                assertThat(facts()).isEmpty();
+                assertThat(
+                                jdbc.queryForMap(
+                                        "SELECT status,attempts FROM bank_kafka_outbox WHERE topic=?",
+                                        receipts))
+                        .containsEntry("status", "PENDING")
+                        .containsEntry("attempts", 1);
+                // Повторные отказы той же записи дают один и тот же факт; отказ публикации самого
+                // факта (его топика нет) не порождает новых фактов и не попадает в счётчик.
+                deliverPending();
+                deliverPending();
+                assertThat(failures(LOGIN, RECEIPT_PUBLISH_FAILED)).isEqualTo(failed + 3);
+                assertThat(factGaps()).isEqualTo(gaps + 1);
+                assertThat(facts())
+                        .singleElement()
+                        .satisfies(
+                                fact -> {
+                                    assertThat(fact.type())
+                                            .isEqualTo(BusinessFailureType.NOTIFICATION);
+                                    assertThat(fact.ownerId()).isEqualTo(event.ownerId());
+                                    assertThat(fact.reason()).isEqualTo(RECEIPT_PUBLISH_FAILED);
+                                    assertThat(fact.requestedAmountMinor()).isZero();
+                                });
+            } finally {
+                KafkaFixture.topics(receipts);
+            }
+        }
+        // Первая публикация после пересоздания топика может ещё отказать: инвариант не зависит от
+        // числа попыток - счётчик равен числу сохранённых неудачных попыток outbox.
+        await().atMost(KafkaFixture.WAIT)
+                .untilAsserted(
+                        () -> {
+                            deliverPending();
+                            assertThat(
+                                            jdbc.queryForObject(
+                                                    "SELECT count(*) FROM bank_kafka_outbox WHERE topic=? AND status='PUBLISHED'",
+                                                    Integer.class,
+                                                    receipts))
+                                    .isEqualTo(1);
+                        });
+        int attempts =
+                jdbc.queryForObject(
+                        "SELECT attempts FROM bank_kafka_outbox WHERE topic=?",
+                        Integer.class,
+                        receipts);
+        assertThat(failures(LOGIN, RECEIPT_PUBLISH_FAILED) - failed).isEqualTo(attempts);
+        assertThat(KafkaFixture.endOffset(receipts)).isEqualTo(1);
+        assertThat(
+                        mapper.readValue(
+                                KafkaFixture.records(receipts, 1).getFirst().value(),
+                                NotificationReceipt.class))
+                .isEqualTo(new NotificationReceipt(NotificationSource.CASH, event));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM bank_kafka_outbox", Integer.class))
+                .isEqualTo(2);
+        assertThat(output.getAll())
+                .doesNotContain(LOGIN, event.ownerId().toString(), event.eventId().toString());
+    }
+
+    private double failures(String login, String reason) {
+        Counter counter =
+                meters.find("bank.notification.failures")
+                        .tags("login", login, "reason", reason)
+                        .counter();
+        return counter == null ? 0 : counter.count();
+    }
+
+    private double factGaps() {
+        Counter counter = meters.find("bank.notification.failure.fact.gaps").counter();
+        return counter == null ? 0 : counter.count();
+    }
+
+    private List<BusinessFailureEvent> facts() {
+        List<String> payloads =
+                jdbc.queryForList(
+                        "SELECT payload::text FROM bank_kafka_outbox WHERE topic=?",
+                        String.class,
+                        BankTopics.BUSINESS_FAILURES);
+        return payloads.stream()
+                .map(json -> codec.decode(json, BusinessFailureEvent.class))
+                .toList();
+    }
+
+    // Пауза повтора outbox пропускается: тест не ждёт DeliveryPolicy.RETRY_DELAY_SECONDS.
+    private void deliverPending() {
+        jdbc.update("UPDATE bank_kafka_outbox SET next_attempt_at=now() WHERE status='PENDING'");
+        outbox.pendingIds().forEach(outbox::recover);
+    }
+
     private double producerErrors() {
         return kafka.metrics().values().stream()
                 .filter(metric -> metric.metricName().name().equals("record-error-total"))
@@ -451,7 +590,8 @@ class NotificationKafkaTest extends NotificationsTestBase {
                 type,
                 100,
                 500,
-                Instant.parse("2026-10-17T12:00:00Z"));
+                Instant.parse("2026-10-17T12:00:00Z"),
+                LOGIN);
     }
 
     private int count() {

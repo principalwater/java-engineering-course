@@ -68,7 +68,13 @@ public class ProfileService {
         var now = clock.instant();
         BankEvent event =
                 new BankEvent(
-                        eventId, account.id(), "PROFILE_UPDATED", 0, account.balanceMinor(), now);
+                        eventId,
+                        account.id(),
+                        "PROFILE_UPDATED",
+                        0,
+                        account.balanceMinor(),
+                        now,
+                        actor.login());
         outbox.enqueue(
                 NotificationSource.ACCOUNTS.getTopic(),
                 account.id().toString(),

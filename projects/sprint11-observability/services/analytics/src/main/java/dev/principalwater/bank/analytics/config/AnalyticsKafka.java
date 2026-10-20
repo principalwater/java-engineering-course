@@ -1,12 +1,14 @@
 package dev.principalwater.bank.analytics.config;
 
 import dev.principalwater.bank.messaging.KafkaClientProperties;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.util.Map;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.context.ApplicationListener;
@@ -19,6 +21,8 @@ import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.core.MicrometerConsumerListener;
+import org.springframework.kafka.core.MicrometerProducerListener;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.event.ConsumerRetryAuthEvent;
 import org.springframework.kafka.event.ConsumerStoppedEvent;
@@ -56,16 +60,21 @@ public class AnalyticsKafka {
     }
 
     @Bean
-    ProducerFactory<String, String> analyticsProducerFactory() {
+    ProducerFactory<String, String> analyticsProducerFactory(ObjectProvider<MeterRegistry> meters) {
         DefaultKafkaProducerFactory<String, String> factory =
                 new DefaultKafkaProducerFactory<>(secured(properties.buildProducerProperties()));
         factory.setPhysicalCloseTimeout(PRODUCER_CLOSE_SECONDS);
+        // Собственная фабрика не получает клиентские метрики Boot автоматически.
+        meters.ifAvailable(
+                registry -> factory.addListener(new MicrometerProducerListener<>(registry)));
         return factory;
     }
 
     @Bean
     KafkaTemplate<String, String> analyticsKafkaTemplate(ProducerFactory<String, String> factory) {
         KafkaTemplate<String, String> template = new KafkaTemplate<>(factory);
+        // Наблюдение передаёт traceparent в заголовках записи и делает отправку span-потомком.
+        template.setObservationEnabled(true);
         // Штатный LoggingProducerListener включает содержимое записи; здесь достаточно безопасного
         // класса ошибки.
         template.setProducerListener(
@@ -84,8 +93,12 @@ public class AnalyticsKafka {
     }
 
     @Bean
-    ConsumerFactory<String, String> analyticsConsumerFactory() {
-        return new DefaultKafkaConsumerFactory<>(secured(properties.buildConsumerProperties()));
+    ConsumerFactory<String, String> analyticsConsumerFactory(ObjectProvider<MeterRegistry> meters) {
+        DefaultKafkaConsumerFactory<String, String> factory =
+                new DefaultKafkaConsumerFactory<>(secured(properties.buildConsumerProperties()));
+        meters.ifAvailable(
+                registry -> factory.addListener(new MicrometerConsumerListener<>(registry)));
+        return factory;
     }
 
     @Bean
@@ -108,6 +121,8 @@ public class AnalyticsKafka {
         listeners.setConsumerFactory(factory);
         listeners.setConcurrency(CONSUMERS_PER_GROUP);
         listeners.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+        // Обработка записи идёт внутри наблюдения-потомка трассы из заголовков записи.
+        listeners.getContainerProperties().setObservationEnabled(true);
         listeners.getContainerProperties().setPollTimeout(POLL_TIMEOUT_MS);
         // После восстановления ACL/брокера консьюмер продолжает работу.
         listeners.getContainerProperties().setAuthExceptionRetryInterval(AUTHENTICATION_RETRY);

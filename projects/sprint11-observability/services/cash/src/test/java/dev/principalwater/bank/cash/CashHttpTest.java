@@ -5,19 +5,24 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import dev.principalwater.bank.contract.InternalOperation;
+import dev.principalwater.bank.contract.ProbePaths;
 import dev.principalwater.bank.runtime.error.ApiErrors;
 import dev.principalwater.bank.runtime.security.ApiJwtConfiguration;
 import dev.principalwater.bank.runtime.workflow.MoneyWorkflow;
 import dev.principalwater.bank.testing.BankFixtures;
 import dev.principalwater.bank.testing.ServletSecurityTestBase;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
+import org.springframework.boot.autoconfigure.web.client.RestTemplateAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
@@ -30,6 +35,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
             "spring.config.import=classpath:bank-common.properties",
             "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.security.oauth2.client.servlet.OAuth2ClientAutoConfiguration"
         })
+// Срез MVC не содержит builder клиента, который ApiJwtConfiguration получает от Boot.
+@ImportAutoConfiguration(RestTemplateAutoConfiguration.class)
 @ContextConfiguration(classes = CashController.class)
 @Import({CashSecurity.class, CashService.class, ApiJwtConfiguration.class, ApiErrors.class})
 class CashHttpTest extends ServletSecurityTestBase {
@@ -56,6 +63,20 @@ class CashHttpTest extends ServletSecurityTestBase {
         assertThat(commands.getValue().actor().issuer()).isEqualTo(JWT.issuer());
         assertThat(commands.getValue().actor().subject()).isEqualTo("alice-sub");
         assertThat(commands.getValue().operationId()).isEqualTo(id);
+    }
+
+    @Test
+    void scrapePathPassesAccessControlOnlyForExactGetWhileOtherManagementPathsStayProtected()
+            throws Exception {
+        // В срезе нет Actuator, поэтому «прошёл проверку доступа» — любой статус кроме 401/403.
+        assertThat(http.perform(get(ProbePaths.PROMETHEUS)).andReturn().getResponse().getStatus())
+                .isNotIn(401, 403);
+        http.perform(post(ProbePaths.PROMETHEUS)).andExpect(status().isUnauthorized());
+        for (String path :
+                List.of(ProbePaths.PROMETHEUS + "/extra", "/actuator/env", "/actuator/heapdump")) {
+            http.perform(get(path)).andExpect(status().isUnauthorized());
+        }
+        verifyNoInteractions(workflow);
     }
 
     @Test

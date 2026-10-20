@@ -15,6 +15,8 @@ import dev.principalwater.bank.analytics.model.ActivitySnapshot;
 import dev.principalwater.bank.analytics.model.AnalyticsUnavailable;
 import dev.principalwater.bank.analytics.model.AnalyticsView;
 import dev.principalwater.bank.contract.BankEvent;
+import dev.principalwater.bank.contract.BusinessFailureEvent;
+import dev.principalwater.bank.contract.BusinessFailureType;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
@@ -105,6 +107,47 @@ class ClickHouseWarehouseTest {
         assertEquals(event.eventId().toString(), fact.path("event_id").asText());
         assertEquals(-29, fact.path("amount_minor").asLong());
         assertEquals("2026-10-17 01:02:03.456", fact.path("occurred_at").asText());
+    }
+
+    @Test
+    void rejectionIsEnrichedAndReplayedIntoItsOwnTableWithoutBecomingAMoneyMovement()
+            throws Exception {
+        AtomicReference<String> body = new AtomicReference<>();
+        handler.set(
+                exchange -> {
+                    String actual =
+                            new String(
+                                    exchange.getRequestBody().readAllBytes(),
+                                    StandardCharsets.UTF_8);
+                    String previous = body.getAndSet(actual);
+                    if (previous != null) assertEquals(previous, actual);
+                    assertTrue(
+                            exchange.getRequestURI()
+                                    .getRawQuery()
+                                    .contains("wait_for_async_insert=1"));
+                    reply(exchange, 200, "");
+                });
+        BusinessFailureEvent fact =
+                new BusinessFailureEvent(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        null,
+                        BusinessFailureType.WITHDRAWAL,
+                        "INSUFFICIENT_FUNDS",
+                        100,
+                        Instant.parse("2026-10-17T01:02:03Z"));
+        warehouse.insertFailure(fact);
+        warehouse.insertFailure(fact);
+        assertTrue(
+                body.get()
+                        .startsWith(
+                                "INSERT INTO bank_analytics.business_failures FORMAT JSONEachRow\n"));
+        JsonNode row = mapper.readTree(body.get().substring(body.get().indexOf('\n') + 1));
+        assertEquals("RUB", row.path("currency").asText());
+        assertEquals("cash", row.path("source_service").asText());
+        assertEquals(100, row.path("requested_amount_minor").asLong());
+        assertTrue(row.path("counterparty_id").isNull());
+        assertTrue(row.path("amount_minor").isMissingNode());
     }
 
     @Test

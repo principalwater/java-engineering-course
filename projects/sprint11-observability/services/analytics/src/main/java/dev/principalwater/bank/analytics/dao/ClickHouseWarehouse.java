@@ -9,6 +9,7 @@ import dev.principalwater.bank.analytics.model.AnalyticsUnavailable;
 import dev.principalwater.bank.analytics.model.AnalyticsView;
 import dev.principalwater.bank.contract.BankEvent;
 import dev.principalwater.bank.contract.BankLimits;
+import dev.principalwater.bank.contract.BusinessFailureEvent;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
@@ -83,23 +84,50 @@ public class ClickHouseWarehouse implements AutoCloseable {
     }
 
     public void insert(BankEvent event) {
+        insertRow(
+                "events",
+                Map.of(
+                        "event_id",
+                        event.eventId(),
+                        "owner_id",
+                        event.ownerId(),
+                        "event_type",
+                        event.type(),
+                        "amount_minor",
+                        event.amountMinor(),
+                        "occurred_at",
+                        EVENT_TIME.format(event.occurredAt()),
+                        "version",
+                        EVENT_VERSION));
+    }
+
+    public void insertFailure(BusinessFailureEvent event) {
+        // Отказ обогащается здесь, но не превращается в проводку: финансовые суммы events не
+        // меняются.
+        insertRow(
+                "business_failures",
+                new FailureRow(
+                        event.eventId(),
+                        event.ownerId(),
+                        event.counterpartyId(),
+                        event.type().name(),
+                        event.type().getSourceService(),
+                        event.reason(),
+                        BankLimits.CURRENCY,
+                        event.requestedAmountMinor(),
+                        EVENT_TIME.format(event.occurredAt()),
+                        EVENT_VERSION));
+    }
+
+    private void insertRow(String table, Object row) {
         try {
+            // table приходит только из двух константных вызовов выше, пользовательский SQL не
+            // принимается.
             String payload =
-                    "INSERT INTO bank_analytics.events FORMAT JSONEachRow\n"
-                            + mapper.writeValueAsString(
-                                    Map.of(
-                                            "event_id",
-                                            event.eventId(),
-                                            "owner_id",
-                                            event.ownerId(),
-                                            "event_type",
-                                            event.type(),
-                                            "amount_minor",
-                                            event.amountMinor(),
-                                            "occurred_at",
-                                            EVENT_TIME.format(event.occurredAt()),
-                                            "version",
-                                            EVENT_VERSION))
+                    "INSERT INTO bank_analytics."
+                            + table
+                            + " FORMAT JSONEachRow\n"
+                            + mapper.writeValueAsString(row)
                             + '\n';
             URI uri =
                     base().queryParam("async_insert", 1)
@@ -115,6 +143,18 @@ public class ClickHouseWarehouse implements AutoCloseable {
                     AnalyticsUnavailable.Category.INVALID_RESPONSE, exception);
         }
     }
+
+    private record FailureRow(
+            java.util.UUID event_id,
+            java.util.UUID owner_id,
+            java.util.UUID counterparty_id,
+            String failure_type,
+            String source_service,
+            String reason,
+            String currency,
+            long requested_amount_minor,
+            String occurred_at,
+            long version) {}
 
     public AnalyticsView month(YearMonth month) {
         URI uri =

@@ -18,6 +18,8 @@ import dev.principalwater.bank.testing.ServletSecurityTestBase;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
+import org.springframework.boot.autoconfigure.web.client.RestTemplateAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
@@ -30,6 +32,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
             "spring.config.import=classpath:bank-common.properties",
             "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.security.oauth2.client.servlet.OAuth2ClientAutoConfiguration"
         })
+// Срез MVC не содержит builder клиента, который ApiJwtConfiguration получает от Boot.
+@ImportAutoConfiguration(RestTemplateAutoConfiguration.class)
 @ContextConfiguration(classes = TransferController.class)
 @Import({TransferSecurity.class, TransferService.class, ApiJwtConfiguration.class, ApiErrors.class})
 class TransferHttpTest extends ServletSecurityTestBase {

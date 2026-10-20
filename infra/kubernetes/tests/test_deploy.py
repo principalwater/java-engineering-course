@@ -22,6 +22,16 @@ class PlanGuardTest(unittest.TestCase):
         for address, actions in (("helm_release.foreign", ["no-op"]), ("helm_release.bank", ["delete", "create"])):
             with self.subTest(address=address, actions=actions), self.assertRaises(ValueError):
                 DEPLOY.validate_plan({"resource_changes": [{"address": address, "change": {"actions": actions}}]})
+        network = {"resource_changes": [{"address": "helm_release.cilium[0]", "change": {"actions": ["create"]}}]}
+        with self.assertRaises(ValueError):
+            DEPLOY.validate_plan(network)
+        self.assertEqual(DEPLOY.validate_plan(network, operator_only=True, dual_stack=True), {"create": 1})
+        secrets = {"resource_changes": [{"address": "helm_release.openbao[0]", "change": {"actions": ["create"]}}]}
+        self.assertEqual(DEPLOY.validate_plan(secrets, secrets_only=True, dual_stack=True), {"create": 1})
+        with self.assertRaises(ValueError):
+            DEPLOY.validate_plan(secrets, operator_only=True, dual_stack=True)
+        with self.assertRaises(ValueError):
+            DEPLOY.validate_plan({"resource_changes": changes}, secrets_only=True, dual_stack=True)
 
     def test_multiline_and_encoded_credentials_are_rejected_without_echo(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -44,6 +54,16 @@ class PlanGuardTest(unittest.TestCase):
                             DEPLOY.require_no_secrets(b"prefix " + value + b" suffix", variants, "saved plan")
                         self.assertNotIn("example-private-material", str(failure.exception))
                         self.assertEqual(DEPLOY.redact(value, variants), b"[redacted]")
+
+    def test_telegram_identifier_exception_does_not_weaken_password_guard(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for name in ("telegram_chat_id", "password"):
+                path = Path(directory) / name
+                path.write_bytes(b"-123456789\n")
+                path.chmod(0o600)
+            self.assertTrue(DEPLOY.secret_variants(Path(directory), ["telegram_chat_id"]))
+            with self.assertRaises(ValueError):
+                DEPLOY.secret_variants(Path(directory), ["password"])
 
 
 if __name__ == "__main__":

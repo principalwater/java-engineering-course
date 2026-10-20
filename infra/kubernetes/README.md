@@ -1,6 +1,16 @@
-# Sprint 10: OpenTofu и Helm
+# Банк: OpenTofu и Helm
 
 Независимый root использует OpenTofu 1.11.x, провайдеры Helm/Kubernetes 3.3.0 и внешний local state для учебного запуска одним пользователем. Он не меняет Docker-root `infra/` и состояния предыдущих спринтов. Для совместной production-работы требуется отдельный удалённый backend с блокировкой и шифрованием.
+
+## Спринт 11: наблюдаемость и OpenBao
+
+`stack_prefix=bank11` выбирается по проверенной идентичности собственного runtime. У этого стенда отдельные namespace, context, state, kubeconfig и PVC; ресурсы `bank10` не переименовываются и не переносятся. Дополнительно устанавливаются Cilium 1.20.3 с IPv4/IPv6, OpenBao 2.7.1 и External Secrets Operator 2.13.0; OCI charts закреплены digest.
+
+Bootstrap разделён на три сохранённых плана: `deploy.py plan/apply --operator-only` для CNI/Strimzi, `--secrets-only` для OpenBao/ESO, затем обычный план приложения. Между второй и третьей фазами выполняются явные инициализация, unseal, настройка ролей и импорт KV. Перед обновлением приложений проверяется доступность распечатанного OpenBao. Значения секретов читаются приложениями через Kubernetes auth или платформой через ESO, без передачи в Helm/OpenTofu и state. Локальные seed/recovery-ключи остаются во внешнем зашифрованном источнике.
+
+Порядок команд, ограничения однорепличного Raft, TLS, NetworkPolicy, метрики/логи/трассы и отдельный Jenkins-агент описаны в [проекте спринта 11](../../projects/sprint11-observability/). Полный стенд требует отдельного расчёта памяти хоста и VM; сборка и запуск выполняются последовательно. CI проверяет прямой деплой и настоящий Jenkins pipeline независимыми заданиями.
+
+## Спринт 10
 
 Два native `helm_release`: официальный Strimzi 1.3.0 из OCI по digest и собственный umbrella chart банка с Kafka subchart. Namespace `bank10-dev`, `bank10-test` или `bank10-prod` и context задаются явно. Kind-кластеры `bank10-<environment>-single` и `bank10-<environment>-ha` имеют раздельные kubeconfig, сети, PVC и state; смена профиля поверх старого KRaft-хранилища не поддерживается.
 

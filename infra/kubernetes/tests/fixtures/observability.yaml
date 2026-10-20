@@ -1,0 +1,8 @@
+global:
+  environment: dev
+  secretPrefix: bank11
+  analyticsEnabled: false
+kafka:
+  profile: single
+superset:
+  enabled: false

@@ -1,3 +1,14 @@
+variable "stack_prefix" {
+  description = "Versioned bank deployment identity; existing bank10 state remains unchanged."
+  type        = string
+  default     = "bank10"
+  nullable    = false
+  validation {
+    condition     = contains(["bank10", "bank11"], var.stack_prefix)
+    error_message = "Stack prefix must identify an explicitly supported bank deployment."
+  }
+}
+
 variable "environment" {
   description = "Isolated bank environment and namespace suffix."
   type        = string
@@ -35,7 +46,7 @@ variable "kube_context" {
   type        = string
   nullable    = false
   validation {
-    condition     = var.kube_context == "kind-bank10-${var.environment}-${var.profile}"
+    condition     = var.kube_context == "kind-${var.stack_prefix}-${var.environment}-${var.profile}"
     error_message = "Context must identify this bank environment and profile."
   }
 }

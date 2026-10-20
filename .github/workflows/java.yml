@@ -1040,6 +1040,8 @@ jobs:
       - name: Check all services and real Kafka producer-consumer contracts
         working-directory: projects/sprint10-kafka
         run: ./gradlew --no-daemon --console=plain check packageDeployment
+      - name: Validate the Jenkins pipeline with the official controller
+        run: bash .github/scripts/verify-jenkinsfile.sh
       - name: Verify private secret lifecycle TLS and Helm contracts
         working-directory: projects/sprint10-kafka
         run: |
@@ -1063,6 +1065,7 @@ jobs:
         run: |
           python3 projects/sprint10-kafka/deployment/kubernetes/probe.py --state-dir "$BANK_STATE" security
           python3 projects/sprint10-kafka/deployment/kubernetes/probe.py --state-dir "$BANK_STATE" persistence
+          python3 projects/sprint10-kafka/deployment/kubernetes/probe.py --state-dir "$BANK_STATE" lifecycle
       - name: Verify real bank UI API money notification and projection recovery
         run: python3 projects/sprint10-kafka/deployment/scripts/verify-runtime.py --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR" --analytics --faults
       - name: Verify the repeated deployment plan

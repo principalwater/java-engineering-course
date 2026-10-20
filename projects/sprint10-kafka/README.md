@@ -24,6 +24,7 @@ sprint10-kafka/
 │   └── authorization/, database/, discovery/, edge/, superset/
 ├── config/                   # правила PMD и настройки JVM
 ├── gradle/, gradlew          # единая сборка Gradle
+├── Jenkinsfile              # альтернативный CI/CD на выделенном агенте
 └── Dockerfile                # общий образ Java-приложений
 ```
 
@@ -277,12 +278,30 @@ python3 projects/sprint10-kafka/deployment/scripts/init-secrets.py
 cd projects/sprint10-kafka
 ./gradlew --no-daemon check packageDeployment
 python3 -m unittest discover -s deployment/scripts
+"$BANK_PYTHON" -m unittest discover -s deployment/kubernetes -p 'test_*.py'
+"$BANK_PYTHON" deployment/kubernetes/probe.py --state-dir "$BANK_STATE" lifecycle
 "$BANK_PYTHON" deployment/scripts/verify-runtime.py --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR" --analytics --faults
 ```
 
 Java-проверки включают деньги и откат транзакций, повторные команды, JWT с настоящими подписями и HTTP JWK Set, права сервисов и владельцев, Kafka-доставку и контрактные сообщения. Общие Spring-контексты переиспользуются без `@DirtiesContext`. Инфраструктура отдельно проверяет рендеринг Helm, допустимые планы OpenTofu и реальное сохранение Kafka-данных после отказа.
 
 Runtime-проверка проходит через HTTPS, Keycloak, Front/Gateway и настоящие хранилища: два пользователя, CSRF, баланс, перевод, история, уведомления, первое прочтение и конечная конкурентная нагрузка.
+
+### Жизненный цикл Pod
+
+У веб-сервисов startup/liveness проверяют `/actuator/health/liveness`, readiness — `/actuator/health/readiness` на основном HTTP-порту. Разрешены только эти два GET без деталей зависимостей; Caddy не публикует `/actuator/*` наружу. Общая БД и Kafka исключены из liveness/readiness-групп: ограниченные ошибки, circuit breaker и сохранённый outbox позволяют пережить их отказ без каскадного рестарта всех JVM. Startup даёт приложению до пяти минут на старт, затем liveness допускает минуту временной недоступности.
+
+Notifications остаётся без MVC/WebFlux и HTTP-порта. События `ApplicationAvailability` создают и снимают exec-маркеры; перед каждой JVM entrypoint удаляет маркеры предыдущего процесса из сохраняемого `emptyDir`. Прогон `lifecycle` на `single` и `ha` подтвердил снятие readiness без рестарта, восстановление контейнера по liveness и сохранение идентичности PVC. Конечные init/BI Jobs завершаются по своему результату и не получают probes.
+
+Для PostgreSQL используется `pg_isready` по TCP, ZooKeeper — ответы `ruok/srvr`, Keycloak — штатные `/health/started`, `/health/live`, `/health/ready` на внутреннем порту 9000. ClickHouse проверяется через `/ping`, Superset — через HTTPS `/health`. Cassandra readiness проверяет ответ CQL `OPTIONS/SUPPORTED` без секретов и дополнительной JVM, с ограничением времени и размера кадра. Это готовность протокола; работу авторизации, таблиц и проекций отдельно проверяет runtime-сценарий. Startup/liveness проверяют собственный CQL-порт. Caddy отвечает на внутреннем HTTP `/healthz`, не зависящем от Front/IdP и TLS SNI kubelet; этот порт не опубликован Service. Kafka/оператор используют probes Strimzi.
+
+### Jenkins
+
+[Jenkinsfile](Jenkinsfile) задаёт тот же путь: Gradle `check packageDeployment` → Python/Helm-проверки → kind и файловые Secret → сохранённый план OpenTofu и его apply → Kafka TLS/ACL, перезапуск брокера, lifecycle, банковские сценарии и отказ хранилищ → пустой повторный план. JUnit и JAR/контрактные артефакты сохраняются; `post/cleanup` останавливает собственный стенд с сохранением PVC/state даже при ошибке архивации.
+
+В Jenkins Pipeline from SCM указывается Script Path `projects/sprint10-kafka/Jenkinsfile`. Нужны плагины Pipeline, Git и JUnit, выделенный Linux x86_64 агент `bank-kubernetes` с одним executor и собственным Docker daemon, Java 21, Node 24.4.0, Python/venv, OpenTofu 1.11.6, Helm 4.3.1, kind 0.33.0, kubectl 1.34.11, `mkcert` и `openssl`. Docker socket такого агента не разделяется с другими окружениями. Plaintext-источник тестовых секретов допустим только на этом изолированном Linux CI-агенте; для промышленной среды нужны внешнее хранилище секретов и шифрованный StorageClass.
+
+GitHub Actions остаётся основным автоматическим прогоном. В нём Jenkinsfile отдельно проверяется официальным Jenkins Declarative Linter с закреплённым digest, без внешнего контроллера; команды pipeline выполняются теми же проверочными скриптами. Эта валидация синтаксиса не подменяет запуск job на настроенном Jenkins-агенте.
 
 На локальном single-стенде прошли TLS/OIDC, изоляция двух владельцев, доставка и прочтение уведомлений, шесть запросов BI и независимое восстановление Cassandra/ClickHouse. Конечная нагрузка — 24 команды от четырёх клиентов и 24 повтора, наблюдаемый p95 — 0,414 с после прогрева и 4,331 с после обновления сервисов при одновременной работе BI. Это замеры двух конечных прогонов на общем стенде, без заявления SLO или предельной пропускной способности.
 
@@ -308,3 +327,6 @@ Runtime-проверка проходит через HTTPS, Keycloak, Front/Gate
 - [Strimzi 1.3: KRaft, KafkaNodePool и постоянное хранилище](https://strimzi.io/docs/operators/1.3.0/deploying).
 - [Superset: импорт активов через API](https://superset.apache.org/developer-docs/api/import-export/).
 - [Caddy: выбор протоколов публичного HTTP-сервера](https://caddyserver.com/docs/caddyfile/options#protocols).
+- [Spring Boot 3.5: состояния приложения и probes](https://docs.spring.io/spring-boot/3.5/reference/actuator/endpoints.html#actuator.endpoints.kubernetes-probes).
+- [Kubernetes: startup, readiness и liveness](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/).
+- [Jenkins: проверка Declarative Pipeline](https://www.jenkins.io/doc/book/pipeline/development/#linter).

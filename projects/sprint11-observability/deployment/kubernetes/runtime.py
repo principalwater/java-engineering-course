@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import secrets
 import shutil
+import ssl
 import subprocess
 import sys
 import time
@@ -22,7 +23,7 @@ from prepare import APPS, image_reference, prepare, project_dir, require_externa
 
 
 NODE_IMAGE = "kindest/node:v1.34.11@sha256:44e222ee2132dab25ff87301682f89eb82c7880ea3a1bf543bfe9708fd08d67d"
-OWNER_LABEL = "bank10.io/cluster"
+OWNER_LABEL = "bank11.io/cluster"
 # Docker exports/unpacked layers need temporary headroom; this floor is not a capacity estimate.
 MIN_HOST_DISK_FREE_GIB = 5
 
@@ -99,10 +100,10 @@ def owned_identity(state_dir: Path, *, api: bool = True) -> dict:
     if not identity_path.is_file() or identity_path.is_symlink():
         raise ValueError("Owned cluster identity is missing; adoption is not supported")
     identity = json.loads(identity_path.read_text(encoding="utf-8"))
-    cluster_match = re.fullmatch(r"bank10-(dev|test|prod)-(single|ha)", identity["cluster"])
+    cluster_match = re.fullmatch(r"bank11-(dev|test|prod)-(single|ha)", identity["cluster"])
     if not cluster_match:
-        raise ValueError("Cluster identity is outside the bank10 allowlist")
-    if identity["namespace"] != f"bank10-{cluster_match.group(1)}" or identity["profile"] != cluster_match.group(2):
+        raise ValueError("Cluster identity is outside the bank11 allowlist")
+    if identity["namespace"] != f"bank11-{cluster_match.group(1)}" or identity["profile"] != cluster_match.group(2):
         raise ValueError("Namespace/profile do not match the owned cluster identity")
     if identity["context"] != f"kind-{identity['cluster']}":
         raise ValueError("Unexpected Kubernetes context")
@@ -139,14 +140,14 @@ def encryption_config(path: Path) -> None:
     key = base64.b64encode(secrets.token_bytes(32)).decode("ascii")
     document = {"apiVersion": "apiserver.config.k8s.io/v1", "kind": "EncryptionConfiguration",
                 "resources": [{"resources": ["secrets"], "providers": [
-                    {"aescbc": {"keys": [{"name": "bank10-v1", "secret": key}]}}, {"identity": {}}]}]}
+                    {"aescbc": {"keys": [{"name": "bank11-v1", "secret": key}]}}, {"identity": {}}]}]}
     private_file(path, yaml.safe_dump(document).encode())
 
 
 def create_cluster(args: argparse.Namespace) -> None:
     state_dir = require_external(args.state_dir, project_dir().parents[1])
     secret_dir = require_private_source(args.secrets_dir)
-    cluster = f"bank10-{args.environment}-{args.profile}"
+    cluster = f"bank11-{args.environment}-{args.profile}"
     if (state_dir / "cluster.json").exists():
         identity = owned_identity(state_dir, api=False)
         if identity["cluster"] != cluster:
@@ -163,10 +164,12 @@ def create_cluster(args: argparse.Namespace) -> None:
         raise ValueError("Persistent local kind storage requires FileVault encryption at rest")
     if sys.platform != "darwin" and os.environ.get("BANK_ALLOW_PLAINTEXT_TEST_SECRETS") != "true":
         raise ValueError("Use an encrypted production StorageClass; local hostPath is CI-only on Linux")
-    subnets = {"dev-single": "10.251.10.64/27", "dev-ha": "10.251.10.96/27",
-               "test-single": "10.251.10.128/27", "test-ha": "10.251.10.160/27",
-               "prod-single": "10.251.10.192/27", "prod-ha": "10.251.10.224/27"}
+    subnets = {"dev-single": "10.251.11.64/27", "dev-ha": "10.251.11.96/27",
+               "test-single": "10.251.11.128/27", "test-ha": "10.251.11.160/27",
+               "prod-single": "10.251.11.192/27", "prod-ha": "10.251.11.224/27"}
     subnet = ipaddress.ip_network(subnets[f"{args.environment}-{args.profile}"])
+    # Distinct ULA /64s keep retained Sprint10/11 node networks independent.
+    subnet6 = ipaddress.ip_network(f"fd11:11:{subnet.network_address.packed[-1]:x}::/64")
     networks = command(["docker", "network", "ls", "-q"]).split()
     for network in networks:
         info = json.loads(command(["docker", "network", "inspect", network]))[0]
@@ -175,14 +178,15 @@ def create_cluster(args: argparse.Namespace) -> None:
                 raise ValueError("Existing network has no ownership intent; refusing adoption")
             if intent.get("network_id") and info["Id"] != intent["network_id"]:
                 raise ValueError("Previously recorded owned network was replaced")
-            if not intent.get("network_id") and info.get("Labels", {}).get("bank10.io/intent") != intent["id"]:
+            if not intent.get("network_id") and info.get("Labels", {}).get("bank11.io/intent") != intent["id"]:
                 raise ValueError("Network does not carry the exact creation intent")
             intent["network_id"] = info["Id"]
             continue
         for config in info.get("IPAM", {}).get("Config") or []:
             if config.get("Subnet"):
                 existing = ipaddress.ip_network(config["Subnet"])
-                if existing.version == subnet.version and subnet.overlaps(existing):
+                if any(existing.version == candidate.version and candidate.overlaps(existing)
+                       for candidate in (subnet, subnet6)):
                     raise ValueError("Dedicated kind network subnet overlaps an existing network")
     private_dir = secret_dir / "kubernetes" / cluster
     private_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -200,23 +204,25 @@ def create_cluster(args: argparse.Namespace) -> None:
         data_dir = state_dir / "pvc" / name
         data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         node = {"role": "control-plane" if index == 0 else "worker", "image": NODE_IMAGE,
-                "labels": {"bank10.io/worker": "true"},
+                "labels": {"bank11.io/worker": "true"},
                 "extraMounts": [{"hostPath": str(data_dir), "containerPath": "/var/local-path-provisioner"}]}
         if index == 0:
             if args.profile == "ha":
                 node["kubeadmConfigPatches"] = [yaml.safe_dump({"kind": "InitConfiguration",
                                                                "nodeRegistration": {"taints": []}})]
             node["extraMounts"].append({"hostPath": str(encryption_path),
-                                        "containerPath": "/etc/kubernetes/bank10-encryption.yaml", "readOnly": True})
-            node["extraPortMappings"] = [{"containerPort": 30450, "hostPort": args.external_port,
+                                        "containerPath": "/etc/kubernetes/bank11-encryption.yaml", "readOnly": True})
+            node["extraPortMappings"] = [{"containerPort": 30460, "hostPort": args.external_port,
                                            "listenAddress": "127.0.0.1", "protocol": "TCP"}]
         nodes.append(node)
     patch = {"apiVersion": "kubeadm.k8s.io/v1beta3", "kind": "ClusterConfiguration", "apiServer": {
-        "extraArgs": {"encryption-provider-config": "/etc/kubernetes/bank10-encryption.yaml"},
-        "extraVolumes": [{"name": "bank-encryption", "hostPath": "/etc/kubernetes/bank10-encryption.yaml",
-                           "mountPath": "/etc/kubernetes/bank10-encryption.yaml", "readOnly": True, "pathType": "File"}]}}
+        "extraArgs": {"encryption-provider-config": "/etc/kubernetes/bank11-encryption.yaml"},
+        "extraVolumes": [{"name": "bank-encryption", "hostPath": "/etc/kubernetes/bank11-encryption.yaml",
+                           "mountPath": "/etc/kubernetes/bank11-encryption.yaml", "readOnly": True, "pathType": "File"}]}}
     config = {"kind": "Cluster", "apiVersion": "kind.x-k8s.io/v1alpha4",
-              "networking": {"apiServerAddress": "127.0.0.1"},
+              "networking": {"apiServerAddress": "127.0.0.1", "ipFamily": "dual", "disableDefaultCNI": True,
+                             "podSubnet": "10.244.0.0/16,fd11:244::/56",
+                             "serviceSubnet": "10.96.0.0/16,fd11:96::/112"},
               "kubeadmConfigPatches": [yaml.safe_dump(patch)], "nodes": nodes}
     config_path = state_dir / "kind.yaml"
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
@@ -229,8 +235,9 @@ def create_cluster(args: argparse.Namespace) -> None:
     save_receipt(intent_path, intent)
     if not intent["network_id"]:
         intent["network_id"] = command(["docker", "network", "create", "--subnet", str(subnet),
+                                         "--ipv6", "--subnet", str(subnet6),
                                          "--label", f"{OWNER_LABEL}={cluster}",
-                                         "--label", f"bank10.io/intent={intent['id']}", cluster]).strip()
+                                         "--label", f"bank11.io/intent={intent['id']}", cluster]).strip()
         save_receipt(intent_path, intent)
     environment = dict(os.environ, KIND_EXPERIMENTAL_DOCKER_NETWORK=cluster)
     record_nodes(intent, node_names)
@@ -248,7 +255,7 @@ def create_cluster(args: argparse.Namespace) -> None:
     if set(intent["nodes"]) != set(node_names) or not kubeconfig.is_file():
         raise RuntimeError("Owned partial cluster retained; repair bootstrap before retrying")
     kubeconfig.chmod(0o600)
-    identity = {"cluster": cluster, "context": f"kind-{cluster}", "namespace": f"bank10-{args.environment}",
+    identity = {"cluster": cluster, "context": f"kind-{cluster}", "namespace": f"bank11-{args.environment}",
                 "kubeconfig": str(kubeconfig), "profile": args.profile, "external_port": args.external_port,
                 "network_id": intent["network_id"], "nodes": intent["nodes"]}
     identity["cluster_uid"] = kubectl(identity, "get", "namespace", "kube-system", "-o", "jsonpath={.metadata.uid}").strip()
@@ -259,35 +266,33 @@ def create_cluster(args: argparse.Namespace) -> None:
 def bootstrap_secrets(args: argparse.Namespace) -> None:
     identity = owned_identity(args.state_dir)
     secret_dir = require_private_source(args.secrets_dir)
-    bindings = json.loads((args.state_dir / "secret-bindings.json").read_text(encoding="utf-8"))
-    namespace = json.loads(kubectl(identity, "get", "namespace", identity["namespace"], "--ignore-not-found", "-o", "json") or "{}")
-    labels = {OWNER_LABEL: identity["cluster"], "app.kubernetes.io/part-of": "bank10"}
-    if namespace and namespace["metadata"].get("labels", {}).get(OWNER_LABEL) != identity["cluster"]:
-        raise ValueError("Namespace belongs to another deployment")
-    if not namespace:
-        kubectl(identity, "create", "-f", "-", data=json.dumps({"apiVersion": "v1", "kind": "Namespace",
-                "metadata": {"name": identity["namespace"], "labels": labels}}).encode())
-    for name, files in bindings.items():
-        if not re.fullmatch(r"bank10-[a-z-]+", name):
-            raise ValueError("Unexpected Secret object name")
-        data = {}
-        for target, source in files.items():
-            if not re.fullmatch(r"[a-zA-Z0-9_.-]+", target) or not re.fullmatch(r"[a-zA-Z0-9_.-]+", source):
-                raise ValueError("Secret projection filenames must not contain paths")
-            path = secret_dir / source
-            if not path.is_file() or path.is_symlink() or path.stat().st_mode & 0o077:
-                raise ValueError(f"Secret source is absent or not private: {source}")
-            data[target] = base64.b64encode(path.read_bytes()).decode("ascii")
-        current = json.loads(kubectl(identity, "get", "secret", name, "--ignore-not-found", "-o", "json") or "{}")
-        if current:
-            if current["metadata"].get("labels", {}).get(OWNER_LABEL) != identity["cluster"]:
-                raise ValueError(f"Secret ownership mismatch: {name}")
-            if current.get("data", {}) != data:
-                raise ValueError(f"Existing Secret differs; explicit credential rotation is required: {name}")
-            continue
-        kubectl(identity, "create", "-f", "-", data=json.dumps({"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
-                "metadata": {"name": name, "labels": labels}, "data": data}).encode())
-    print(f"Bootstrapped {len(bindings)} owned Secret references; existing values preserved, no Terraform Secret resources")
+    # Значения больше не копируются из локальных файлов: источник runtime-секретов — OpenBao.
+    labels = {OWNER_LABEL: identity["cluster"], "app.kubernetes.io/part-of": "bank11"}
+    for name in (identity["namespace"], "bank11-system"):
+        namespace = json.loads(kubectl(identity, "get", "namespace", name,
+                                      "--ignore-not-found", "-o", "json") or "{}")
+        if namespace and namespace["metadata"].get("labels", {}).get(OWNER_LABEL) != identity["cluster"]:
+            raise ValueError("Namespace belongs to another deployment")
+        if not namespace:
+            kubectl(identity, "create", "-f", "-", data=json.dumps({"apiVersion": "v1", "kind": "Namespace",
+                    "metadata": {"name": name, "labels": labels}}).encode())
+    roots = {}
+    for key, filename in (("ca.crt", "internal_ca.pem"), ("edge-ca.crt", "tls_ca.pem")):
+        path = secret_dir / filename
+        if not path.is_file() or path.is_symlink():
+            raise ValueError("A regular public trust certificate is required")
+        certificate = path.read_text(encoding="utf-8")
+        ssl.create_default_context(cadata=certificate)
+        roots[key] = certificate
+    name = "bank11-trust"
+    current = json.loads(kubectl(identity, "get", "configmap", name, "--ignore-not-found", "-o", "json") or "{}")
+    if current:
+        if current["metadata"].get("labels", {}).get(OWNER_LABEL) != identity["cluster"] or current.get("data") != roots:
+            raise ValueError("Trust bundle ownership or contents differ; explicit CA rotation is required")
+    else:
+        kubectl(identity, "create", "-f", "-", data=json.dumps({"apiVersion": "v1", "kind": "ConfigMap",
+                "metadata": {"name": name, "labels": labels}, "data": roots}).encode())
+    print("Owned namespaces are ready; runtime Secret data is managed by OpenBao/ESO")
 
 
 def require_host_disk_space() -> None:
@@ -318,8 +323,8 @@ def load_images(args: argparse.Namespace) -> None:
         command(["kind", "load", "docker-image", "--name", identity["cluster"], image], timeout=300)
         images[name] = image
     (args.state_dir / "images.json").write_text(json.dumps(images, indent=2) + "\n", encoding="utf-8")
-    prepare(args.state_dir, environment=identity["namespace"].removeprefix("bank10-"), profile=identity["profile"],
-            analytics=source["analytics"], superset=source["superset"], external_port=identity["external_port"], images=images)
+    prepare(args.state_dir, environment=identity["namespace"].removeprefix("bank11-"), profile=identity["profile"],
+            analytics=source["analytics"], superset=source["superset"], external_port=identity["external_port"], images=images, telegram=source.get("telegram", False))
     print(f"Loaded {len(images)} content-addressed application images; no Gradle invocation")
 
 
@@ -334,8 +339,11 @@ def ready(args: argparse.Namespace) -> None:
         expected.append("superset")
     manifest = command(["helm", "get", "manifest", "bank", "--kubeconfig", identity["kubeconfig"],
                         "--kube-context", identity["context"], "--namespace", identity["namespace"]])
-    expected_jobs = {item["metadata"]["name"] for item in yaml.safe_load_all(manifest)
-                     if item and item.get("kind") == "Job"}
+    resources = [item for item in yaml.safe_load_all(manifest) if item]
+    expected_jobs = {item["metadata"]["name"] for item in resources if item.get("kind") == "Job"}
+    expected_workloads = {(item["kind"], item["metadata"]["name"]): item["spec"].get("replicas", 1)
+                          for item in resources if item.get("kind") in {"Deployment", "StatefulSet"}}
+    expected_secrets = {item["metadata"]["name"] for item in resources if item.get("kind") == "ExternalSecret"}
     if not expected_jobs:
         raise ValueError("Current bank release has no finite initialization Jobs")
     while time.monotonic() < deadline:
@@ -349,9 +357,21 @@ def ready(args: argparse.Namespace) -> None:
         ready_names = {item["metadata"]["name"] for item in deployments if item.get("status", {}).get("availableReplicas", 0) >= 1}
         kafka = json.loads(kubectl(identity, "get", "kafka", "bank-kafka", "-o", "json"))
         kafka_ready = any(item["type"] == "Ready" and item["status"] == "True" for item in kafka.get("status", {}).get("conditions", []))
-        jobs = {item["metadata"]["name"]: item for item in json.loads(kubectl(identity, "get", "jobs", "-l", "app.kubernetes.io/part-of=bank10", "-o", "json"))["items"]}
-        if kafka_ready and set(expected).issubset(ready_names) and expected_jobs.issubset(jobs) and all(jobs[name].get("status", {}).get("succeeded", 0) for name in expected_jobs):
-            print(f"Owned {identity['profile']} bank is ready; Kafka and {len(expected)} Deployments, finite Jobs complete")
+        jobs = {item["metadata"]["name"]: item for item in json.loads(kubectl(identity, "get", "jobs", "-l", "app.kubernetes.io/part-of=bank11", "-o", "json"))["items"]}
+        stores = json.loads(kubectl(identity, "get", "statefulsets", "-o", "json"))["items"]
+        workloads = [("Deployment", item) for item in deployments] + [("StatefulSet", item) for item in stores]
+        ready_workloads = {(kind, item["metadata"]["name"]) for kind, item in workloads
+                           if item.get("status", {}).get("observedGeneration", 0) >= item["metadata"].get("generation", 1)
+                           and item.get("status", {}).get("readyReplicas", 0) >= expected_workloads.get((kind, item["metadata"]["name"]), 1)
+                           and item["spec"].get("replicas", 1) == expected_workloads.get((kind, item["metadata"]["name"]), 1)}
+        secrets = json.loads(kubectl(identity, "get", "externalsecrets", "-o", "json"))["items"]
+        ready_secrets = {item["metadata"]["name"] for item in secrets
+                         if any(condition["type"] == "Ready" and condition["status"] == "True"
+                                for condition in item.get("status", {}).get("conditions", []))}
+        if (kafka_ready and set(expected).issubset(ready_names) and set(expected_workloads).issubset(ready_workloads)
+                and expected_secrets.issubset(ready_secrets) and expected_jobs.issubset(jobs)
+                and all(jobs[name].get("status", {}).get("succeeded", 0) for name in expected_jobs)):
+            print(f"Owned {identity['profile']} bank is ready; Kafka, {len(expected_workloads)} workloads, {len(expected_secrets)} secrets and finite Jobs complete")
             return
         time.sleep(3)
     raise RuntimeError("Owned bank readiness timed out; inspect safe pod state before stopping")
@@ -372,6 +392,12 @@ def lifecycle(args: argparse.Namespace, *, stop: bool) -> None:
                 break
             time.sleep(2)
         owned_identity(args.state_dir)
+    import bao
+    bao_scope = {**identity, "namespace": bao.OPENBAO_NAMESPACE}
+    namespace = json.loads(kubectl(bao_scope, "get", "namespace", bao.OPENBAO_NAMESPACE,
+                                   "--ignore-not-found", "-o", "json") or "{}")
+    if namespace and namespace["metadata"].get("labels", {}).get(OWNER_LABEL) != identity["cluster"]:
+        raise ValueError("OpenBao namespace belongs to another deployment")
     if stop:
         node_state = json.loads(kubectl(identity, "get", "nodes", "-o", "json"))["items"]
         if {node["metadata"]["name"] for node in node_state} != set(nodes):
@@ -383,9 +409,14 @@ def lifecycle(args: argparse.Namespace, *, stop: bool) -> None:
         private_file(snapshot, (json.dumps(previous) + "\n").encode())
         kubectl(identity, "cordon", *nodes)
         # Cordon keeps replacement Pods pending without changing Helm-declared replica counts.
-        for role in ("application", "storage", "kafka"):
-            kubectl(identity, "delete", "pods", "-l", f"bank10.io/role={role}",
+        for role in ("application", "observability", "storage", "kafka"):
+            kubectl(identity, "delete", "pods", "-l", f"bank11.io/role={role}",
                     "--wait=true", "--timeout=120s", timeout=150)
+        if namespace:
+            kubectl(bao_scope, "delete", "pods", "-l", "app.kubernetes.io/name=openbao,app.kubernetes.io/instance=openbao",
+                    "--wait=true", "--timeout=120s", timeout=150)
+        # Явно остановленный стенд не должен сам запускаться после рестарта Docker/OrbStack.
+        command(["docker", "update", "--restart=unless-stopped", *nodes])
         command(["docker", "stop", "--time", "60", *reversed(nodes)], timeout=300)
         print("Stopped owned applications before stores and kind nodes; PVCs/state/identities retained")
     else:
@@ -397,7 +428,18 @@ def lifecycle(args: argparse.Namespace, *, stop: bool) -> None:
             for node, cordoned in previous.items():
                 kubectl(identity, "cordon" if cordoned else "uncordon", node)
             snapshot.unlink()
-        print("Resumed only the retained owned nodes and bank workloads; completed Jobs preserved")
+        # Raft после рестарта запечатан; до повторного запуска сервисов нужен сохранённый ключ.
+        intent = json.loads((args.state_dir / "creation.json").read_text(encoding="utf-8"))
+        secret_dir = Path(intent["secrets_dir"])
+        installed = namespace and kubectl(bao_scope, "get", "statefulset", "openbao", "--ignore-not-found", "-o", "json")
+        if installed:
+            bao.bootstrap(argparse.Namespace(state_dir=args.state_dir, secrets_dir=secret_dir), may_initialize=False)
+            print("Resumed retained nodes and unsealed OpenBao; completed Jobs and application data preserved")
+        elif bao.recovery_path(secret_dir, identity["cluster"]).exists():
+            raise ValueError("OpenBao workload is missing but recovery exists; explicit reconciliation is required")
+        else:
+            # Первый CI-запуск мог завершиться до установки OpenBao; его bootstrap остаётся отдельной фазой.
+            print("Resumed retained bootstrap nodes; OpenBao has not been installed yet")
 
 
 def main() -> None:
@@ -409,7 +451,7 @@ def main() -> None:
     create.add_argument("--secrets-dir", type=Path, required=True)
     create.add_argument("--environment", choices=("dev", "test", "prod"), default="dev")
     create.add_argument("--profile", choices=("single", "ha"), default="single")
-    create.add_argument("--external-port", type=int, default=8450)
+    create.add_argument("--external-port", type=int, default=8460)
     bootstrap = subparsers.add_parser("secrets")
     bootstrap.add_argument("--secrets-dir", type=Path, required=True)
     subparsers.add_parser("load-images")

@@ -12,19 +12,25 @@ import yaml
 
 APPS = ("accounts", "cash", "transfer", "notifications", "gateway", "front", "analytics")
 PUBLIC_ASSETS = {
-    "bank10-setup": {
+    "bank11-setup": {
         "start-database.sh": "deployment/scripts/start-database.sh",
         "init-config.sh": "deployment/discovery/init-config.sh",
     },
-    "bank10-database": {"init-database.sh": "deployment/database/init-database.sh"},
-    "bank10-authorization": {
+    "bank11-database": {"init-database.sh": "deployment/database/init-database.sh"},
+    "bank11-authorization": {
         "start-authorization.sh": "deployment/authorization/start-authorization.sh",
         "bank-realm.json": "deployment/authorization/bank-realm.json",
     },
-    "bank10-edge": {"Caddyfile": "deployment/edge/Caddyfile"},
+    "bank11-edge": {"Caddyfile": "deployment/edge/Caddyfile"},
 }
+for component in ("zipkin", "prometheus", "grafana", "elk"):
+    PUBLIC_ASSETS[f"bank11-{component}"] = {
+        path.name: str(path.relative_to(Path(__file__).resolve().parents[2]))
+        for path in sorted((Path(__file__).resolve().parents[2] / component).iterdir())
+        if path.is_file() and not path.is_symlink()
+    }
 ANALYTICS_ASSETS = {
-    "bank10-analytics-setup": {
+    "bank11-analytics-setup": {
         "start-cassandra.sh": "deployment/scripts/start-cassandra.sh",
         "probe-cassandra.py": "deployment/scripts/probe-cassandra.py",
         "init-cassandra.sh": "deployment/scripts/init-cassandra.sh",
@@ -56,14 +62,18 @@ def require_external(directory: Path, repository: Path) -> Path:
     return directory
 
 
-def secret_bindings(project: Path, analytics: bool, superset: bool) -> dict:
+def secret_bindings(project: Path, analytics: bool, superset: bool, *, telegram: bool = True) -> dict:
     bindings = json.loads((project / "deployment/kubernetes/secret-bindings.json").read_text(encoding="utf-8"))
-    selected = {"database", "authorization", "edge", *APPS[:-1]}
+    selected = {"database", "authorization", "edge", *APPS[:-1],
+                "prometheus", "grafana", "elasticsearch", "logstash", "kibana"}
+    if telegram:
+        selected.add("alertmanager")
+    selected.update(f"kafka-{app}" for app in ("accounts", "cash", "transfer", "notifications"))
     if analytics:
-        selected.update({"analytics", "cassandra", "clickhouse"})
+        selected.update({"analytics", "cassandra", "clickhouse", "kafka-analytics"})
     if superset:
         selected.update({"superset", "bank-bi"})
-    return {f"bank10-{name}": items for name, items in bindings.items() if name in selected}
+    return {f"bank11-{name}": items for name, items in bindings.items() if name in selected}
 
 
 def image_reference(project: Path, name: str) -> str:
@@ -80,7 +90,7 @@ def image_reference(project: Path, name: str) -> str:
         for path in sorted(context.rglob("*")):
             if path.is_file() and "__pycache__" not in path.parts:
                 hashed.update(str(path.relative_to(context)).encode() + b"\0" + path.read_bytes())
-    return f"bank10-{name}:{hashed.hexdigest()[:20]}"
+    return f"bank11-{name}:{hashed.hexdigest()[:20]}"
 
 
 def chart_digest(project: Path) -> str:
@@ -97,7 +107,7 @@ def chart_digest(project: Path) -> str:
 def source_digest(project: Path, analytics: bool, superset: bool = False) -> str:
     files = {project / relative for sources in (PUBLIC_ASSETS | (ANALYTICS_ASSETS if analytics else {})).values()
              for relative in sources.values()}
-    files.update(path for directory in ("deployment/charts", "deployment/kubernetes") for path in (project / directory).rglob("*")
+    files.update(path for directory in ("deployment/charts", "deployment/kubernetes", "openbao", "zipkin", "prometheus", "grafana", "elk") for path in (project / directory).rglob("*")
                  if path.is_file() and "__pycache__" not in path.parts)
     files.update(project / name for name in ("Dockerfile", "config/jvm-network.security", "deployment/authorization/Dockerfile", "deployment/edge/Dockerfile"))
     if superset:
@@ -109,7 +119,7 @@ def source_digest(project: Path, analytics: bool, superset: bool = False) -> str
 
 
 def prepare(output: Path, *, environment: str, profile: str, analytics: bool, superset: bool,
-            external_port: int, images: dict | None = None) -> dict:
+            external_port: int, images: dict | None = None, telegram: bool = False) -> dict:
     project = project_dir()
     output = require_external(output, project.parents[1])
     assets = {}
@@ -121,8 +131,8 @@ def prepare(output: Path, *, environment: str, profile: str, analytics: bool, su
                 raise ValueError(f"Public source asset must be a regular file: {relative}")
             contents = path.read_text(encoding="utf-8")
             if key in {"Caddyfile", "bank-realm.json"}:
-                contents = contents.replace(":8450", f":{external_port}")
-                contents = contents.replace("X-Forwarded-Port 8450", f"X-Forwarded-Port {external_port}")
+                contents = contents.replace(":8460", f":{external_port}")
+                contents = contents.replace("X-Forwarded-Port 8460", f"X-Forwarded-Port {external_port}")
             assets[config_map][key] = contents
     values = {
         "global": {"environment": environment, "externalPort": external_port, "analyticsEnabled": analytics,
@@ -130,6 +140,8 @@ def prepare(output: Path, *, environment: str, profile: str, analytics: bool, su
         "kafka": {"profile": profile, "analyticsEnabled": analytics},
         "superset": {"enabled": superset},
         "assets": assets,
+        "openbao": {"bindings": secret_bindings(project, analytics, superset, telegram=telegram)},
+        "observability": {"alerting": {"telegram": {"enabled": telegram}}},
     }
     if images:
         expected = {*APPS[:-1], "authorization", "edge"}
@@ -137,7 +149,7 @@ def prepare(output: Path, *, environment: str, profile: str, analytics: bool, su
             expected.add("analytics")
         if superset:
             expected.update({"superset", "bank-bi"})
-        if set(images) != expected or any(not re.fullmatch(rf"bank10-{re.escape(name)}:[a-f0-9]{{20}}", image)
+        if set(images) != expected or any(not re.fullmatch(rf"bank11-{re.escape(name)}:[a-f0-9]{{20}}", image)
                                           for name, image in images.items()):
             raise ValueError("Image manifest must contain every selected content-addressed application image")
         if any(image != image_reference(project, name) for name, image in images.items()):
@@ -150,7 +162,7 @@ def prepare(output: Path, *, environment: str, profile: str, analytics: bool, su
             values["superset"]["image"] = images["superset"]
         if "bank-bi" in images:
             values["superset"]["provisionerImage"] = images["bank-bi"]
-    bindings = secret_bindings(project, analytics, superset)
+    bindings = secret_bindings(project, analytics, superset, telegram=telegram)
     values_path = output / "public-values.yaml"
     values_path.write_text(yaml.safe_dump(values, sort_keys=True), encoding="utf-8")
     values_path.chmod(0o600)
@@ -159,12 +171,12 @@ def prepare(output: Path, *, environment: str, profile: str, analytics: bool, su
     bindings_path.chmod(0o600)
     artifacts = {name: hashlib.sha256((project / "build/deployment" / f"{name}.jar").read_bytes()).hexdigest()
                  for name in (APPS + ("bank-bi",)) if images and name in images}
-    receipt = {"source_sha256": source_digest(project, analytics, superset), "namespace": f"bank10-{environment}",
-               "profile": profile, "analytics": analytics, "superset": superset,
+    receipt = {"source_sha256": source_digest(project, analytics, superset), "namespace": f"bank11-{environment}",
+               "profile": profile, "analytics": analytics, "superset": superset, "telegram": telegram,
                "images": images or {}, "artifacts": artifacts,
                "secret_files": sorted({name for items in bindings.values() for name in items.values()})}
     (output / "source.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
-    print(f"Prepared public values for bank10-{environment}/{profile}; secret values were not read")
+    print(f"Prepared public values for bank11-{environment}/{profile}; secret values were not read")
     return receipt
 
 
@@ -174,8 +186,9 @@ def main() -> None:
     parser.add_argument("--environment", choices=("dev", "test", "prod"), default="dev")
     parser.add_argument("--profile", choices=("single", "ha"), default="single")
     parser.add_argument("--analytics", action="store_true")
+    parser.add_argument("--telegram", action="store_true", help="Enable the separately supplied Telegram destination")
     parser.add_argument("--superset", action="store_true")
-    parser.add_argument("--external-port", type=int, default=8450)
+    parser.add_argument("--external-port", type=int, default=8460)
     parser.add_argument("--images", type=Path)
     args = parser.parse_args()
     if not 1024 < args.external_port < 65536:
@@ -183,7 +196,7 @@ def main() -> None:
     images = json.loads(args.images.read_text(encoding="utf-8")) if args.images else None
     prepare(args.output_dir, environment=args.environment, profile=args.profile,
             analytics=args.analytics or args.superset, superset=args.superset,
-            external_port=args.external_port, images=images)
+            external_port=args.external_port, images=images, telegram=args.telegram)
 
 
 if __name__ == "__main__":

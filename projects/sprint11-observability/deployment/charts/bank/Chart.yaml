@@ -1,9 +1,9 @@
 apiVersion: v2
 name: bank
-description: Банк Sprint 10 с Kafka и изолированными хранилищами
+description: Банк Sprint 11 с Kafka и наблюдаемостью и изолированными хранилищами
 type: application
 version: 0.1.0
-appVersion: "10"
+appVersion: "11"
 dependencies:
   - name: kafka
     version: 0.1.0

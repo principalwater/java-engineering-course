@@ -226,16 +226,16 @@
           }
         }
       ],
-      "rootUrl": "https://bank.valgrind-home.localhost:8450",
+      "rootUrl": "https://bank.valgrind-home.localhost:8460",
       "redirectUris": [
-        "https://bank.valgrind-home.localhost:8450/login/oauth2/code/bank"
+        "https://bank.valgrind-home.localhost:8460/login/oauth2/code/bank"
       ],
       "webOrigins": [
-        "https://bank.valgrind-home.localhost:8450"
+        "https://bank.valgrind-home.localhost:8460"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "https://bank.valgrind-home.localhost:8450/login?logout"
+        "post.logout.redirect.uris": "https://bank.valgrind-home.localhost:8460/login?logout"
       }
     },
     {
@@ -350,12 +350,12 @@
         "email"
       ],
       "optionalClientScopes": [],
-      "rootUrl": "https://insights.valgrind-home.localhost:8450",
+      "rootUrl": "https://insights.valgrind-home.localhost:8460",
       "redirectUris": [
-        "https://insights.valgrind-home.localhost:8450/oauth-authorized/bank"
+        "https://insights.valgrind-home.localhost:8460/oauth-authorized/bank"
       ],
       "webOrigins": [
-        "https://insights.valgrind-home.localhost:8450"
+        "https://insights.valgrind-home.localhost:8460"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256"

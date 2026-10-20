@@ -7,11 +7,15 @@ metadata:
   name: {{ printf "%s-service" $name }}
   labels:
     strimzi.io/cluster: {{ $.Values.global.kafkaCluster }}
-    app.kubernetes.io/part-of: bank10
+    app.kubernetes.io/part-of: bank11
   annotations:
     helm.sh/resource-policy: keep
 spec:
-  authentication: {type: scram-sha-512}
+  authentication:
+    type: scram-sha-512
+    password:
+      valueFrom:
+        secretKeyRef: {name: {{ printf "bank11-kafka-%s" $name }}, key: password}
   authorization:
     type: simple
     acls:

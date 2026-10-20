@@ -7,7 +7,7 @@
     }
 }
 
-https://bank.valgrind-home.localhost:8450 {
+https://bank.valgrind-home.localhost:8460 {
     tls /run/secrets/tls_certificate.pem /run/secrets/tls_private_key.pem
     header Alt-Svc clear
     request_body {
@@ -16,13 +16,20 @@ https://bank.valgrind-home.localhost:8450 {
     header Referrer-Policy no-referrer
     @management path /actuator /actuator/*
     respond @management 404
-    reverse_proxy front:8080 {
+    reverse_proxy https://front:8443 {
+        transport http {
+            tls_trusted_ca_certs /run/secrets/internal_ca.pem
+        }
+        header_up -traceparent
+        header_up -tracestate
+        header_up -b3
+        header_up -X-B3-*
         header_up -Forwarded
         # Wildcard-удаление применяется после set и удалило бы доверенный Proto.
         header_up -X-Forwarded-Prefix
-        header_up X-Forwarded-Host bank.valgrind-home.localhost:8450
+        header_up X-Forwarded-Host bank.valgrind-home.localhost:8460
         header_up X-Forwarded-Proto https
-        header_up X-Forwarded-Port 8450
+        header_up X-Forwarded-Port 8460
     }
 }
 
@@ -31,22 +38,29 @@ http://:8081 {
     respond /healthz 200
 }
 
-https://auth-bank.valgrind-home.localhost:8450 {
+https://auth-bank.valgrind-home.localhost:8460 {
     tls /run/secrets/tls_certificate.pem /run/secrets/tls_private_key.pem
     header Alt-Svc clear
     request_body {
         max_size 32KB
     }
-    reverse_proxy authorization:8080 {
+    reverse_proxy https://authorization:8443 {
+        transport http {
+            tls_trusted_ca_certs /run/secrets/internal_ca.pem
+        }
+        header_up -traceparent
+        header_up -tracestate
+        header_up -b3
+        header_up -X-B3-*
         header_up -Forwarded
         header_up -X-Forwarded-Prefix
-        header_up X-Forwarded-Host auth-bank.valgrind-home.localhost:8450
+        header_up X-Forwarded-Host auth-bank.valgrind-home.localhost:8460
         header_up X-Forwarded-Proto https
-        header_up X-Forwarded-Port 8450
+        header_up X-Forwarded-Port 8460
     }
 }
 
-https://insights.valgrind-home.localhost:8450 {
+https://insights.valgrind-home.localhost:8460 {
     tls /run/secrets/tls_certificate.pem /run/secrets/tls_private_key.pem
     header Alt-Svc clear
     request_body {
@@ -57,10 +71,41 @@ https://insights.valgrind-home.localhost:8450 {
         transport http {
             tls_trusted_ca_certs /run/secrets/tls_ca.pem
         }
+        header_up -traceparent
+        header_up -tracestate
+        header_up -b3
+        header_up -X-B3-*
         header_up -Forwarded
         header_up -X-Forwarded-Prefix
-        header_up X-Forwarded-Host insights.valgrind-home.localhost:8450
+        header_up X-Forwarded-Host insights.valgrind-home.localhost:8460
         header_up X-Forwarded-Proto https
-        header_up X-Forwarded-Port 8450
+        header_up X-Forwarded-Port 8460
+    }
+}
+
+# Наблюдаемость отделена от клиентского кабинета: собственные read-only учётные записи операторов.
+https://grafana-bank.valgrind-home.localhost:8460 {
+    tls /run/secrets/tls_certificate.pem /run/secrets/tls_private_key.pem
+    header Alt-Svc clear
+    @management path /metrics /api/admin/*
+    respond @management 404
+    reverse_proxy grafana:3000 {
+        header_up -Forwarded
+        header_up -X-Forwarded-Prefix
+        header_up X-Forwarded-Host grafana-bank.valgrind-home.localhost:8460
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-Port 8460
+    }
+}
+
+https://kibana-bank.valgrind-home.localhost:8460 {
+    tls /run/secrets/tls_certificate.pem /run/secrets/tls_private_key.pem
+    header Alt-Svc clear
+    reverse_proxy kibana:5601 {
+        header_up -Forwarded
+        header_up -X-Forwarded-Prefix
+        header_up X-Forwarded-Host kibana-bank.valgrind-home.localhost:8460
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-Port 8460
     }
 }

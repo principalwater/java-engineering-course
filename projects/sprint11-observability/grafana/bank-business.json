@@ -1,0 +1,1123 @@
+{
+  "uid": "bank-business",
+  "title": "Bank11 / Business failures",
+  "description": "Failed cash withdrawals, transfers and notifications grouped by login.",
+  "tags": [
+    "bank11",
+    "business"
+  ],
+  "schemaVersion": 41,
+  "version": 1,
+  "editable": false,
+  "graphTooltip": 1,
+  "style": "dark",
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "fiscalYearStartMonth": 0,
+  "liveNow": false,
+  "weekStart": "",
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "links": [
+    {
+      "type": "dashboards",
+      "title": "Bank11 dashboards",
+      "tags": [
+        "bank11"
+      ],
+      "asDropdown": true,
+      "includeVars": false,
+      "keepTime": true,
+      "icon": "external link",
+      "targetBlank": false,
+      "tooltip": "",
+      "url": ""
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Cash withdrawals",
+      "collapsed": false,
+      "id": 1,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Failed withdrawals (range)",
+      "description": "Counters bank_cash_withdrawal_failures_total, bank_transfer_failures_total and bank_notification_failures_total are registered on the first failure, so 'no failures counted' is the normal empty state, not missing telemetry.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bank-prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bank-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(((increase(bank_cash_withdrawal_failures_total[$__range]) and bank_cash_withdrawal_failures_total offset $__range) or bank_cash_withdrawal_failures_total))",
+          "legendFormat": "",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 1,
+                "color": "orange"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "noValue": "no failures counted"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "id": 2,
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "Top logins by failed withdrawals (range)",
+      "description": "Counters bank_cash_withdrawal_failures_total, bank_transfer_failures_total and bank_notification_failures_total are registered on the first failure, so 'no failures counted' is the normal empty state, not missing telemetry.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bank-prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bank-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "topk(10, sum by (login) (((increase(bank_cash_withdrawal_failures_total[$__range]) and bank_cash_withdrawal_failures_total offset $__range) or bank_cash_withdrawal_failures_total)))",
+          "legendFormat": "{{login}}",
+          "range": false,
+          "instant": true,
+          "refId": "A",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "blue"
+              }
+            ]
+          },
+          "min": 0,
+          "noValue": "no failures counted"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "valueMode": "color"
+      },
+      "id": 3,
+      "gridPos": {
+        "h": 5,
+        "w": 9,
+        "x": 6,
+        "y": 1
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Failed withdrawals by login",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bank-prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bank-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (login) (((increase(bank_cash_withdrawal_failures_total[$__rate_interval]) and bank_cash_withdrawal_failures_total offset $__rate_interval) or bank_cash_withdrawal_failures_total))",
+          "legendFormat": "{{login}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "lineInterpolation": "linear",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 4,
+      "gridPos": {
+        "h": 5,
+        "w": 9,
+        "x": 15,
+        "y": 1
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Failed withdrawals by reason",
+      "description": "reason is the BankError name of the rejection (bounded enum).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bank-prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bank-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (reason) (((increase(bank_cash_withdrawal_failures_total[$__rate_interval]) and bank_cash_withdrawal_failures_total offset $__rate_interval) or bank_cash_withdrawal_failures_total))",
+          "legendFormat": "{{reason}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "lineInterpolation": "linear",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 5,
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      }
+    },
+    {
+      "type": "row",
+      "title": "Transfers",
+      "collapsed": false,
+      "id": 6,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 12
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Failed transfers (range)",
+      "description": "Counters bank_cash_withdrawal_failures_total, bank_transfer_failures_total and bank_notification_failures_total are registered on the first failure, so 'no failures counted' is the normal empty state, not missing telemetry.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bank-prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bank-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(((increase(bank_transfer_failures_total[$__range]) and bank_transfer_failures_total offset $__range) or bank_transfer_failures_total))",
+          "legendFormat": "",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 1,
+                "color": "orange"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "noValue": "no failures counted"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "id": 7,
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 13
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "Top senders by failed transfers (range)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bank-prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bank-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "topk(10, sum by (sender) (((increase(bank_transfer_failures_total[$__range]) and bank_transfer_failures_total offset $__range) or bank_transfer_failures_total)))",
+          "legendFormat": "{{sender}}",
+          "range": false,
+          "instant": true,
+          "refId": "A",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "blue"
+              }
+            ]
+          },
+          "min": 0,
+          "noValue": "no failures counted"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "valueMode": "color"
+      },
+      "id": 8,
+      "gridPos": {
+        "h": 5,
+        "w": 9,
+        "x": 6,
+        "y": 13
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "Top recipients by failed transfers (range)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bank-prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bank-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "topk(10, sum by (recipient) (((increase(bank_transfer_failures_total[$__range]) and bank_transfer_failures_total offset $__range) or bank_transfer_failures_total)))",
+          "legendFormat": "{{recipient}}",
+          "range": false,
+          "instant": true,
+          "refId": "A",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "blue"
+              }
+            ]
+          },
+          "min": 0,
+          "noValue": "no failures counted"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "valueMode": "color"
+      },
+      "id": 9,
+      "gridPos": {
+        "h": 5,
+        "w": 9,
+        "x": 15,
+        "y": 13
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Failed transfers by sender",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bank-prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bank-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (sender) (((increase(bank_transfer_failures_total[$__rate_interval]) and bank_transfer_failures_total offset $__rate_interval) or bank_transfer_failures_total))",
+          "legendFormat": "{{sender}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "lineInterpolation": "linear",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 10,
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      }
+    },
+    {
+      "type": "table",
+      "title": "Failed transfers by sender and recipient (range)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bank-prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bank-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "topk(15, sum by (sender, recipient) (((increase(bank_transfer_failures_total[$__range]) and bank_transfer_failures_total offset $__range) or bank_transfer_failures_total)))",
+          "legendFormat": "",
+          "range": false,
+          "instant": true,
+          "refId": "A",
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "renameByName": {
+              "sender": "Sender",
+              "recipient": "Recipient",
+              "Value": "Failures"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "noValue": "no failures counted"
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "sortBy": [
+          {
+            "displayName": "Failures",
+            "desc": true
+          }
+        ]
+      },
+      "id": 11,
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Failed transfers by reason",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bank-prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bank-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (reason) (((increase(bank_transfer_failures_total[$__rate_interval]) and bank_transfer_failures_total offset $__rate_interval) or bank_transfer_failures_total))",
+          "legendFormat": "{{reason}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "lineInterpolation": "linear",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 12,
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 25
+      }
+    },
+    {
+      "type": "row",
+      "title": "Notifications",
+      "collapsed": false,
+      "id": 13,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Failed notifications (range)",
+      "description": "Counters bank_cash_withdrawal_failures_total, bank_transfer_failures_total and bank_notification_failures_total are registered on the first failure, so 'no failures counted' is the normal empty state, not missing telemetry.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bank-prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bank-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(((increase(bank_notification_failures_total[$__range]) and bank_notification_failures_total offset $__range) or bank_notification_failures_total))",
+          "legendFormat": "",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 1,
+                "color": "orange"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "noValue": "no failures counted"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "id": 14,
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 32
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "Top logins by failed notifications (range)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bank-prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bank-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "topk(10, sum by (login) (((increase(bank_notification_failures_total[$__range]) and bank_notification_failures_total offset $__range) or bank_notification_failures_total)))",
+          "legendFormat": "{{login}}",
+          "range": false,
+          "instant": true,
+          "refId": "A",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "blue"
+              }
+            ]
+          },
+          "min": 0,
+          "noValue": "no failures counted"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "valueMode": "color"
+      },
+      "id": 15,
+      "gridPos": {
+        "h": 5,
+        "w": 9,
+        "x": 6,
+        "y": 32
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Failed notifications by login",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bank-prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bank-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (login) (((increase(bank_notification_failures_total[$__rate_interval]) and bank_notification_failures_total offset $__rate_interval) or bank_notification_failures_total))",
+          "legendFormat": "{{login}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "lineInterpolation": "linear",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 16,
+      "gridPos": {
+        "h": 5,
+        "w": 9,
+        "x": 15,
+        "y": 32
+      }
+    },
+    {
+      "type": "row",
+      "title": "Context: HTTP errors of the money services",
+      "collapsed": false,
+      "id": 17,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "4xx/5xx per second of cash, transfer and accounts",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bank-prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bank-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (service, outcome) (rate(http_server_requests_seconds_count{job=\"bank-web\", service=~\"cash|transfer|accounts\", outcome=~\"CLIENT_ERROR|SERVER_ERROR\", uri!~\"/actuator.*\"}[$__rate_interval]))",
+          "legendFormat": "{{service}} {{outcome}}",
+          "range": true,
+          "instant": false,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "lineInterpolation": "linear",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 18,
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      }
+    }
+  ]
+}

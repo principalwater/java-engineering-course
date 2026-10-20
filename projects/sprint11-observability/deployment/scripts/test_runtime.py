@@ -28,7 +28,7 @@ class RuntimeFormTest(unittest.TestCase):
         self.assertIn("basic", front["defaultClientScopes"])
         self.assertTrue(any(mapper["protocolMapper"] == "oidc-sub-mapper" and mapper["config"].get("access.token.claim") == "true"
                             for mapper in basic["protocolMappers"]))
-        self.assertEqual("https://bank.valgrind-home.localhost:8450/login?logout", front["attributes"]["post.logout.redirect.uris"])
+        self.assertEqual("https://bank.valgrind-home.localhost:8460/login?logout", front["attributes"]["post.logout.redirect.uris"])
 
     def test_selects_only_login_form_and_preserves_hidden_input(self):
         form = runtime.LoginForm()
@@ -52,17 +52,17 @@ class RuntimeFormTest(unittest.TestCase):
             form.feed('<form id="kc-form-login" action="/one"></form><form id="kc-form-login" action="/two"></form>')
 
     def test_callback_guard_rejects_http_or_foreign_origins(self):
-        base = "https://bank.valgrind-home.localhost:8450"
+        base = "https://bank.valgrind-home.localhost:8460"
         guard = runtime.SafeRedirect(base)
-        for callback in ("http://bank.valgrind-home.localhost:8450/login/oauth2/code/bank", "https://evil.example/callback"):
-            target = "https://auth-bank.valgrind-home.localhost:8450/realms/bank/protocol/openid-connect/auth?" + urlencode({"redirect_uri": callback})
+        for callback in ("http://bank.valgrind-home.localhost:8460/login/oauth2/code/bank", "https://evil.example/callback"):
+            target = "https://auth-bank.valgrind-home.localhost:8460/realms/bank/protocol/openid-connect/auth?" + urlencode({"redirect_uri": callback})
             with self.assertRaises(runtime.VerificationError):
                 guard.redirect_request(Request(base), None, 302, "Found", {}, target)
         self.assertEqual(0, guard.authorization_redirects)
 
     def test_target_and_uuid_boundaries_reject_credentials_and_sql_fragments(self):
-        self.assertFalse(runtime.allowed_url("https://alice:secret@bank.valgrind-home.localhost:8450"))
-        self.assertFalse(runtime.allowed_url("http://bank.valgrind-home.localhost:8450"))
+        self.assertFalse(runtime.allowed_url("https://alice:secret@bank.valgrind-home.localhost:8460"))
+        self.assertFalse(runtime.allowed_url("http://bank.valgrind-home.localhost:8460"))
         self.assertFalse(runtime.allowed_url("https://other.localhost"))
         with self.assertRaises(ValueError):
             runtime.checked_uuid("' OR true --")

@@ -9,7 +9,8 @@ import sys
 import tempfile
 
 
-HOSTS = ("bank.valgrind-home.localhost", "auth-bank.valgrind-home.localhost", "insights.valgrind-home.localhost", "superset")
+HOSTS = ("bank.valgrind-home.localhost", "auth-bank.valgrind-home.localhost", "insights.valgrind-home.localhost", "superset",
+         "grafana-bank.valgrind-home.localhost", "kibana-bank.valgrind-home.localhost")
 
 
 def openssl_binary():

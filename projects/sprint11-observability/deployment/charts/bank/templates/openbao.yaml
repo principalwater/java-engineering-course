@@ -1,0 +1,71 @@
+{{- $namespace := .Release.Namespace }}
+{{- $apps := .Values.apps }}
+{{- range $name, $app := $apps }}
+{{- if or (not $app.optional) $.Values.global.analyticsEnabled }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "bank.labels" $ | nindent 4 }}
+automountServiceAccountToken: false
+{{- end }}
+{{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: eso
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: openbao
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  provider:
+    openBao:
+      server: https://openbao.bank11-system.svc.cluster.local:8200
+      path: kv
+      version: v2
+      caProvider: {type: ConfigMap, name: bank11-trust, key: ca.crt}
+      auth:
+        kubernetes:
+          path: kubernetes
+          role: {{ printf "%s-eso" $namespace }}
+          serviceAccountRef: {name: eso, audiences: [openbao]}
+{{- range $binding, $files := .Values.openbao.bindings }}
+{{- $name := trimPrefix "bank11-" $binding }}
+{{- if and $files (not (hasKey $apps $name)) }}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: {{ $binding }}
+  labels:
+    {{- include "bank.labels" $ | nindent 4 }}
+spec:
+  refreshInterval: 1m
+  secretStoreRef: {kind: SecretStore, name: openbao}
+  target:
+    name: {{ $binding }}
+    creationPolicy: Owner
+    # Недоступность хранилища не удаляет последнюю подтверждённую копию секрета.
+    deletionPolicy: Retain
+    template:
+      metadata:
+        labels:
+          bank11.io/cluster: {{ printf "bank11-%s-%s" $.Values.global.environment $.Values.kafka.profile }}
+          app.kubernetes.io/part-of: bank11
+  data:
+    {{- range $target, $_ := $files }}
+    - secretKey: {{ $target | quote }}
+      remoteRef: {key: {{ printf "%s/%s" $namespace $name | quote }}, property: {{ $target | quote }}}
+    {{- end }}
+{{- end }}
+{{- end }}

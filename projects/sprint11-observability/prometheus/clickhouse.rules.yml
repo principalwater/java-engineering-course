@@ -1,0 +1,50 @@
+groups:
+  - name: bank-clickhouse
+    interval: 30s
+    rules:
+      - alert: ClickHouseDown
+        expr: up{job="clickhouse"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ClickHouse cannot be scraped"
+          description: "The native Prometheus endpoint (port 9363) of ClickHouse has been unreachable for 2 minutes."
+          action: "Check the clickhouse pod status and its logs; the analytics service cannot write or read marts while it is down."
+      - alert: ClickHouseQueriesFailing
+        expr: sum(rate(ClickHouseProfileEvents_FailedQuery[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ClickHouse queries are failing"
+          description: "{{ $value | printf \"%.2f\" }} queries per second have failed for 10 minutes."
+          action: "Query system.query_log for exception_code != 0, or read the server log; the analytics service logs the same failures with a traceId."
+      - alert: ClickHouseInsertsRejected
+        expr: sum(rate(ClickHouseProfileEvents_RejectedInserts[5m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ClickHouse rejects inserts (too many parts)"
+          description: "Inserts are being refused because a partition has too many active parts; the analytics export queue will back up."
+          action: "Check ClickHouseAsyncMetrics_MaxPartCountForPartition and the background merge activity on the ClickHouse dashboard; batch inserts more coarsely."
+      - alert: ClickHouseTooManyParts
+        expr: max(ClickHouseAsyncMetrics_MaxPartCountForPartition) > 300
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A ClickHouse partition holds {{ $value }} parts"
+          description: "Merges are not keeping up with inserts; at the delay threshold inserts slow down, then are rejected."
+          action: "Look at merge activity and disk throughput on the ClickHouse dashboard before inserts start to be delayed."
+      - alert: ClickHouseDiskSpaceLow
+        expr: |
+          min by (disk) (ClickHouseAsyncMetrics_DiskAvailable{disk=~"default|cold"} / ClickHouseAsyncMetrics_DiskTotal{disk=~"default|cold"}) < 0.1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ClickHouse disk {{ $labels.disk }} has less than 10% free space"
+          description: "Disk {{ $labels.disk }} has {{ $value | humanizePercentage }} of its capacity available."
+          action: "Check table sizes (system.parts) and the tiered-storage move policy; the cold volume is the PVC analytics-cold."

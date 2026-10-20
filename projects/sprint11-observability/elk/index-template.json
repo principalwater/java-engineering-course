@@ -1,0 +1,27 @@
+{
+  "index_patterns": ["bank11-logs-*"],
+  "priority": 300,
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0,
+      "refresh_interval": "5s",
+      "index.lifecycle.name": "bank11-logs-retention"
+    },
+    "mappings": {
+      "dynamic": "strict",
+      "properties": {
+        "@timestamp": {"type": "date"},
+        "level": {"type": "keyword"},
+        "logger_name": {"type": "keyword", "ignore_above": 256},
+        "event": {"type": "text"},
+        "category": {"type": "keyword", "ignore_above": 256},
+        "service": {"type": "keyword"},
+        "traceId": {"type": "keyword", "ignore_above": 64},
+        "spanId": {"type": "keyword", "ignore_above": 32},
+        "environment": {"type": "keyword"},
+        "tags": {"type": "keyword"}
+      }
+    }
+  }
+}

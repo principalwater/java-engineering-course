@@ -1,0 +1,1072 @@
+{{- /*
+Observability stack: Zipkin, Prometheus + Alertmanager, Grafana, and the Logstash -> Elasticsearch -> Kibana
+log chain. Every workload is single-replica; images are pinned by digest; every container has explicit
+requests and limits. Public configuration comes from .Values.assets (ConfigMaps bank11-zipkin,
+bank11-prometheus, bank11-grafana, bank11-elk, produced by kubernetes/prepare.py from the zipkin/,
+prometheus/, grafana/ and elk/ directories). Secret values never appear here: workloads reference the
+external Secrets bank11-{prometheus,alertmanager,grafana,elasticsearch,logstash,kibana} by name.
+Defaults below are overridden by .Values.observability.
+*/ -}}
+{{- $defaults := fromYaml `
+enabled: true
+logging:
+  enabled: true
+retention:
+  metricsTime: 7d
+  metricsSize: 1GB
+  logsTime: 7d
+  alertmanagerTime: 120h
+storage:
+  prometheus: 2Gi
+  alertmanager: 128Mi
+  grafana: 256Mi
+  elasticsearch: 4Gi
+  logstash: 1Gi
+publicHosts:
+  grafana: grafana-bank.valgrind-home.localhost
+  kibana: kibana-bank.valgrind-home.localhost
+alerting:
+  telegram:
+    enabled: false
+    apiUrl: https://api.telegram.org
+scrape:
+  webPort: 8080
+  workerPort: 9400
+  webPath: /actuator/prometheus
+  workerPath: /actuator/prometheus
+images:
+  zipkin: openzipkin/zipkin:3.6.1@sha256:d17e856dcbba7ffeefbbfc252f89ab78a4ab6faed47e646d46daad78f91b5ee2
+  prometheus: prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
+  alertmanager: prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
+  grafana: grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
+  elasticsearch: docker.elastic.co/elasticsearch/elasticsearch:9.5.5@sha256:13b4a40bb095774f5fda635e45fd5677cc6a26565e42b24997b0c72b88e75984
+  kibana: docker.elastic.co/kibana/kibana:9.5.5@sha256:13b72ce7222c36e4213229004ae62a87aeb32fd372ebfa6fb38f7a3285fdbb78
+  logstash: docker.elastic.co/logstash/logstash:9.5.5@sha256:d170c92166492ff82433395734121dcd2c73140038a03e252299384a01c9aae5
+  logstashExporter: kuskoman/logstash-exporter:v1.9.2@sha256:1fa5ef435073d83525d54809cb4e5e4b5375a774e368c92677c854c6e6524902
+resources:
+  zipkin: {requests: {cpu: 50m, memory: 192Mi}, limits: {cpu: 500m, memory: 320Mi}}
+  prometheus: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: "1", memory: 384Mi}}
+  alertmanager: {requests: {cpu: 10m, memory: 32Mi}, limits: {cpu: 200m, memory: 64Mi}}
+  grafana: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: "1", memory: 512Mi}}
+  elasticsearch: {requests: {cpu: 200m, memory: 640Mi}, limits: {cpu: "1.5", memory: 768Mi}}
+  kibana: {requests: {cpu: 100m, memory: 768Mi}, limits: {cpu: "1", memory: 1536Mi}}
+  logstash: {requests: {cpu: 100m, memory: 512Mi}, limits: {cpu: "1", memory: 640Mi}}
+  logstashExporter: {requests: {cpu: 10m, memory: 16Mi}, limits: {cpu: 100m, memory: 48Mi}}
+  job: {requests: {cpu: 10m, memory: 32Mi}, limits: {cpu: 200m, memory: 128Mi}}
+` }}
+{{- $obs := mustMergeOverwrite $defaults (deepCopy (default (dict) .Values.observability)) }}
+{{- if $obs.enabled }}
+{{- $zipkinAsset := required "assets.bank11-zipkin is missing: run kubernetes/prepare.py and pass its public-values.yaml" (index .Values.assets "bank11-zipkin") }}
+{{- $promAsset := required "assets.bank11-prometheus is missing: run kubernetes/prepare.py and pass its public-values.yaml" (index .Values.assets "bank11-prometheus") }}
+{{- $grafanaAsset := required "assets.bank11-grafana is missing: run kubernetes/prepare.py and pass its public-values.yaml" (index .Values.assets "bank11-grafana") }}
+{{- $elkAsset := required "assets.bank11-elk is missing: run kubernetes/prepare.py and pass its public-values.yaml" (index .Values.assets "bank11-elk") }}
+{{- $release := .Release.Name }}
+{{- $prefix := .Values.global.secretPrefix }}
+{{- $environment := .Values.global.environment }}
+{{- $logging := $obs.logging.enabled }}
+{{- $kafka := .Values.global.kafkaCluster }}
+{{- $dashboards := list }}
+{{- range $key, $_ := $grafanaAsset }}{{ if hasSuffix ".json" $key }}{{ $dashboards = append $dashboards $key }}{{ end }}{{ end }}
+{{- $rules := list }}
+{{- $ruleContents := dict }}
+{{- range $key, $content := $promAsset }}{{ if hasSuffix ".rules.yml" $key }}{{ $rules = append $rules $key }}{{ $_ := set $ruleContents $key $content }}{{ end }}{{ end }}
+
+{{- /* Scrape target lists rendered from apps.*: an optional service that is not deployed is never scraped. */}}
+{{- $webTargets := list }}
+{{- $workerTargets := list }}
+{{- $workerServices := list }}
+{{- range $name, $app := .Values.apps }}
+{{- if or (not $app.optional) $.Values.global.analyticsEnabled }}
+{{- if ne (toString $app.web) "false" }}
+{{- $webTargets = append $webTargets (dict "targets" (list (printf "%s:%v" $name $obs.scrape.webPort)) "labels" (dict "service" $name "__metrics_path__" $obs.scrape.webPath)) }}
+{{- else }}
+{{- $workerTargets = append $workerTargets (dict "targets" (list (printf "%s-metrics:%v" $name $obs.scrape.workerPort)) "labels" (dict "service" $name "__metrics_path__" $obs.scrape.workerPath)) }}
+{{- $workerServices = append $workerServices $name }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- $clickhouseTargets := list }}
+{{- if .Values.global.analyticsEnabled }}
+{{- $clickhouseTargets = list (dict "targets" (list "clickhouse-metrics:9363") "labels" (dict "service" "clickhouse")) }}
+{{- end }}
+{{- $alertmanagerConfig := "route:\n  receiver: local\nreceivers:\n  - name: local\n" }}
+{{- if $obs.alerting.telegram.enabled }}
+{{- $alertmanagerConfig = replace "@TELEGRAM_API_URL@" $obs.alerting.telegram.apiUrl (index $promAsset "alertmanager.yml") }}
+{{- end }}
+
+{{- $claims := dict "prometheus-data" $obs.storage.prometheus "alertmanager-data" $obs.storage.alertmanager "grafana-data" $obs.storage.grafana }}
+{{- if $logging }}
+{{- $_ := set $claims "elasticsearch-data" $obs.storage.elasticsearch }}
+{{- $_ := set $claims "logstash-data" $obs.storage.logstash }}
+{{- end }}
+{{- range $name, $size := $claims }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "bank.labels" $ | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ $.Values.global.storageClass }}
+  resources:
+    requests: {storage: {{ $size }}}
+{{- end }}
+
+{{- /* ---------------------------------------------------------------- generated configuration */}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-targets
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+data:
+  bank-web.json: {{ toJson $webTargets | quote }}
+  bank-worker.json: {{ toJson $workerTargets | quote }}
+  clickhouse.json: {{ toJson $clickhouseTargets | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+data:
+  alertmanager.yml: |
+    {{- $alertmanagerConfig | nindent 4 }}
+
+{{- /* ---------------------------------------------------------------- Services */}}
+{{- range $service := list (dict "name" "zipkin" "port" 9411) (dict "name" "prometheus" "port" 9090) (dict "name" "alertmanager" "port" 9093) (dict "name" "grafana" "port" 3000) }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $service.name }}
+  labels:
+    {{- include "bank.labels" $ | nindent 4 }}
+spec:
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  selector: {app: {{ $service.name }}, bank11.io/instance: {{ $release }}}
+  ports: [{name: http, port: {{ $service.port }}, targetPort: http}]
+{{- end }}
+{{- if $logging }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  selector: {app: elasticsearch, bank11.io/instance: {{ $release }}}
+  ports: [{name: http, port: 9200, targetPort: http}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  selector: {app: kibana, bank11.io/instance: {{ $release }}}
+  ports: [{name: http, port: 5601, targetPort: http}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logstash
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  selector: {app: logstash, bank11.io/instance: {{ $release }}}
+  ports:
+    - {name: logback, port: 5044, targetPort: logback}
+    - {name: api, port: 9600, targetPort: api}
+    - {name: metrics, port: 9198, targetPort: metrics}
+{{- end }}
+{{- /* Metrics-only Services: they publish ports the application Services do not expose and keep scrape traffic off them. */}}
+{{- range $name := $workerServices }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-metrics
+  labels:
+    {{- include "bank.labels" $ | nindent 4 }}
+spec:
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  selector: {app: {{ $name }}, bank11.io/instance: {{ $release }}}
+  ports: [{name: metrics, port: {{ $obs.scrape.workerPort }}, targetPort: {{ $obs.scrape.workerPort }}}]
+{{- end }}
+{{- if .Values.global.analyticsEnabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clickhouse-metrics
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  selector: {app: clickhouse, bank11.io/instance: {{ $release }}}
+  ports: [{name: metrics, port: 9363, targetPort: 9363}]
+{{- end }}
+---
+# Headless: Prometheus resolves every Kafka pod (brokers and controllers) through DNS. Not-ready pods are
+# published too, so a running but unready broker is reported as up == 0 instead of silently vanishing.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-jmx-metrics
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector: {strimzi.io/cluster: {{ $kafka }}, strimzi.io/kind: Kafka, strimzi.io/name: {{ $kafka }}-kafka}
+  ports: [{name: metrics, port: 9404, targetPort: 9404}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-exporter-metrics
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  selector: {strimzi.io/cluster: {{ $kafka }}, strimzi.io/kind: Kafka, strimzi.io/name: {{ $kafka }}-kafka-exporter}
+  ports: [{name: metrics, port: 9404, targetPort: 9404}]
+
+{{- /* ---------------------------------------------------------------- Zipkin */}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zipkin
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: zipkin, bank11.io/instance: {{ $release }}}
+  template:
+    metadata:
+      labels: {app: zipkin, bank11.io/instance: {{ $release }}, bank11.io/role: observability}
+      annotations: {checksum/public-config: {{ $zipkinAsset | toJson | sha256sum }}}
+    spec:
+      automountServiceAccountToken: false
+      # Service links would inject ELASTICSEARCH_*, LOGSTASH_*, ... variables into images that read their own settings from the environment.
+      enableServiceLinks: false
+      nodeSelector:
+        {{- toYaml .Values.global.nodeSelector | nindent 8 }}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: zipkin
+          image: {{ $obs.images.zipkin | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: STORAGE_TYPE, value: mem}
+            # Heap sized with MEM_MAX_SPANS in zipkin/application.yml; ExitOnOutOfMemoryError lets the
+            # kubelet restart a wedged JVM instead of leaving it half alive.
+            - {name: JAVA_OPTS, value: "-Xms96m -Xmx128m -XX:+ExitOnOutOfMemoryError"}
+          ports: [{name: http, containerPort: 9411}]
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 120
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+          securityContext:
+            {{- include "bank.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml $obs.resources.zipkin | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /zipkin/config, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap:
+            name: bank11-zipkin
+            items: [{key: application.yml, path: application.yml}]
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 64Mi}}
+
+{{- /* ---------------------------------------------------------------- Prometheus */}}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: prometheus
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  serviceName: prometheus
+  replicas: 1
+  selector:
+    matchLabels: {app: prometheus, bank11.io/instance: {{ $release }}}
+  template:
+    metadata:
+      labels: {app: prometheus, bank11.io/instance: {{ $release }}, bank11.io/role: storage}
+      annotations:
+        checksum/public-config: {{ pick $promAsset "prometheus.yml" | toJson | sha256sum }}
+        checksum/rules: {{ $ruleContents | toJson | sha256sum }}
+        checksum/targets: {{ dict "web" $webTargets "worker" $workerTargets "clickhouse" $clickhouseTargets | toJson | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      # Service links would inject ELASTICSEARCH_*, LOGSTASH_*, ... variables into images that read their own settings from the environment.
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      nodeSelector:
+        {{- toYaml .Values.global.nodeSelector | nindent 8 }}
+      securityContext:
+        runAsUser: 65534
+        runAsGroup: 65534
+        runAsNonRoot: true
+        fsGroup: 65534
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: prometheus
+          image: {{ $obs.images.prometheus | quote }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            # Retention is bounded twice: by age and by size, whichever trips first. The size cap leaves
+            # headroom for the WAL inside the claim.
+            - --storage.tsdb.retention.time={{ $obs.retention.metricsTime }}
+            - --storage.tsdb.retention.size={{ $obs.retention.metricsSize }}
+            - --web.listen-address=:9090
+            - --query.timeout=30s
+          env:
+            # Makes the Go GC aware of the container limit instead of discovering it through an OOM kill.
+            - {name: GOMEMLIMIT, value: 320MiB}
+          ports: [{name: http, containerPort: 9090}]
+          startupProbe:
+            httpGet: {path: /-/ready, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            # WAL replay after an unclean stop can take minutes.
+            failureThreshold: 120
+          readinessProbe:
+            httpGet: {path: /-/ready, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: {path: /-/healthy, port: http}
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+          securityContext:
+            {{- include "bank.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml $obs.resources.prometheus | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /etc/prometheus, readOnly: true}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: data, mountPath: /prometheus}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        # One projected tree: a nested mount under a read-only ConfigMap mount cannot create its mount point.
+        - name: config
+          projected:
+            sources:
+              - configMap:
+                  name: bank11-prometheus
+                  items:
+                    - {key: prometheus.yml, path: prometheus.yml}
+                    {{- range $rules }}
+                    - {key: {{ . }}, path: {{ printf "rules/%s" . }}}
+                    {{- end }}
+              - configMap:
+                  name: prometheus-targets
+                  items:
+                    - {key: bank-web.json, path: targets/bank-web.json}
+                    - {key: bank-worker.json, path: targets/bank-worker.json}
+                    - {key: clickhouse.json, path: targets/clickhouse.json}
+        - name: secrets
+          secret:
+            secretName: {{ printf "%s-prometheus" $prefix }}
+            defaultMode: 0440
+            items: [{key: grafana_metrics_password, path: grafana_metrics_password}]
+        - {name: data, persistentVolumeClaim: {claimName: prometheus-data}}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 16Mi}}
+
+{{- /* ---------------------------------------------------------------- Alertmanager */}}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: alertmanager
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  serviceName: alertmanager
+  replicas: 1
+  selector:
+    matchLabels: {app: alertmanager, bank11.io/instance: {{ $release }}}
+  template:
+    metadata:
+      labels: {app: alertmanager, bank11.io/instance: {{ $release }}, bank11.io/role: storage}
+      annotations: {checksum/config: {{ $alertmanagerConfig | sha256sum }}}
+    spec:
+      automountServiceAccountToken: false
+      # Service links would inject ELASTICSEARCH_*, LOGSTASH_*, ... variables into images that read their own settings from the environment.
+      enableServiceLinks: false
+      nodeSelector:
+        {{- toYaml .Values.global.nodeSelector | nindent 8 }}
+      securityContext:
+        runAsUser: 65534
+        runAsGroup: 65534
+        runAsNonRoot: true
+        fsGroup: 65534
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: alertmanager
+          image: {{ $obs.images.alertmanager | quote }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+            - --data.retention={{ $obs.retention.alertmanagerTime }}
+            - --web.listen-address=:9093
+            # One replica: clustering gossip would only add a listening port nobody joins.
+            - --cluster.listen-address=
+          ports: [{name: http, containerPort: 9093}]
+          startupProbe:
+            httpGet: {path: /-/ready, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 24
+          readinessProbe:
+            httpGet: {path: /-/ready, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: {path: /-/healthy, port: http}
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+          securityContext:
+            {{- include "bank.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml $obs.resources.alertmanager | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /etc/alertmanager, readOnly: true}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: data, mountPath: /alertmanager}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: config, configMap: {name: alertmanager-config}}
+        - name: secrets
+          secret:
+            secretName: {{ printf "%s-alertmanager" $prefix }}
+            optional: {{ not $obs.alerting.telegram.enabled }}
+            defaultMode: 0440
+            items:
+              - {key: telegram_bot_token, path: telegram_bot_token}
+              - {key: telegram_chat_id, path: telegram_chat_id}
+        - {name: data, persistentVolumeClaim: {claimName: alertmanager-data}}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 8Mi}}
+
+{{- /* ---------------------------------------------------------------- Grafana */}}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: grafana
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  serviceName: grafana
+  replicas: 1
+  selector:
+    matchLabels: {app: grafana, bank11.io/instance: {{ $release }}}
+  template:
+    metadata:
+      labels: {app: grafana, bank11.io/instance: {{ $release }}, bank11.io/role: storage}
+      annotations: {checksum/public-config: {{ $grafanaAsset | toJson | sha256sum }}}
+    spec:
+      automountServiceAccountToken: false
+      # Service links would inject ELASTICSEARCH_*, LOGSTASH_*, ... variables into images that read their own settings from the environment.
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      nodeSelector:
+        {{- toYaml .Values.global.nodeSelector | nindent 8 }}
+      securityContext:
+        runAsUser: 472
+        runAsGroup: 472
+        runAsNonRoot: true
+        fsGroup: 472
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: grafana
+          image: {{ $obs.images.grafana | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: GF_SERVER_ROOT_URL, value: {{ printf "https://%s:%v/" $obs.publicHosts.grafana .Values.global.externalPort | quote }}}
+            - {name: GF_LOG_MODE, value: console}
+            # Built-in administrator for break-glass use only; day-to-day access is the read-only operator user.
+            - {name: GF_SECURITY_ADMIN_USER, value: bank11-admin}
+            - {name: GF_SECURITY_ADMIN_PASSWORD__FILE, value: /run/secrets/grafana_admin_password}
+            # The default signing key is public; it also encrypts the datasource credentials stored in the database.
+            - {name: GF_SECURITY_SECRET_KEY__FILE, value: /run/secrets/grafana_secret_key}
+            - {name: GF_SECURITY_COOKIE_SECURE, value: "true"}
+            - {name: GF_SECURITY_DISABLE_GRAVATAR, value: "true"}
+            - {name: GF_USERS_ALLOW_SIGN_UP, value: "false"}
+            - {name: GF_USERS_VIEWERS_CAN_EDIT, value: "false"}
+            - {name: GF_AUTH_ANONYMOUS_ENABLED, value: "false"}
+            - {name: GF_ANALYTICS_REPORTING_ENABLED, value: "false"}
+            - {name: GF_ANALYTICS_CHECK_FOR_UPDATES, value: "false"}
+            - {name: GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES, value: "false"}
+            - {name: GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH, value: /var/lib/grafana-dashboards/bank-overview.json}
+            # /metrics sits behind basic auth: the edge may proxy Grafana without exposing its internals.
+            - {name: GF_METRICS_BASIC_AUTH_USERNAME, value: prometheus}
+            - {name: GF_METRICS_BASIC_AUTH_PASSWORD__FILE, value: /run/secrets/grafana_metrics_password}
+            # Сохраняем только используемые backend-плагины: каждый лишний запускает отдельный процесс.
+            - {name: GF_PLUGINS_PREINSTALL_DISABLED, value: "true"}
+            - {name: GF_PLUGINS_PUBLIC_KEY_RETRIEVAL_DISABLED, value: "true"}
+            - {name: GF_PLUGINS_DISABLE_PLUGINS, value: "grafana-postgresql-datasource,grafana-pyroscope-datasource,influxdb,jaeger,loki,mssql,mysql,opentsdb,tempo,cloudwatch,grafana-azure-monitor-datasource,graphite,stackdriver"}
+            - {name: GOMEMLIMIT, value: 384MiB}
+          ports: [{name: http, containerPort: 3000}]
+          startupProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 120
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+          securityContext:
+            {{- include "bank.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml $obs.resources.grafana | nindent 12 }}
+          volumeMounts:
+            - {name: datasources, mountPath: /etc/grafana/provisioning/datasources/bank11.yaml, subPath: bank11.yaml, readOnly: true}
+            - {name: dashboard-provider, mountPath: /etc/grafana/provisioning/dashboards/bank11.yaml, subPath: bank11.yaml, readOnly: true}
+            - {name: dashboards, mountPath: /var/lib/grafana-dashboards, readOnly: true}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: data, mountPath: /var/lib/grafana}
+            - {name: logs, mountPath: /var/log/grafana}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: datasources
+          configMap:
+            name: bank11-grafana
+            items: [{key: datasources.yaml, path: bank11.yaml}]
+        - name: dashboard-provider
+          configMap:
+            name: bank11-grafana
+            items: [{key: dashboards.yaml, path: bank11.yaml}]
+        - name: dashboards
+          configMap:
+            name: bank11-grafana
+            items:
+              {{- range $dashboards }}
+              - {key: {{ . }}, path: {{ . }}}
+              {{- end }}
+        - name: secrets
+          secret:
+            secretName: {{ printf "%s-grafana" $prefix }}
+            defaultMode: 0440
+            items:
+              - {key: grafana_admin_password, path: grafana_admin_password}
+              - {key: grafana_secret_key, path: grafana_secret_key}
+              - {key: grafana_metrics_password, path: grafana_metrics_password}
+              - {key: grafana_es_reader_password, path: grafana_es_reader_password}
+        - {name: data, persistentVolumeClaim: {claimName: grafana-data}}
+        - {name: logs, emptyDir: {medium: Memory, sizeLimit: 8Mi}}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 32Mi}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: grafana-bootstrap-{{ pick $grafanaAsset "grafana-bootstrap.sh" | toJson | sha256sum | trunc 10 }}
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels: {app: grafana-bootstrap, bank11.io/instance: {{ $release }}, bank11.io/role: initializer}
+    spec:
+      automountServiceAccountToken: false
+      # Service links would inject ELASTICSEARCH_*, LOGSTASH_*, ... variables into images that read their own settings from the environment.
+      enableServiceLinks: false
+      restartPolicy: Never
+      nodeSelector:
+        {{- toYaml .Values.global.nodeSelector | nindent 8 }}
+      securityContext:
+        runAsUser: 472
+        runAsGroup: 472
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: bootstrap
+          image: {{ $obs.images.grafana | quote }}
+          command: [/bin/bash, /setup/grafana-bootstrap.sh]
+          securityContext:
+            {{- include "bank.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml $obs.resources.job | nindent 12 }}
+          volumeMounts:
+            - {name: setup, mountPath: /setup, readOnly: true}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: setup
+          configMap:
+            name: bank11-grafana
+            items: [{key: grafana-bootstrap.sh, path: grafana-bootstrap.sh}]
+        - name: secrets
+          secret:
+            secretName: {{ printf "%s-grafana" $prefix }}
+            defaultMode: 0440
+            items:
+              - {key: grafana_admin_password, path: grafana_admin_password}
+              - {key: grafana_operator_password, path: grafana_operator_password}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 8Mi}}
+
+{{- if $logging }}
+{{- /* ---------------------------------------------------------------- Elasticsearch */}}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: elasticsearch
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  serviceName: elasticsearch
+  replicas: 1
+  selector:
+    matchLabels: {app: elasticsearch, bank11.io/instance: {{ $release }}}
+  template:
+    metadata:
+      labels: {app: elasticsearch, bank11.io/instance: {{ $release }}, bank11.io/role: storage}
+      annotations: {checksum/public-config: {{ pick $elkAsset "elasticsearch.yml" "elasticsearch-probe.sh" | toJson | sha256sum }}}
+    spec:
+      automountServiceAccountToken: false
+      # Service links would inject ELASTICSEARCH_*, LOGSTASH_*, ... variables into images that read their own settings from the environment.
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      nodeSelector:
+        {{- toYaml .Values.global.nodeSelector | nindent 8 }}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 0
+        runAsNonRoot: true
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: {type: RuntimeDefault}
+      initContainers:
+        # The root filesystem is read-only, but Elasticsearch writes its keystore into the config directory:
+        # seed a writable copy of the image defaults and drop our elasticsearch.yml over it.
+        - name: config-seed
+          image: {{ $obs.images.elasticsearch | quote }}
+          command: [sh, -ec, "cp -R /usr/share/elasticsearch/config/. /seed/ && cp /setup/elasticsearch.yml /seed/elasticsearch.yml && find /seed -mindepth 1 -exec chmod u+rwX,g+rX {} +"]
+          securityContext:
+            {{- include "bank.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml $obs.resources.job | nindent 12 }}
+          volumeMounts:
+            - {name: setup, mountPath: /setup, readOnly: true}
+            - {name: config, mountPath: /seed}
+      containers:
+        - name: elasticsearch
+          image: {{ $obs.images.elasticsearch | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: ES_JAVA_OPTS, value: "-Xms256m -Xmx256m"}
+            - {name: ELASTIC_PASSWORD_FILE, value: /run/secrets/elastic_password}
+          ports: [{name: http, containerPort: 9200}]
+          startupProbe:
+            exec: {command: [sh, /setup/elasticsearch-probe.sh, ready]}
+            periodSeconds: 5
+            timeoutSeconds: 6
+            failureThreshold: 120
+          readinessProbe:
+            exec: {command: [sh, /setup/elasticsearch-probe.sh, ready]}
+            periodSeconds: 10
+            timeoutSeconds: 6
+          livenessProbe:
+            exec: {command: [sh, /setup/elasticsearch-probe.sh, live]}
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          securityContext:
+            {{- include "bank.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml $obs.resources.elasticsearch | nindent 12 }}
+          volumeMounts:
+            - {name: setup, mountPath: /setup, readOnly: true}
+            - {name: config, mountPath: /usr/share/elasticsearch/config}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: data, mountPath: /usr/share/elasticsearch/data}
+            - {name: logs, mountPath: /usr/share/elasticsearch/logs}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: setup
+          configMap:
+            name: bank11-elk
+            items:
+              - {key: elasticsearch.yml, path: elasticsearch.yml}
+              - {key: elasticsearch-probe.sh, path: elasticsearch-probe.sh}
+        - {name: config, emptyDir: {sizeLimit: 16Mi}}
+        - name: secrets
+          secret:
+            secretName: {{ printf "%s-elasticsearch" $prefix }}
+            defaultMode: 0440
+            items: [{key: elastic_password, path: elastic_password}]
+        - {name: data, persistentVolumeClaim: {claimName: elasticsearch-data}}
+        - {name: logs, emptyDir: {medium: Memory, sizeLimit: 16Mi}}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 64Mi}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: elasticsearch-bootstrap-{{ dict "script" (pick $elkAsset "elasticsearch-bootstrap.sh" "ilm-policy.json" "index-template.json") "retention" $obs.retention.logsTime | toJson | sha256sum | trunc 10 }}
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels: {app: elasticsearch-bootstrap, bank11.io/instance: {{ $release }}, bank11.io/role: initializer}
+    spec:
+      automountServiceAccountToken: false
+      # Service links would inject ELASTICSEARCH_*, LOGSTASH_*, ... variables into images that read their own settings from the environment.
+      enableServiceLinks: false
+      restartPolicy: Never
+      nodeSelector:
+        {{- toYaml .Values.global.nodeSelector | nindent 8 }}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 0
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: bootstrap
+          image: {{ $obs.images.elasticsearch | quote }}
+          command: [sh, /setup/elasticsearch-bootstrap.sh]
+          env:
+            - {name: LOGS_RETENTION, value: {{ $obs.retention.logsTime | quote }}}
+          securityContext:
+            {{- include "bank.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml $obs.resources.job | nindent 12 }}
+          volumeMounts:
+            - {name: setup, mountPath: /setup, readOnly: true}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: setup
+          configMap:
+            name: bank11-elk
+            items:
+              - {key: elasticsearch-bootstrap.sh, path: elasticsearch-bootstrap.sh}
+              - {key: ilm-policy.json, path: ilm-policy.json}
+              - {key: index-template.json, path: index-template.json}
+        - name: secrets
+          secret:
+            secretName: {{ printf "%s-elasticsearch" $prefix }}
+            defaultMode: 0440
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 8Mi}}
+
+{{- /* ---------------------------------------------------------------- Kibana */}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kibana
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: kibana, bank11.io/instance: {{ $release }}}
+  template:
+    metadata:
+      labels: {app: kibana, bank11.io/instance: {{ $release }}, bank11.io/role: observability}
+      annotations: {checksum/public-config: {{ pick $elkAsset "kibana.yml" "kibana-start.sh" | toJson | sha256sum }}}
+    spec:
+      automountServiceAccountToken: false
+      # Service links would inject ELASTICSEARCH_*, LOGSTASH_*, ... variables into images that read their own settings from the environment.
+      enableServiceLinks: false
+      nodeSelector:
+        {{- toYaml .Values.global.nodeSelector | nindent 8 }}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 0
+        runAsNonRoot: true
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: kibana
+          image: {{ $obs.images.kibana | quote }}
+          imagePullPolicy: IfNotPresent
+          # Keeps the image's tini as PID 1 and wraps Kibana in the Secret-reading start script.
+          command: [/bin/tini, --, /bin/bash, /setup/kibana-start.sh]
+          env:
+            - {name: SERVER_PUBLICBASEURL, value: {{ printf "https://%s:%v" $obs.publicHosts.kibana .Values.global.externalPort | quote }}}
+            # 448 MiB вызывали V8 OOM при холодном старте; Kibana 9.4+ сама выбирает heap по cgroup.
+          ports: [{name: http, containerPort: 5601}]
+          startupProbe:
+            httpGet: {path: /api/status, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 120
+          readinessProbe:
+            httpGet: {path: /api/status, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            # Kibana reports unavailable while Elasticsearch is down; restarting it would not help, so liveness
+            # only proves the Node.js server still accepts connections.
+            tcpSocket: {port: http}
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          securityContext:
+            {{- include "bank.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml $obs.resources.kibana | nindent 12 }}
+          volumeMounts:
+            - {name: setup, mountPath: /setup, readOnly: true}
+            - {name: settings, mountPath: /usr/share/kibana/config/kibana.yml, subPath: kibana.yml, readOnly: true}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: data, mountPath: /usr/share/kibana/data}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: setup
+          configMap:
+            name: bank11-elk
+            items: [{key: kibana-start.sh, path: kibana-start.sh}]
+        - name: settings
+          configMap:
+            name: bank11-elk
+            items: [{key: kibana.yml, path: kibana.yml}]
+        - name: secrets
+          secret:
+            secretName: {{ printf "%s-kibana" $prefix }}
+            defaultMode: 0440
+            items:
+              - {key: kibana_system_password, path: kibana_system_password}
+              - {key: kibana_encryption_key, path: kibana_encryption_key}
+        - {name: data, emptyDir: {sizeLimit: 256Mi}}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 64Mi}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kibana-bootstrap-{{ pick $elkAsset "kibana-bootstrap.sh" "kibana-data-view.json" "kibana-objects.ndjson" | toJson | sha256sum | trunc 10 }}
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels: {app: kibana-bootstrap, bank11.io/instance: {{ $release }}, bank11.io/role: initializer}
+    spec:
+      automountServiceAccountToken: false
+      # Service links would inject ELASTICSEARCH_*, LOGSTASH_*, ... variables into images that read their own settings from the environment.
+      enableServiceLinks: false
+      restartPolicy: Never
+      nodeSelector:
+        {{- toYaml .Values.global.nodeSelector | nindent 8 }}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 0
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: bootstrap
+          image: {{ $obs.images.kibana | quote }}
+          command: [/bin/bash, /setup/kibana-bootstrap.sh]
+          securityContext:
+            {{- include "bank.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml $obs.resources.job | nindent 12 }}
+          volumeMounts:
+            - {name: setup, mountPath: /setup, readOnly: true}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: setup
+          configMap:
+            name: bank11-elk
+            items:
+              - {key: kibana-bootstrap.sh, path: kibana-bootstrap.sh}
+              - {key: kibana-data-view.json, path: kibana-data-view.json}
+              - {key: kibana-objects.ndjson, path: kibana-objects.ndjson}
+        - name: secrets
+          secret:
+            secretName: {{ printf "%s-kibana" $prefix }}
+            defaultMode: 0440
+            items: [{key: kibana_provisioner_password, path: kibana_provisioner_password}]
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 8Mi}}
+
+{{- /* ---------------------------------------------------------------- Logstash */}}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: logstash
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  serviceName: logstash
+  replicas: 1
+  selector:
+    matchLabels: {app: logstash, bank11.io/instance: {{ $release }}}
+  template:
+    metadata:
+      labels: {app: logstash, bank11.io/instance: {{ $release }}, bank11.io/role: storage}
+      annotations: {checksum/public-config: {{ pick $elkAsset "logstash.yml" "bank-logs.conf" "logstash-start.sh" "logstash-ready.sh" | toJson | sha256sum }}}
+    spec:
+      automountServiceAccountToken: false
+      # Service links would inject ELASTICSEARCH_*, LOGSTASH_*, ... variables into images that read their own settings from the environment.
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      nodeSelector:
+        {{- toYaml .Values.global.nodeSelector | nindent 8 }}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: logstash
+          image: {{ $obs.images.logstash | quote }}
+          imagePullPolicy: IfNotPresent
+          command: [/bin/bash, /setup/logstash-start.sh]
+          env:
+            - {name: LS_JAVA_OPTS, value: "-Xms256m -Xmx256m"}
+            - {name: BANK_ENVIRONMENT, value: {{ $environment | quote }}}
+          ports:
+            - {name: logback, containerPort: 5044}
+            - {name: api, containerPort: 9600}
+          startupProbe:
+            exec: {command: [/bin/bash, /setup/logstash-ready.sh]}
+            periodSeconds: 5
+            timeoutSeconds: 6
+            failureThreshold: 120
+          readinessProbe:
+            exec: {command: [/bin/bash, /setup/logstash-ready.sh]}
+            periodSeconds: 10
+            timeoutSeconds: 6
+          livenessProbe:
+            httpGet: {path: /, port: api}
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          securityContext:
+            {{- include "bank.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml $obs.resources.logstash | nindent 12 }}
+          volumeMounts:
+            - {name: setup, mountPath: /setup, readOnly: true}
+            - {name: settings, mountPath: /usr/share/logstash/config/logstash.yml, subPath: logstash.yml, readOnly: true}
+            # Replaces the image's own pipeline file: a second .conf beside it would keep its Beats input and stdout output alive.
+            - {name: settings, mountPath: /usr/share/logstash/pipeline/logstash.conf, subPath: bank-logs.conf, readOnly: true}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: data, mountPath: /usr/share/logstash/data}
+            - {name: logs, mountPath: /usr/share/logstash/logs}
+            - {name: tmp, mountPath: /tmp}
+        # Logstash has no Prometheus endpoint; this sidecar translates its local stats API (127.0.0.1:9600).
+        - name: exporter
+          image: {{ $obs.images.logstashExporter | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: LOGSTASH_URL, value: "http://127.0.0.1:9600"}
+            - {name: PORT, value: "9198"}
+          ports: [{name: metrics, containerPort: 9198}]
+          startupProbe:
+            httpGet: {path: /health, port: metrics}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 24
+          readinessProbe:
+            httpGet: {path: /health, port: metrics}
+            periodSeconds: 15
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: {path: /health, port: metrics}
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 6
+          securityContext:
+            runAsUser: 65534
+            runAsGroup: 65534
+            {{- include "bank.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml $obs.resources.logstashExporter | nindent 12 }}
+      volumes:
+        - name: setup
+          configMap:
+            name: bank11-elk
+            items:
+              - {key: logstash-start.sh, path: logstash-start.sh}
+              - {key: logstash-ready.sh, path: logstash-ready.sh}
+        - name: settings
+          configMap:
+            name: bank11-elk
+            items:
+              - {key: logstash.yml, path: logstash.yml}
+              - {key: bank-logs.conf, path: bank-logs.conf}
+        - name: secrets
+          secret:
+            secretName: {{ printf "%s-logstash" $prefix }}
+            defaultMode: 0440
+            items:
+              - {key: logstash_writer_password, path: logstash_writer_password}
+              - {key: tls.crt, path: tls.crt}
+              - {key: tls.key, path: tls.key}
+        - {name: data, persistentVolumeClaim: {claimName: logstash-data}}
+        - {name: logs, emptyDir: {medium: Memory, sizeLimit: 16Mi}}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 32Mi}}
+{{- end }}
+{{- end }}

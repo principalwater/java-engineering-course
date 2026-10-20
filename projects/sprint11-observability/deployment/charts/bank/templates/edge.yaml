@@ -5,8 +5,10 @@ metadata:
   labels:
     {{- include "bank.labels" . | nindent 4 }}
 spec:
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
   type: {{ .Values.edge.serviceType }}
-  selector: {app: edge, bank10.io/instance: {{ .Release.Name }}}
+  selector: {app: edge, bank11.io/instance: {{ .Release.Name }}}
   ports:
     - name: https
       port: {{ .Values.global.externalPort }}
@@ -25,11 +27,11 @@ spec:
   replicas: 1
   strategy: {type: Recreate}
   selector:
-    matchLabels: {app: edge, bank10.io/instance: {{ .Release.Name }}}
+    matchLabels: {app: edge, bank11.io/instance: {{ .Release.Name }}}
   template:
     metadata:
-      labels: {app: edge, bank10.io/instance: {{ .Release.Name }}, bank10.io/role: application}
-      annotations: {checksum/public-config: {{ index .Values.assets "bank10-edge" | toJson | sha256sum }}}
+      labels: {app: edge, bank11.io/instance: {{ .Release.Name }}, bank11.io/role: application}
+      annotations: {checksum/public-config: {{ index .Values.assets "bank11-edge" | toJson | sha256sum }}}
     spec:
       automountServiceAccountToken: false
       securityContext:
@@ -68,7 +70,7 @@ spec:
             - {name: runtime-config, mountPath: /config}
             - {name: data, mountPath: /data}
       volumes:
-        - {name: config, configMap: {name: bank10-edge}}
+        - {name: config, configMap: {name: bank11-edge}}
         - {name: secrets, secret: {secretName: {{ printf "%s-edge" .Values.global.secretPrefix }}, defaultMode: 0440}}
         - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 8Mi}}
         - {name: runtime-config, emptyDir: {medium: Memory, sizeLimit: 8Mi}}

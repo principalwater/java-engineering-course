@@ -14,7 +14,7 @@ metadata:
   name: {{ $pool.name }}
   labels:
     strimzi.io/cluster: {{ $.Values.global.kafkaCluster }}
-    app.kubernetes.io/part-of: bank10
+    app.kubernetes.io/part-of: bank11
   annotations:
     helm.sh/resource-policy: keep
 spec:
@@ -39,7 +39,7 @@ spec:
   template:
     pod:
       metadata:
-        labels: {bank10.io/role: kafka}
+        labels: {bank11.io/role: kafka}
       securityContext:
         runAsNonRoot: true
         fsGroup: 0
@@ -49,7 +49,7 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
-                  - {key: bank10.io/worker, operator: In, values: ["true"]}
+                  - {key: bank11.io/worker, operator: In, values: ["true"]}
         {{- if $ha }}
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -65,7 +65,7 @@ apiVersion: kafka.strimzi.io/v1
 kind: Kafka
 metadata:
   name: {{ .Values.global.kafkaCluster }}
-  labels: {app.kubernetes.io/part-of: bank10}
+  labels: {app.kubernetes.io/part-of: bank11}
   annotations:
     helm.sh/resource-policy: keep
 spec:
@@ -73,12 +73,23 @@ spec:
     version: 4.2.2
     metadataVersion: 4.2-IV1
     image: {{ .Values.image | quote }}
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef: {name: bank11-prometheus, key: kafka-jmx-exporter.yml}
     listeners:
       - name: tls
         port: 9093
         type: internal
         tls: true
         authentication: {type: scram-sha-512}
+    template:
+      bootstrapService:
+        ipFamilyPolicy: RequireDualStack
+        ipFamilies: [IPv4, IPv6]
+      brokersService:
+        ipFamilyPolicy: RequireDualStack
+        ipFamilies: [IPv4, IPv6]
     authorization:
       type: simple
     config:
@@ -95,7 +106,7 @@ spec:
     template:
       pod:
         metadata:
-          labels: {bank10.io/role: kafka-operator}
+          labels: {bank11.io/role: kafka-operator}
         securityContext:
           runAsNonRoot: true
           seccompProfile: {type: RuntimeDefault}
@@ -111,3 +122,23 @@ spec:
         requests: {cpu: 50m, memory: 128Mi}
         limits: {cpu: 500m, memory: 256Mi}
       jvmOptions: {-Xms: 64m, -Xmx: 128m}
+
+  kafkaExporter:
+    topicRegex: "bank\\..*"
+    groupRegex: "bank\\..*"
+    resources:
+      requests: {cpu: 20m, memory: 64Mi}
+      limits: {cpu: 200m, memory: 128Mi}
+    template:
+      pod:
+        metadata:
+          labels: {bank11.io/role: kafka}
+        securityContext:
+          runAsNonRoot: true
+          seccompProfile: {type: RuntimeDefault}
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - {key: bank11.io/worker, operator: In, values: ["true"]}

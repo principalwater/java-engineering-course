@@ -1,0 +1,15 @@
+server.host: "::"
+server.port: 5601
+server.name: bank11-kibana
+elasticsearch.hosts: ["http://elasticsearch:9200"]
+# kibana_system is the built-in service identity; its password and the encryption keys are exported by
+# kibana-start.sh from mounted Secret files, never written here.
+elasticsearch.username: kibana_system
+# Anonymous callers receive only the overall level; the readiness probe needs nothing more.
+status.allowAnonymous: true
+telemetry.optIn: false
+telemetry.allowChangingOptInStatus: false
+newsfeed.enabled: false
+xpack.security.secureCookies: true
+path.data: /usr/share/kibana/data
+logging.root.level: warn

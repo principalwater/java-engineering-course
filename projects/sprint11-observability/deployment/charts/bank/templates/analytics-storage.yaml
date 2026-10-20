@@ -1,14 +1,15 @@
 {{- if .Values.global.analyticsEnabled }}
 {{- $stores := list (dict "name" "cassandra" "image" .Values.platform.cassandraImage "port" 9042 "memory" "1Gi") (dict "name" "clickhouse" "image" .Values.platform.clickhouseImage "port" 8123 "memory" "768Mi") }}
 {{- range $store := $stores }}
-{{- $initialization := index $.Values.assets "bank10-analytics-setup" (printf "init-%s.sh" $store.name) }}
-{{- $startup := pick (index $.Values.assets "bank10-analytics-setup") (printf "start-%s.sh" $store.name) }}
+{{- $initialization := index $.Values.assets "bank11-analytics-setup" (printf "init-%s.sh" $store.name) }}
+{{- $startup := pick (index $.Values.assets "bank11-analytics-setup") (printf "start-%s.sh" $store.name) }}
 {{- if eq $store.name "cassandra" }}
-{{- $startup = pick (index $.Values.assets "bank10-analytics-setup") "start-cassandra.sh" "probe-cassandra.py" }}
+{{- $startup = pick (index $.Values.assets "bank11-analytics-setup") "start-cassandra.sh" "probe-cassandra.py" }}
 {{- end }}
 {{- if eq $store.name "clickhouse" }}
-{{- $initialization = printf "%s\n%s\n%s" $initialization (index $.Values.assets "bank10-analytics-setup" "init-clickhouse.sql") (index $.Values.assets "bank10-analytics-setup" "activity-marts.sql") }}
-{{- $startup = pick (index $.Values.assets "bank10-analytics-setup") "start-clickhouse.sh" "clickhouse-users.xml" "clickhouse-storage.xml" }}
+{{- $initialization = printf "%s\n%s\n%s" $initialization (index $.Values.assets "bank11-analytics-setup" "init-clickhouse.sql") (index $.Values.assets "bank11-analytics-setup" "activity-marts.sql") }}
+{{- $startup = pick (index $.Values.assets "bank11-analytics-setup") "start-clickhouse.sh" "clickhouse-users.xml" "clickhouse-storage.xml" }}
+{{- $_ := set $startup "clickhouse-prometheus.xml" (index $.Values.assets "bank11-prometheus" "clickhouse-prometheus.xml") }}
 {{- end }}
 ---
 apiVersion: v1
@@ -18,7 +19,9 @@ metadata:
   labels:
     {{- include "bank.labels" $ | nindent 4 }}
 spec:
-  selector: {app: {{ $store.name }}, bank10.io/instance: {{ $.Release.Name }}}
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  selector: {app: {{ $store.name }}, bank11.io/instance: {{ $.Release.Name }}}
   ports:
     - {name: client, port: {{ $store.port }}, targetPort: {{ $store.port }}}
     {{- if eq $store.name "clickhouse" }}
@@ -35,10 +38,10 @@ spec:
   serviceName: {{ $store.name }}
   replicas: 1
   selector:
-    matchLabels: {app: {{ $store.name }}, bank10.io/instance: {{ $.Release.Name }}}
+    matchLabels: {app: {{ $store.name }}, bank11.io/instance: {{ $.Release.Name }}}
   template:
     metadata:
-      labels: {app: {{ $store.name }}, bank10.io/instance: {{ $.Release.Name }}, bank10.io/role: storage}
+      labels: {app: {{ $store.name }}, bank11.io/instance: {{ $.Release.Name }}, bank11.io/role: storage}
       annotations: {checksum/public-config: {{ toJson $startup | sha256sum }}}
     spec:
       automountServiceAccountToken: false
@@ -54,7 +57,7 @@ spec:
           {{- if eq $store.name "cassandra" }}
           args: [cassandra, -f]
           env:
-            - {name: CASSANDRA_CLUSTER_NAME, value: bank10}
+            - {name: CASSANDRA_CLUSTER_NAME, value: bank11}
             - {name: CASSANDRA_DC, value: datacenter1}
             - {name: CASSANDRA_ENDPOINT_SNITCH, value: GossipingPropertyFileSnitch}
             - {name: CASSANDRA_NUM_TOKENS, value: "16"}
@@ -64,7 +67,11 @@ spec:
           {{- else }}
           env: [{name: CLICKHOUSE_SKIP_USER_SETUP, value: "1"}]
           {{- end }}
-          ports: [{name: client, containerPort: {{ $store.port }}}]
+          ports:
+            - {name: client, containerPort: {{ $store.port }}}
+            {{- if eq $store.name "clickhouse" }}
+            - {name: metrics, containerPort: 9363}
+            {{- end }}
           startupProbe:
             {{- if eq $store.name "cassandra" }}
             tcpSocket: {port: client}
@@ -110,10 +117,11 @@ spec:
             - {name: logs, mountPath: /var/log/clickhouse-server}
             - {name: users, mountPath: /etc/clickhouse-server/users.d}
             - {name: storage-config, mountPath: /etc/clickhouse-server/config.d/bank.xml, subPath: clickhouse-storage.xml, readOnly: true}
+            - {name: prometheus-config, mountPath: /etc/clickhouse-server/config.d/prometheus.xml, subPath: clickhouse-prometheus.xml, readOnly: true}
             - {name: secrets, mountPath: /run/secrets, readOnly: true}
             {{- end }}
       volumes:
-        - {name: setup, configMap: {name: bank10-analytics-setup}}
+        - {name: setup, configMap: {name: bank11-analytics-setup}}
         - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 64Mi}}
         - {name: logs, emptyDir: {medium: Memory, sizeLimit: 32Mi}}
         {{- if eq $store.name "cassandra" }}
@@ -122,7 +130,8 @@ spec:
         - {name: data, persistentVolumeClaim: {claimName: analytics-hot}}
         - {name: cold, persistentVolumeClaim: {claimName: analytics-cold}}
         - {name: users, emptyDir: {medium: Memory, sizeLimit: 1Mi}}
-        - {name: storage-config, configMap: {name: bank10-analytics-setup}}
+        - {name: storage-config, configMap: {name: bank11-analytics-setup}}
+        - {name: prometheus-config, configMap: {name: bank11-prometheus}}
         - {name: secrets, secret: {secretName: {{ printf "%s-clickhouse" $.Values.global.secretPrefix }}, defaultMode: 0400}}
         {{- end }}
 ---
@@ -137,7 +146,7 @@ spec:
   activeDeadlineSeconds: 600
   template:
     metadata:
-      labels: {app: {{ $store.name }}-init, bank10.io/instance: {{ $.Release.Name }}, bank10.io/role: initializer}
+      labels: {app: {{ $store.name }}-init, bank11.io/instance: {{ $.Release.Name }}, bank11.io/role: initializer}
     spec:
       automountServiceAccountToken: false
       restartPolicy: Never
@@ -157,7 +166,7 @@ spec:
             - {name: secrets, mountPath: /run/secrets, readOnly: true}
             - {name: tmp, mountPath: /tmp}
       volumes:
-        - {name: setup, configMap: {name: bank10-analytics-setup}}
+        - {name: setup, configMap: {name: bank11-analytics-setup}}
         - {name: secrets, secret: {secretName: {{ printf "%s-%s" $.Values.global.secretPrefix $store.name }}, defaultMode: 0400}}
         - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 8Mi}}
 {{- end }}

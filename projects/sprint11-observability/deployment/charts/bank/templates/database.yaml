@@ -5,7 +5,9 @@ metadata:
   labels:
     {{- include "bank.labels" . | nindent 4 }}
 spec:
-  selector: {app: database, bank10.io/instance: {{ .Release.Name }}}
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  selector: {app: database, bank11.io/instance: {{ .Release.Name }}}
   ports: [{name: postgres, port: 5432, targetPort: 5432}]
 ---
 apiVersion: apps/v1
@@ -18,11 +20,11 @@ spec:
   serviceName: database
   replicas: 1
   selector:
-    matchLabels: {app: database, bank10.io/instance: {{ .Release.Name }}}
+    matchLabels: {app: database, bank11.io/instance: {{ .Release.Name }}}
   template:
     metadata:
-      labels: {app: database, bank10.io/instance: {{ .Release.Name }}, bank10.io/role: storage}
-      annotations: {checksum/public-config: {{ dict "setup" (pick (index .Values.assets "bank10-setup") "start-database.sh") "database" (index .Values.assets "bank10-database") | toJson | sha256sum }}}
+      labels: {app: database, bank11.io/instance: {{ .Release.Name }}, bank11.io/role: storage}
+      annotations: {checksum/public-config: {{ dict "setup" (pick (index .Values.assets "bank11-setup") "start-database.sh") "database" (index .Values.assets "bank11-database") | toJson | sha256sum }}}
     spec:
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 30
@@ -75,11 +77,11 @@ spec:
         - {name: secrets, secret: {secretName: {{ printf "%s-database" .Values.global.secretPrefix }}, defaultMode: 0400}}
         - name: setup
           configMap:
-            name: bank10-setup
+            name: bank11-setup
             items: [{key: start-database.sh, path: start-database.sh}]
         - name: db-init
           configMap:
-            name: bank10-database
+            name: bank11-database
             defaultMode: 0555
         - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 32Mi}}
         - {name: sockets, emptyDir: {medium: Memory, sizeLimit: 8Mi}}

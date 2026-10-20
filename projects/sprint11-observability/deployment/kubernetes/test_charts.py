@@ -14,15 +14,15 @@ from prepare import prepare, project_dir
 class BankChartTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.directory = tempfile.TemporaryDirectory(prefix="bank10-chart-")
+        cls.directory = tempfile.TemporaryDirectory(prefix="bank11-chart-")
         cls.project = project_dir()
         cls.models = {}
         for profile, analytics, superset in (("single", False, False), ("single", True, True), ("ha", False, False)):
             destination = Path(cls.directory.name) / f"{profile}-{analytics}"
             prepare(destination, environment="dev", profile=profile, analytics=analytics,
-                    superset=superset, external_port=8450)
+                    superset=superset, external_port=8460)
             rendered = subprocess.run(["helm", "template", "bank", str(cls.project / "deployment/charts/bank"),
-                                       "--namespace", "bank10-dev", "-f", str(destination / "public-values.yaml")],
+                                       "--namespace", "bank11-dev", "-f", str(destination / "public-values.yaml")],
                                       capture_output=True, text=True, check=True)
             cls.models[(profile, analytics)] = list(yaml.safe_load_all(rendered.stdout))
 
@@ -75,7 +75,7 @@ class BankChartTest(unittest.TestCase):
                 self.assertEqual(topic["config"]["min.insync.replicas"], source["config"]["min.insync.replicas"])
                 self.assertGreaterEqual(topic["config"]["retention.ms"], 30 * 24 * 60 * 60 * 1000)
 
-    def test_clients_use_operator_password_and_pem_without_accounts_oauth_or_notifications_http(self):
+    def test_clients_use_native_openbao_and_kafka_pem_without_accounts_oauth_or_notifications_business_http(self):
         deployments = self.resources(kind="Deployment")
         maps = self.resources(kind="ConfigMap")
         services = self.resources(kind="Service")
@@ -89,8 +89,19 @@ class BankChartTest(unittest.TestCase):
         self.assertEqual(accounts["SPRING_KAFKA_SSL_TRUSTSTORETYPE"], "PEM")
         self.assertEqual(accounts["SPRING_KAFKA_SSL_TRUSTSTORELOCATION"], "file:/run/kafka/ca.crt")
         self.assertEqual(accounts["SPRING_KAFKA_PROPERTIES_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM"], "https")
-        sources = deployments["accounts"]["spec"]["template"]["spec"]["volumes"][1]["projected"]["sources"]
-        self.assertIn({"secret": {"name": "accounts-service", "items": [{"key": "password", "path": "bank.kafka.password"}]}}, sources)
+        pod = deployments["accounts"]["spec"]["template"]["spec"]
+        self.assertEqual(pod["serviceAccountName"], "accounts")
+        volumes = {volume["name"]: volume for volume in pod["volumes"]}
+        self.assertEqual(volumes["openbao-token"]["projected"]["sources"],
+                         [{"serviceAccountToken": {"path": "token", "audience": "openbao", "expirationSeconds": 600}}])
+        self.assertNotIn("secrets", volumes)
+        self.assertIn("vault:///kv/bank11-dev/accounts", accounts["BANK_CONFIG_IMPORT"])
+        self.assertEqual(accounts["BANK_VAULT_ROLE"], "bank11-dev-accounts")
+        users = self.resources(kind="KafkaUser")
+        self.assertEqual(users["accounts-service"]["spec"]["authentication"]["password"]["valueFrom"],
+                         {"secretKeyRef": {"name": "bank11-kafka-accounts", "key": "password"}})
+        self.assertNotIn("bank11-accounts", self.resources(kind="ExternalSecret"))
+        self.assertIn("bank11-kafka-accounts", self.resources(kind="ExternalSecret"))
         self.assertFalse(self.resources(kind="Secret"))
 
     def test_optional_bi_uses_https_ca_and_keeps_source_storage_when_disabled(self):
@@ -105,11 +116,11 @@ class BankChartTest(unittest.TestCase):
         environment = bi["spec"]["template"]["spec"]["containers"][0]["env"]
         self.assertIn({"name": "BANK_BI_URL", "value": "https://superset:8088"}, environment)
         superset = self.resources(analytics=True, kind="Deployment")["superset"]
-        self.assertIn({"name": "BANK_BI_PUBLIC_AUTH_URL", "value": "https://auth-bank.valgrind-home.localhost:8450/realms/bank"},
+        self.assertIn({"name": "BANK_BI_PUBLIC_AUTH_URL", "value": "https://auth-bank.valgrind-home.localhost:8460/realms/bank"},
                       superset["spec"]["template"]["spec"]["containers"][0]["env"])
         analytics = self.resources(analytics=True, kind="KafkaUser")["analytics-service"]["spec"]["authorization"]["acls"]
         groups = {acl["resource"].get("name") for acl in analytics if acl["resource"]["type"] == "group"}
-        self.assertEqual(groups, {"bank.analytics.accounts.ingress.v1", "bank.analytics.personal.v1", "bank.analytics.business.v1"})
+        self.assertEqual(groups, {"bank.analytics.accounts.ingress.v1", "bank.analytics.personal.v1", "bank.analytics.business.v1", "bank.analytics.failures.v1"})
         for deployment in self.resources(analytics=True, kind="Deployment").values():
             self.assertEqual(deployment["spec"]["replicas"], 1)
             self.assertEqual(deployment["spec"]["strategy"]["type"], "Recreate")
@@ -120,16 +131,16 @@ class BankChartTest(unittest.TestCase):
                     for item in self.models[("single", True)]
                     if item and item["kind"] in {"Deployment", "StatefulSet"}}
         changes = (
-            ("bank10-edge", "Caddyfile", {("Deployment", "edge")}),
-            ("bank10-setup", "start-database.sh", {("StatefulSet", "database")}),
-            ("bank10-database", "init-database.sh", {("StatefulSet", "database")}),
-            ("bank10-authorization", "bank-realm.json", {("Deployment", "authorization")}),
-            ("bank10-analytics-setup", "start-cassandra.sh", {("StatefulSet", "cassandra")}),
-            ("bank10-analytics-setup", "probe-cassandra.py", {("StatefulSet", "cassandra")}),
-            ("bank10-analytics-setup", "start-clickhouse.sh", {("StatefulSet", "clickhouse")}),
-            ("bank10-analytics-setup", "clickhouse-users.xml", {("StatefulSet", "clickhouse")}),
-            ("bank10-analytics-setup", "clickhouse-storage.xml", {("StatefulSet", "clickhouse")}),
-            ("bank10-setup", "init-config.sh", {("Deployment", name) for name in
+            ("bank11-edge", "Caddyfile", {("Deployment", "edge")}),
+            ("bank11-setup", "start-database.sh", {("StatefulSet", "database")}),
+            ("bank11-database", "init-database.sh", {("StatefulSet", "database")}),
+            ("bank11-authorization", "bank-realm.json", {("Deployment", "authorization")}),
+            ("bank11-analytics-setup", "start-cassandra.sh", {("StatefulSet", "cassandra")}),
+            ("bank11-analytics-setup", "probe-cassandra.py", {("StatefulSet", "cassandra")}),
+            ("bank11-analytics-setup", "start-clickhouse.sh", {("StatefulSet", "clickhouse")}),
+            ("bank11-analytics-setup", "clickhouse-users.xml", {("StatefulSet", "clickhouse")}),
+            ("bank11-analytics-setup", "clickhouse-storage.xml", {("StatefulSet", "clickhouse")}),
+            ("bank11-setup", "init-config.sh", {("Deployment", name) for name in
              ("accounts", "cash", "transfer", "notifications", "gateway", "front", "analytics")}),
         )
         for config_map, asset, expected in changes:
@@ -139,7 +150,7 @@ class BankChartTest(unittest.TestCase):
                 override = Path(self.directory.name) / "changed-asset.yaml"
                 override.write_text(yaml.safe_dump(values), encoding="utf-8")
                 rendered = subprocess.run(["helm", "template", "bank", str(self.project / "deployment/charts/bank"),
-                                           "--namespace", "bank10-dev", "-f", str(override)],
+                                           "--namespace", "bank11-dev", "-f", str(override)],
                                           capture_output=True, text=True, check=True)
                 actual = {(item["kind"], item["metadata"]["name"]): item["spec"]["template"]
                           for item in yaml.safe_load_all(rendered.stdout)
@@ -151,7 +162,7 @@ class BankChartTest(unittest.TestCase):
                                  "-f", str(Path(self.directory.name) / "single-False/public-values.yaml")], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("release namespace must equal", result.stderr)
-        extra_replica = subprocess.run(["helm", "template", "bank", str(self.project / "deployment/charts/bank"), "--namespace", "bank10-dev",
+        extra_replica = subprocess.run(["helm", "template", "bank", str(self.project / "deployment/charts/bank"), "--namespace", "bank11-dev",
                                        "-f", str(Path(self.directory.name) / "single-False/public-values.yaml"),
                                        "--set", "apps.accounts.replicas=2"], capture_output=True, text=True)
         self.assertNotEqual(extra_replica.returncode, 0)

@@ -6,8 +6,8 @@ while [ "$attempt" -lt 30 ]; do
     result=$(printf '%s\n' \
         'create /config' \
         'create /config/application' \
-        'create /config/application/bank.config.revision sprint10-v1' \
-        'set /config/application/bank.config.revision sprint10-v1' \
+        'create /config/application/bank.config.revision sprint11-v1' \
+        'set /config/application/bank.config.revision sprint11-v1' \
         'create /config/application/bank.client.connect-timeout 1s' \
         'set /config/application/bank.client.connect-timeout 1s' \
         'create /config/application/bank.client.read-timeout 3s' \
@@ -16,7 +16,7 @@ while [ "$attempt" -lt 30 ]; do
         'set /config/application/spring.threads.virtual.enabled true' \
         'get /config/application/bank.config.revision' \
         'quit' | timeout 8s zkCli.sh -server discovery:2181 -timeout 3000 2>&1) || result=''
-    if printf '%s\n' "$result" | grep -qx sprint10-v1; then
+    if printf '%s\n' "$result" | grep -qx sprint11-v1; then
         echo 'Shared bank configuration is ready'
         exit 0
     fi

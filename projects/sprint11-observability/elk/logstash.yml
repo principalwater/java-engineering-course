@@ -1,0 +1,18 @@
+api.http.host: 0.0.0.0
+api.http.port: 9600
+pipeline.ecs_compatibility: disabled
+pipeline.workers: 1
+pipeline.batch.size: 125
+# Own on-disk queue on the dedicated PVC: events accepted from Logback survive a Logstash restart or an
+# Elasticsearch outage. The queue is not replicated, and a lost volume loses its events.
+queue.type: persisted
+queue.max_bytes: 512mb
+# Checkpoint after every write: log volume here is tiny, losing a second of events on a crash is not
+# worth the throughput gained by the 1024-write default.
+queue.checkpoint.writes: 1
+# Documents Elasticsearch rejects (mapping conflicts under dynamic: strict) go to the dead letter queue
+# instead of blocking the pipeline or disappearing.
+dead_letter_queue.enable: true
+dead_letter_queue.max_bytes: 64mb
+config.reload.automatic: false
+log.level: warn

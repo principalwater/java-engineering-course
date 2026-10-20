@@ -1,49 +1,49 @@
 global:
   environment: dev
-  externalPort: 8450
+  externalPort: 8460
   storageClass: standard
-  secretPrefix: bank10
+  secretPrefix: bank11
   kafkaCluster: bank-kafka
   analyticsEnabled: false
   chartRevision: ""
   nodeSelector:
-    bank10.io/worker: "true"
+    bank11.io/worker: "true"
 edge:
   serviceType: NodePort
-  nodePort: 30450
-  image: bank10-edge:local
+  nodePort: 30460
+  image: bank11-edge:local
 authorization:
-  image: bank10-authorization:local
+  image: bank11-authorization:local
 apps:
   accounts:
-    image: bank10-accounts:local
+    image: bank11-accounts:local
     jdbc: true
     kafka: true
     audience: accounts-api
   cash:
-    image: bank10-cash:local
+    image: bank11-cash:local
     jdbc: true
     kafka: true
     audience: cash-api
     oauthScope: accounts.cash
   transfer:
-    image: bank10-transfer:local
+    image: bank11-transfer:local
     jdbc: true
     kafka: true
     audience: transfer-api
     oauthScope: accounts.transfer
   notifications:
-    image: bank10-notifications:local
+    image: bank11-notifications:local
     jdbc: true
     kafka: true
     web: false
   gateway:
-    image: bank10-gateway:local
+    image: bank11-gateway:local
     audience: bank-api
   front:
-    image: bank10-front:local
+    image: bank11-front:local
   analytics:
-    image: bank10-analytics:local
+    image: bank11-analytics:local
     jdbc: true
     kafka: true
     audience: analytics-api
@@ -64,6 +64,97 @@ platform:
   clickhouseColdStorage: 2Gi
 # Public source assets are supplied by kubernetes/prepare.py; never secret contents.
 assets: {}
+openbao:
+  bindings: {}
+network:
+  ingress:
+    front:
+      - {clients: [edge], ports: [8443]}
+      - {clients: [prometheus], ports: [8080]}
+    gateway:
+      - {clients: [front], ports: [8443]}
+      - {clients: [prometheus], ports: [8080]}
+    accounts:
+      - {clients: [gateway, cash, transfer, analytics], ports: [8443]}
+      - {clients: [prometheus], ports: [8080]}
+    cash:
+      - {clients: [gateway], ports: [8443]}
+      - {clients: [prometheus], ports: [8080]}
+    transfer:
+      - {clients: [gateway], ports: [8443]}
+      - {clients: [prometheus], ports: [8080]}
+    analytics:
+      - {clients: [gateway], ports: [8443]}
+      - {clients: [prometheus], ports: [8080]}
+    notifications:
+      - {clients: [prometheus], ports: [9400]}
+    database:
+      - {clients: [accounts, cash, transfer, notifications, analytics, authorization, superset, elasticsearch-bootstrap], initializers: true, probes: true, ports: [5432]}
+    discovery:
+      - {clients: [accounts, cash, transfer, notifications, analytics, front, gateway], initializers: true, ports: [2181]}
+    authorization:
+      - {clients: [accounts, cash, transfer, analytics, front, gateway, edge, superset], initializers: true, ports: [8443]}
+    cassandra:
+      - {clients: [analytics], initializers: true, ports: [9042]}
+    clickhouse:
+      - {clients: [analytics, superset, bank-bi], initializers: true, probes: true, ports: [8123, 8443]}
+      - {clients: [], initializers: true, ports: [9000]}
+      - {clients: [prometheus], ports: [9363]}
+    zipkin:
+      - {clients: [accounts, cash, transfer, notifications, front, gateway, analytics, edge, prometheus, grafana], probes: true, ports: [9411]}
+    logstash:
+      - {clients: [accounts, cash, transfer, notifications, front, gateway, analytics], probes: true, ports: [5044]}
+      - {clients: [prometheus], ports: [9198]}
+    elasticsearch:
+      - {clients: [logstash, kibana, grafana], initializers: true, probes: true, ports: [9200]}
+    kibana:
+      - {clients: [edge], initializers: true, probes: true, ports: [5601]}
+    grafana:
+      - {clients: [edge, prometheus], initializers: true, probes: true, ports: [3000]}
+    prometheus:
+      - {clients: [grafana, edge], probes: true, ports: [9090]}
+    alertmanager:
+      - {clients: [prometheus, grafana, edge], probes: true, ports: [9093]}
+    superset:
+      - {clients: [edge, bank-bi], initializers: true, ports: [8443]}
+  egress:
+    authorization:
+      - {servers: [database], ports: [5432]}
+    superset:
+      - {servers: [database], ports: [5432]}
+      - {servers: [clickhouse], ports: [8123, 8443]}
+    front:
+      - {servers: [gateway], ports: [8443]}
+    gateway:
+      - {servers: [accounts, cash, transfer, analytics], ports: [8443]}
+    accounts:
+      - {servers: [database], ports: [5432]}
+      - {kafka: true, ports: [9093]}
+    cash:
+      - {servers: [accounts], ports: [8443]}
+      - {servers: [database], ports: [5432]}
+      - {kafka: true, ports: [9093]}
+    transfer:
+      - {servers: [accounts], ports: [8443]}
+      - {servers: [database], ports: [5432]}
+      - {kafka: true, ports: [9093]}
+    notifications:
+      - {servers: [database], ports: [5432]}
+      - {kafka: true, ports: [9093]}
+    analytics:
+      - {servers: [accounts], ports: [8443]}
+      - {servers: [database], ports: [5432]}
+      - {servers: [cassandra], ports: [9042]}
+      - {servers: [clickhouse], ports: [8123, 8443]}
+      - {kafka: true, ports: [9093]}
+    edge:
+      - {servers: [front, authorization], ports: [8443]}
+      - {servers: [zipkin], ports: [9411]}
+      - {servers: [prometheus], ports: [9090]}
+      - {servers: [grafana], ports: [3000]}
+      - {servers: [kibana], ports: [5601]}
+      - {servers: [alertmanager], ports: [9093]}
+      - {servers: [superset], ports: [8443]}
 kafka:
   profile: single
 superset:

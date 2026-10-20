@@ -1,0 +1,135 @@
+# Native Helm values for the official OpenBao chart; the only place that pins the server version.
+#   chart: oci://ghcr.io/openbao/charts/openbao@sha256:7d0ac0321c10c70d4fda3529416a33abb037d4cca01ab70c8acdf9a02b12adb8
+#          (version 0.30.4, appVersion v2.7.1; the digest is the OCI manifest of that exact chart version)
+#   image: quay.io/openbao/openbao:2.7.1@sha256:6d2b93856e3fcf7b18ad855a0b51eaba474dc8b79cf554379ea32034797d2acf
+# Install into the namespace prepared by `bao.py tls` as release "openbao" with wait=false: the pod becomes
+# Ready only after `bao.py bootstrap` has initialized and unsealed it.
+# One replica with integrated Raft storage is persistent but not highly available.
+global:
+  tlsDisable: false
+injector:
+  enabled: false
+csi:
+  enabled: false
+ui:
+  enabled: false
+server:
+  image:
+    registry: quay.io
+    repository: openbao/openbao
+    # A tag plus digest: the runtime pulls by digest, the tag stays readable.
+    tag: "2.7.1@sha256:6d2b93856e3fcf7b18ad855a0b51eaba474dc8b79cf554379ea32034797d2acf"
+    pullPolicy: IfNotPresent
+  logFormat: json
+  # Every restart needs an unseal, so a values change never restarts the pod by itself.
+  updateStrategyType: OnDelete
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 512Mi}
+  nodeSelector: {bank11.io/worker: "true"}
+  affinity: ""
+  authDelegator:
+    enabled: true
+  serviceAccount:
+    serviceDiscovery:
+      enabled: false
+  service:
+    ipFamilyPolicy: RequireDualStack
+    ipFamilies: [IPv4, IPv6]
+    active:
+      enabled: false
+    standby:
+      enabled: false
+  # Strict TLS also for `kubectl exec openbao-0 -- bao ...`; 127.0.0.1 is not in the certificate, the name is.
+  extraEnvironmentVars:
+    BAO_CACERT: /openbao/userconfig/openbao-tls/ca.crt
+    BAO_TLS_SERVER_NAME: openbao.bank11-system.svc.cluster.local
+  # The Secret comes from `bao.py tls`; 0440 keeps the key readable only by the OpenBao group.
+  extraVolumes:
+    - type: secret
+      name: openbao-tls
+      defaultMode: 288
+  # Kubelet probes cannot verify certificates; this one is unauthenticated and returns only the health code.
+  # Ready therefore means initialized, unsealed and active.
+  readinessProbe:
+    enabled: true
+    path: /v1/sys/health?standbyok=true
+  # Запечатанный/новый сервер остаётся жив: рестарт не должен заменять явный unseal.
+  livenessProbe:
+    enabled: true
+    path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
+    initialDelaySeconds: 30
+    failureThreshold: 6
+    periodSeconds: 10
+    timeoutSeconds: 3
+  dataStorage:
+    enabled: true
+    size: 1Gi
+    storageClass: standard
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  # 16 MiB x 5 files are retained at most (see the rotation sidecar), far below the volume size.
+  auditStorage:
+    enabled: true
+    size: 256Mi
+    storageClass: standard
+  shareProcessNamespace: true
+  extraContainers:
+    # The file audit device never rotates itself; SIGHUP makes it reopen the file after the rename.
+    - name: audit-rotate
+      image: quay.io/openbao/openbao:2.7.1@sha256:6d2b93856e3fcf7b18ad855a0b51eaba474dc8b79cf554379ea32034797d2acf
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          cd /openbao/audit
+          while sleep 60; do
+            [ -f audit.log ] && [ "$(wc -c < audit.log)" -ge 16777216 ] || continue
+            rm -f audit.log.4
+            for n in 3 2 1; do [ -f audit.log.$n ] && mv audit.log.$n audit.log.$((n + 1)); done
+            mv audit.log audit.log.1
+            kill -HUP $(pidof bao)
+          done
+      resources:
+        requests: {cpu: 5m, memory: 8Mi}
+        limits: {memory: 32Mi}
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities: {drop: [ALL]}
+      volumeMounts:
+        - {name: audit, mountPath: /openbao/audit}
+  ha:
+    enabled: true
+    replicas: 1
+    apiAddr: https://openbao-0.openbao-internal.bank11-system.svc.cluster.local:8200
+    disruptionBudget:
+      enabled: false
+    raft:
+      enabled: true
+      setNodeId: true
+      config: |
+        ui = false
+
+        listener "tcp" {
+          address         = "[::]:8200"
+          cluster_address = "[::]:8201"
+          tls_cert_file   = "/openbao/userconfig/openbao-tls/tls.crt"
+          tls_key_file    = "/openbao/userconfig/openbao-tls/tls.key"
+          tls_min_version = "tls12"
+        }
+
+        storage "raft" {
+          path = "/openbao/data"
+        }
+
+        # Declared here instead of through the API, which needs unsafe_allow_api_audit_creation.
+        # Strings are HMAC-SHA256 hashed unless log_raw is true; bao.py refuses a raw device.
+        audit "file" "file" {
+          description = "HMAC audit records on the bounded audit volume"
+          options {
+            file_path     = "/openbao/audit/audit.log"
+            hmac_accessor = "true"
+            log_raw       = "false"
+          }
+        }

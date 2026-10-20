@@ -2,13 +2,13 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: bank-bi-{{ .Values.provisionerImage | sha256sum | trunc 10 }}
-  labels: {app.kubernetes.io/part-of: bank10}
+  labels: {app.kubernetes.io/part-of: bank11}
 spec:
   backoffLimit: 2
   activeDeadlineSeconds: 600
   template:
     metadata:
-      labels: {app: bank-bi, bank10.io/instance: {{ .Release.Name }}, bank10.io/role: initializer}
+      labels: {app: bank-bi, bank11.io/instance: {{ .Release.Name }}, bank11.io/role: initializer}
     spec:
       automountServiceAccountToken: false
       restartPolicy: Never
@@ -64,10 +64,10 @@ spec:
             - {name: secrets, mountPath: /run/secrets, readOnly: true}
             - {name: tmp, mountPath: /tmp}
       volumes:
-        - {name: secrets, secret: {secretName: bank10-bank-bi, defaultMode: 0440}}
+        - {name: secrets, secret: {secretName: bank11-bank-bi, defaultMode: 0440}}
         - name: authority
           secret:
-            secretName: bank10-bank-bi
+            secretName: bank11-bank-bi
             defaultMode: 0444
             items: [{key: tls_ca.pem, path: tls_ca.pem}]
         - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 32Mi}}

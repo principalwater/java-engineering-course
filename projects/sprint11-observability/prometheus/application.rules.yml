@@ -1,0 +1,112 @@
+groups:
+  - name: bank-application
+    interval: 30s
+    rules:
+      - alert: BankServiceDown
+        expr: up{job=~"bank-(web|worker)"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.service }} cannot be scraped"
+          description: "Prometheus has failed to scrape {{ $labels.service }} ({{ $labels.instance }}) for 2 minutes: the pod is down, not ready, or its metrics endpoint is broken."
+          action: "Run kubectl get pod -l app={{ $labels.service }} and read its logs; then open the Targets page in Prometheus for the scrape error."
+      - alert: BankHttpServerErrorRatioHigh
+        expr: |
+          sum by (service) (rate(http_server_requests_seconds_count{job="bank-web", status=~"5..", uri!~"/actuator.*"}[5m]))
+            /
+          sum by (service) (rate(http_server_requests_seconds_count{job="bank-web", uri!~"/actuator.*"}[5m]))
+            > 0.05
+          and
+          sum by (service) (increase(http_server_requests_seconds_count{job="bank-web", uri!~"/actuator.*"}[5m])) >= 10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.service }} answers more than 5% of requests with 5xx"
+          description: "{{ $labels.service }} returned 5xx for {{ $value | humanizePercentage }} of its requests over 5 minutes (at least 10 requests in the window)."
+          action: "Filter Kibana by service and level:ERROR for the same window; follow a traceId into Zipkin to find the failing hop."
+      - alert: BankHttpClientErrorRatioHigh
+        expr: |
+          sum by (service) (rate(http_server_requests_seconds_count{job="bank-web", status=~"4..", uri!~"/actuator.*"}[10m]))
+            /
+          sum by (service) (rate(http_server_requests_seconds_count{job="bank-web", uri!~"/actuator.*"}[10m]))
+            > 0.4
+          and
+          sum by (service) (increase(http_server_requests_seconds_count{job="bank-web", uri!~"/actuator.*"}[10m])) >= 20
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service }} answers more than 40% of requests with 4xx"
+          description: "{{ $labels.service }} returned 4xx for {{ $value | humanizePercentage }} of its requests over 10 minutes (at least 20 requests in the window)."
+          action: "Break the 4xx rate down by status and uri on the HTTP dashboard; a 401/403 burst points at token or client configuration, 404/422 at a broken caller."
+      - alert: BankHttpLatencyP95High
+        expr: |
+          histogram_quantile(0.95, sum by (le, service) (rate(http_server_requests_seconds_bucket{job="bank-web", uri!~"/actuator.*"}[5m]))) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service }} p95 latency is above 1 second"
+          description: "The 95th percentile request duration of {{ $labels.service }} has been {{ $value | humanizeDuration }} for 10 minutes."
+          action: "Compare with the JVM dashboard (GC pauses, heap, pool wait) and with the dependency the service calls; sample slow traces in Zipkin."
+      - alert: BankJvmOldGenerationFull
+        expr: |
+          max by (service) (
+            jvm_memory_used_bytes{job=~"bank-(web|worker)", area="heap", id=~"G1 Old Gen|Tenured Gen|PS Old Gen"}
+              /
+            (jvm_memory_max_bytes{job=~"bank-(web|worker)", area="heap", id=~"G1 Old Gen|Tenured Gen|PS Old Gen"} > 0)
+          ) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service }} old generation is above 90% of its maximum"
+          description: "The old generation of {{ $labels.service }} has stayed at {{ $value | humanizePercentage }} for 10 minutes; the container limit will end in an OOM kill if the heap keeps growing."
+          action: "Check the JVM dashboard for a leak-shaped heap curve before the next restart; take a heap histogram if the pod is still alive."
+      - alert: BankJvmGcOverhead
+        expr: sum by (service) (rate(jvm_gc_pause_seconds_sum{job=~"bank-(web|worker)"}[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service }} spends more than 10% of its time in GC pauses"
+          description: "{{ $labels.service }} has been paused by garbage collection {{ $value | humanizePercentage }} of the time over 5 minutes."
+          action: "Look at the heap curve and allocation rate on the JVM dashboard; the heap limit is probably too small for the load."
+      - alert: BankDatabasePoolExhausted
+        expr: max by (service) (hikaricp_connections_pending{job=~"bank-(web|worker)"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service }} has threads waiting for a database connection"
+          description: "{{ $labels.service }} has had at least one thread waiting for a pooled connection for 5 minutes."
+          action: "Check slow queries and open transactions in PostgreSQL, then the pool size against the service concurrency."
+      - alert: BankCashWithdrawalFailuresByLogin
+        expr: sum(((increase(bank_cash_withdrawal_failures_total[10m]) and bank_cash_withdrawal_failures_total offset 10m) or bank_cash_withdrawal_failures_total)) >= 5
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Repeated cash withdrawal failures"
+          description: "{{ $value | printf \"%.0f\" }} cash withdrawals failed in 10 minutes."
+          action: "Inspect committed rejection reasons on the protected business dashboard; this counter does not count transport outages."
+      - alert: BankTransferFailuresBySender
+        expr: sum(((increase(bank_transfer_failures_total[10m]) and bank_transfer_failures_total offset 10m) or bank_transfer_failures_total)) >= 5
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Repeated transfer failures"
+          description: "{{ $value | printf \"%.0f\" }} transfers failed in 10 minutes."
+          action: "Inspect rejection reasons on the protected business dashboard; compare sender and recipient breakdown there."
+      - alert: BankNotificationFailuresByLogin
+        expr: sum(((increase(bank_notification_failures_total[10m]) and bank_notification_failures_total offset 10m) or bank_notification_failures_total)) >= 3
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Repeated notification failures"
+          description: "{{ $value | printf \"%.0f\" }} notifications failed in 10 minutes."
+          action: "Check the notifications worker logs and the *.DLT topic volume on the Kafka topics dashboard."

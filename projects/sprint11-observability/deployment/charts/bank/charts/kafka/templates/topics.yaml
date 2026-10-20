@@ -13,7 +13,7 @@ metadata:
   name: {{ printf "%s%s" $name $suffix | lower | replace "." "-" }}
   labels:
     strimzi.io/cluster: {{ $.Values.global.kafkaCluster }}
-    app.kubernetes.io/part-of: bank10
+    app.kubernetes.io/part-of: bank11
   annotations:
     helm.sh/resource-policy: keep
 spec:

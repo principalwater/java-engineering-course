@@ -1,8 +1,8 @@
 {{- define "bank.labels" -}}
-app.kubernetes.io/part-of: bank10
+app.kubernetes.io/part-of: bank11
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
-bank10.io/environment: {{ .Values.global.environment }}
+bank11.io/environment: {{ .Values.global.environment }}
 {{- end -}}
 {{- define "bank.containerSecurity" -}}
 allowPrivilegeEscalation: false

@@ -17,6 +17,10 @@ SECRET_NAMES = (
     "analytics_reader_password", "analytics_bi_password", "superset_secret_key", "superset_admin_password",
     "cassandra_admin_password", "cassandra_activity_password",
     "kafka_admin_password", "kafka_analytics_password",
+    "kafka_accounts_password", "kafka_cash_password", "kafka_transfer_password", "kafka_notifications_password",
+    "grafana_admin_password", "grafana_operator_password", "grafana_secret_key", "grafana_metrics_password", "grafana_es_reader_password",
+    "elastic_password", "kibana_system_password", "logstash_writer_password", "elk_operator_password",
+    "kibana_provisioner_password", "kibana_encryption_key",
 )
 
 
@@ -43,7 +47,7 @@ def initialize(directory, repository):
 
 
 def secret_directory(repository):
-    directory = os.environ.get("BANK_SECRETS_DIR", Path.home() / ".config/java-engineering-course/sprint10")
+    directory = os.environ.get("BANK_SECRETS_DIR", Path.home() / ".config/java-engineering-course/sprint11")
     if sys.platform == "darwin":
         specification = importlib.util.spec_from_file_location("secret_disk", Path(__file__).with_name("secret-disk.py"))
         disk = importlib.util.module_from_spec(specification)

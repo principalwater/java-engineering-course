@@ -1,0 +1,83 @@
+rule_files:
+  - ../kafka.rules.yml
+evaluation_interval: 30s
+tests:
+  - name: dead-letter growth alerts only for DLT topics and only while messages arrive
+    interval: 1m
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{topic="bank.notifications.receipts.v1.DLT", partition="0"}'
+        values: '5 5 5 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6'
+      - series: 'kafka_topic_partition_current_offset{topic="bank.accounts.notifications.v1", partition="0"}'
+        values: '0+10x30'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: KafkaDeadLetterTopicReceivedMessages
+        exp_alerts:
+          - exp_labels: {severity: warning, topic: "bank.notifications.receipts.v1.DLT"}
+            exp_annotations:
+              summary: "Messages were dead-lettered to bank.notifications.receipts.v1.DLT"
+              description: "1 messages reached bank.notifications.receipts.v1.DLT in the last 15 minutes: a consumer gave up on them after its retries."
+              action: "Read the dead-lettered records (headers carry the exception) and find the matching consumer errors in Kibana; replay or discard deliberately."
+      # the DLT offset moved once, 20 minutes ago: the 15 minute window is quiet again
+      - eval_time: 29m
+        alertname: KafkaDeadLetterTopicReceivedMessages
+        exp_alerts: []
+  - name: consumer lag alert groups by group and topic after ten minutes
+    interval: 1m
+    input_series:
+      - series: 'kafka_consumergroup_lag{consumergroup="bank.notifications.v1", topic="bank.cash.notifications.v1", partition="0"}'
+        values: '60x30'
+      - series: 'kafka_consumergroup_lag{consumergroup="bank.notifications.v1", topic="bank.cash.notifications.v1", partition="1"}'
+        values: '60x30'
+      - series: 'kafka_consumergroup_lag{consumergroup="bank.analytics.v1", topic="bank.analytics.v1", partition="0"}'
+        values: '5x30'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: KafkaConsumerGroupLagHigh
+        exp_alerts:
+          - exp_labels: {severity: warning, consumergroup: "bank.notifications.v1", topic: "bank.cash.notifications.v1"}
+            exp_annotations:
+              summary: "Consumer group bank.notifications.v1 lags 120 messages on bank.cash.notifications.v1"
+              description: "The group has been more than 100 messages behind for 10 minutes: the consumer is slow, stuck, or gone."
+              action: "Check the consuming service (accounts, notifications or analytics) for errors and rebalances; see the lag panels on the Kafka topics dashboard."
+  - name: a crashed broker has no up series, so absence of a healthy target is the signal
+    interval: 1m
+    input_series:
+      - series: 'up{job="kafka-jmx", instance="10.244.1.7:9404"}'
+        values: '1 1 1 0 0 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: KafkaMetricsMissing
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: KafkaMetricsMissing
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "No Kafka broker is being scraped"
+              description: "Not a single Kafka JMX exporter target has been up for 3 minutes."
+              action: "Run kubectl get kafka,pods -l strimzi.io/cluster=bank-kafka; check the broker pod events and that the kafka-jmx-metrics Service has endpoints."
+  - name: offline partitions and a missing controller are critical
+    interval: 1m
+    input_series:
+      - series: 'kafka_controller_kafkacontroller_offlinepartitionscount{instance="10.244.1.7:9404"}'
+        values: '0 0 2 2 2 2 2 2'
+      - series: 'kafka_controller_kafkacontroller_activecontrollercount{instance="10.244.1.7:9404"}'
+        values: '1 1 1 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: KafkaOfflinePartitions
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "2 Kafka partitions are offline"
+              description: "Partitions without an available leader cannot be produced to or consumed from."
+              action: "Find the topics on the Kafka health dashboard; restore the broker that holds their leader replicas."
+      - eval_time: 7m
+        alertname: KafkaNoActiveController
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "Kafka has 0 active controllers instead of exactly one"
+              description: "The KRaft quorum reports 0 active controllers for 2 minutes."
+              action: "Check the controller pod logs for quorum loss; in the ha profile verify that at least two of the three controllers are running."

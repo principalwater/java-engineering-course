@@ -36,8 +36,8 @@ class ClusterCreationTest(unittest.TestCase):
                         self.fail("Image operation ran below the required free host disk floor")
                     return ""
 
-                with patch.object(runtime, "owned_identity", return_value={"cluster": "bank10-test-ha"}), \
-                        patch.object(runtime, "image_reference", return_value="bank10-accounts:" + "a" * 20), \
+                with patch.object(runtime, "owned_identity", return_value={"cluster": "bank11-test-ha"}), \
+                        patch.object(runtime, "image_reference", return_value="bank11-accounts:" + "a" * 20), \
                         patch.object(shutil, "disk_usage", side_effect=[SimpleNamespace(free=value) for value in available]), \
                         patch.object(runtime, "command", side_effect=fake_command):
                     with self.assertRaisesRegex(ValueError, "free host disk"):
@@ -48,13 +48,15 @@ class ClusterCreationTest(unittest.TestCase):
     def test_stop_preserves_single_node_scheduling_and_rejects_unrecorded_nodes(self):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory)
-            name = "bank10-dev-single-control-plane"
+            name = "bank11-dev-single-control-plane"
             identity = {"nodes": {name: "c" * 64}}
             arguments = argparse.Namespace(state_dir=state)
             mutations = []
             foreign_node = False
 
             def fake_kubectl(cluster, *argv, **kwargs):
+                if argv[:2] == ("get", "namespace"):
+                    return ""
                 if argv[:2] == ("get", "nodes"):
                     node = {"kind": "Node", "metadata": {"name": name}, "spec": {"unschedulable": True}}
                     if name in argv[2:]:
@@ -76,9 +78,11 @@ class ClusterCreationTest(unittest.TestCase):
                 runtime.lifecycle(arguments, stop=True)
                 self.assertEqual(json.loads((state / "scheduling.json").read_text()), {name: True})
                 self.assertEqual(mutations, [("cordon", name),
-                                             ("delete", "bank10.io/role=application"),
-                                             ("delete", "bank10.io/role=storage"),
-                                             ("delete", "bank10.io/role=kafka"),
+                                             ("delete", "bank11.io/role=application"),
+                                             ("delete", "bank11.io/role=observability"),
+                                             ("delete", "bank11.io/role=storage"),
+                                             ("delete", "bank11.io/role=kafka"),
+                                             ("docker", "update", "--restart=unless-stopped", name),
                                              ("docker", "stop", "--time", "60", name)])
                 mutations.clear()
                 foreign_node = True
@@ -86,14 +90,52 @@ class ClusterCreationTest(unittest.TestCase):
                     runtime.lifecycle(arguments, stop=True)
                 self.assertFalse(mutations)
 
+    def test_resume_distinguishes_partial_bootstrap_from_missing_initialized_openbao(self):
+        import bao
+        for installed, recovery in ((False, False), (False, True), (True, True)):
+            with self.subTest(installed=installed, recovery=recovery), tempfile.TemporaryDirectory() as directory:
+                state = Path(directory)
+                kubeconfig = state / "kubeconfig"
+                kubeconfig.touch()
+                secret_dir = state / "source"
+                secret_dir.mkdir()
+                identity = {"cluster": "bank11-dev-single", "namespace": "bank11-dev",
+                            "kubeconfig": str(kubeconfig), "context": "kind-bank11-dev-single",
+                            "nodes": {"bank11-dev-single-control-plane": "a" * 64}}
+                (state / "creation.json").write_text(json.dumps({"secrets_dir": str(secret_dir)}))
+                if recovery:
+                    path = bao.recovery_path(secret_dir, identity["cluster"])
+                    path.parent.mkdir(parents=True)
+                    path.write_text("{}")
+
+                def fake_kubectl(cluster, *argv, **kwargs):
+                    if argv[:2] == ("get", "namespace"):
+                        return json.dumps({"metadata": {"labels": {runtime.OWNER_LABEL: identity["cluster"]}}})
+                    if argv[:2] == ("get", "statefulset"):
+                        return json.dumps({"metadata": {"name": "openbao"}}) if installed else ""
+                    self.fail(f"Unexpected Kubernetes operation: {argv[:2]}")
+
+                with patch.object(runtime, "owned_identity", return_value=identity), \
+                        patch.object(runtime, "command"), patch.object(runtime, "kubectl", side_effect=fake_kubectl), \
+                        patch.object(runtime.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)), \
+                        patch.object(bao, "bootstrap") as bootstrap:
+                    if recovery and not installed:
+                        with self.assertRaisesRegex(ValueError, "explicit reconciliation"):
+                            runtime.lifecycle(argparse.Namespace(state_dir=state), stop=False)
+                    else:
+                        runtime.lifecycle(argparse.Namespace(state_dir=state), stop=False)
+                    self.assertEqual(bootstrap.call_count, int(installed))
+                    if installed:
+                        self.assertIs(bootstrap.call_args.kwargs["may_initialize"], False)
+
     def test_failed_bootstrap_reuses_exact_network_receipt_and_encryption_key(self):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory) / "state"
             secret_source = Path(directory) / "private"
             secret_source.mkdir(mode=0o700)
             arguments = argparse.Namespace(state_dir=state, secrets_dir=secret_source, environment="test",
-                                           profile="ha", external_port=8450)
-            cluster = "bank10-test-ha"
+                                           profile="ha", external_port=8460)
+            cluster = "bank11-test-ha"
             node_names = [cluster + suffix for suffix in ("-control-plane", "-worker", "-worker2")]
             node_ids = {name: str(index + 1) * 64 for index, name in enumerate(node_names)}
             created_networks = []
@@ -109,7 +151,7 @@ class ClusterCreationTest(unittest.TestCase):
                     model = {"Name": "none", "IPAM": {"Config": None}}
                     if argv[3] == network_id:
                         model = {"Name": cluster, "Id": network_id,
-                                 "Labels": {runtime.OWNER_LABEL: cluster}, "IPAM": {"Config": [{"Subnet": "10.251.10.160/27"}]}}
+                                 "Labels": {runtime.OWNER_LABEL: cluster}, "IPAM": {"Config": [{"Subnet": "10.251.11.160/27"}]}}
                     return json.dumps([model])
                 if argv[:3] == ["docker", "network", "create"]:
                     created_networks.append(network_id)
@@ -142,7 +184,7 @@ class ClusterCreationTest(unittest.TestCase):
                 self.assertEqual(intent["network_id"], network_id)
                 topology = yaml.safe_load((state / "kind.yaml").read_text())
                 self.assertEqual([node["role"] for node in topology["nodes"]], ["control-plane", "worker", "worker"])
-                self.assertTrue(all(node["labels"]["bank10.io/worker"] == "true" for node in topology["nodes"]))
+                self.assertTrue(all(node["labels"]["bank11.io/worker"] == "true" for node in topology["nodes"]))
                 control_plane_patch = yaml.safe_load(topology["nodes"][0]["kubeadmConfigPatches"][0])
                 self.assertEqual(control_plane_patch, {"kind": "InitConfiguration", "nodeRegistration": {"taints": []}})
                 key_file = secret_source / ("kubernetes/" + cluster + "/encryption.yaml")

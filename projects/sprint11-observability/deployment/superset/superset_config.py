@@ -65,7 +65,7 @@ MAPBOX_API_KEY = ''
 SECRET_KEY_WARNING = False
 PUBLIC_ROLE_LIKE = None
 
-PUBLIC_ISSUER = os.environ.get('BANK_BI_PUBLIC_AUTH_URL', 'https://auth-bank.valgrind-home.localhost:8450/realms/bank')
+PUBLIC_ISSUER = os.environ.get('BANK_BI_PUBLIC_AUTH_URL', 'https://auth-bank.valgrind-home.localhost:8460/realms/bank')
 INTERNAL_ISSUER = os.environ.get('BANK_BI_AUTH_URL', 'http://authorization:8080/realms/bank')
 OAUTH_PROVIDERS = [{
     'name': 'bank',

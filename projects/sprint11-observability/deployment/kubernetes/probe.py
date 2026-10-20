@@ -57,9 +57,9 @@ def resource_ready(identity: dict, kind: str, name: str, *, timeout: int = 300) 
 
 
 def job(identity: dict, user: str, body: str) -> None:
-    name = f"bank10-probe-{uuid.uuid4().hex[:12]}"
+    name = f"bank11-probe-{uuid.uuid4().hex[:12]}"
     chart = yaml.safe_load((project_dir() / "deployment/charts/bank/charts/kafka/values.yaml").read_text(encoding="utf-8"))
-    labels = {"app.kubernetes.io/part-of": "bank10", "bank10.io/role": "probe", "bank10.io/probe": name}
+    labels = {"app.kubernetes.io/part-of": "bank11", "bank11.io/role": "probe", "bank11.io/probe": name}
     manifest = {"apiVersion": "batch/v1", "kind": "Job", "metadata": {"name": name, "labels": labels},
                 "spec": {"backoffLimit": 0, "activeDeadlineSeconds": 150, "template": {
                     "metadata": {"labels": labels}, "spec": {"restartPolicy": "Never", "automountServiceAccountToken": False,
@@ -76,7 +76,7 @@ def job(identity: dict, user: str, body: str) -> None:
                                     {"name": "tmp", "emptyDir": {"medium": "Memory", "sizeLimit": "64Mi"}}]}}}}
     bootstrap = json.loads(kubectl(identity, "get", "service", "bank-kafka-kafka-bootstrap", "-o", "json"))
     manifest["spec"]["template"]["spec"]["hostAliases"] = [
-        {"ip": bootstrap["spec"]["clusterIP"], "hostnames": ["bank10-wrong-kafka.invalid"]}]
+        {"ip": bootstrap["spec"]["clusterIP"], "hostnames": ["bank11-wrong-kafka.invalid"]}]
     created = json.loads(kubectl(identity, "create", "-f", "-", "-o", "json", data=json.dumps(manifest).encode()))
     deadline = time.monotonic() + 180
     try:
@@ -98,7 +98,7 @@ def job(identity: dict, user: str, body: str) -> None:
             raise RuntimeError(f"Kafka probe for {user} failed: {reason}; private diagnostic: {diagnostic}")
     finally:
         current = json.loads(kubectl(identity, "get", "job", name, "-o", "json"))
-        if current["metadata"]["uid"] != created["metadata"]["uid"] or current["metadata"]["labels"].get("bank10.io/probe") != name:
+        if current["metadata"]["uid"] != created["metadata"]["uid"] or current["metadata"]["labels"].get("bank11.io/probe") != name:
             raise ValueError("Probe Job ownership changed; refusing cleanup")
         kubectl(identity, "delete", "job", name, "--wait=true", "--timeout=60s")
 
@@ -118,19 +118,19 @@ def security(identity: dict, analytics: bool) -> None:
 timeout 30s /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server "$bootstrap" --command-config /tmp/client.properties --topic {shlex.quote(allowed)} >/tmp/describe 2>&1
 test "$(grep -Ec '^{topic_pattern}:[0-9]+:[0-9]+$' /tmp/describe)" -eq 6
 phase=forbidden-write; diagnostic=/tmp/denied
-printf '%s\\n' 'bank10-forbidden-probe' | timeout 30s /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server "$bootstrap" --producer.config /tmp/client.properties --sync --topic {shlex.quote(forbidden)} >/tmp/denied 2>&1 || true
+printf '%s\\n' 'bank11-forbidden-probe' | timeout 30s /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server "$bootstrap" --producer.config /tmp/client.properties --sync --topic {shlex.quote(forbidden)} >/tmp/denied 2>&1 || true
 grep -q TopicAuthorizationException /tmp/denied
 echo 'Kafka TLS/SCRAM and foreign-write denial verified'
 '''
         if consumer_topic:
             script += f'''phase=forbidden-group; diagnostic=/tmp/group-denied
-timeout --kill-after=5s 20s /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server "$bootstrap" --command-config /tmp/client.properties --command-property enable.auto.commit=false --group bank10-forbidden-probe --max-messages 1 --topic {shlex.quote(consumer_topic)} >/tmp/group-denied 2>&1 || true
+timeout --kill-after=5s 20s /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server "$bootstrap" --command-config /tmp/client.properties --command-property enable.auto.commit=false --group bank11-forbidden-probe --max-messages 1 --topic {shlex.quote(consumer_topic)} >/tmp/group-denied 2>&1 || true
 grep -q GroupAuthorizationException /tmp/group-denied
 echo 'Foreign consumer group denied on an authorized input topic'
 '''
         if service == "accounts":
             script += f'''phase=hostname-mismatch; diagnostic=/tmp/hostname-denied
-timeout 30s /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server bank10-wrong-kafka.invalid:9093 --command-config /tmp/client.properties --topic {shlex.quote(allowed)} >/tmp/hostname-denied 2>&1 || true
+timeout 30s /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server bank11-wrong-kafka.invalid:9093 --command-config /tmp/client.properties --topic {shlex.quote(allowed)} >/tmp/hostname-denied 2>&1 || true
 grep -Eq 'subject alternative|No name matching' /tmp/hostname-denied
 echo 'Kafka hostname mismatch rejected with the same trusted CA'
 '''
@@ -142,7 +142,7 @@ def pvc_snapshot(identity: dict) -> dict:
     claims = json.loads(kubectl(identity, "get", "pvc", "-o", "json"))["items"]
     return {item["metadata"]["name"]: {"uid": item["metadata"]["uid"], "volume": item["spec"]["volumeName"]}
             for item in claims if item["metadata"].get("labels", {}).get("strimzi.io/cluster") == "bank-kafka"
-            or item["metadata"].get("labels", {}).get("app.kubernetes.io/part-of") == "bank10"}
+            or item["metadata"].get("labels", {}).get("app.kubernetes.io/part-of") == "bank11"}
 
 
 def probe_records(identity: dict, user: str, topic: str, group: str, messages: tuple[str, ...], *, publish: bool) -> None:
@@ -170,8 +170,8 @@ phase=record-membership
 
 
 def persistence(identity: dict, state_dir: Path, *, ha: bool) -> None:
-    prefix = f"bank10-probe-{uuid.uuid4().hex[:10]}"
-    labels = {"strimzi.io/cluster": "bank-kafka", "bank10.io/probe": prefix}
+    prefix = f"bank11-probe-{uuid.uuid4().hex[:10]}"
+    labels = {"strimzi.io/cluster": "bank-kafka", "bank11.io/probe": prefix}
     topic = {"apiVersion": "kafka.strimzi.io/v1", "kind": "KafkaTopic", "metadata": {"name": prefix, "labels": labels},
              "spec": {"topicName": prefix, "partitions": 6, "replicas": 3 if ha else 1,
                       "config": {"min.insync.replicas": 2 if ha else 1, "retention.ms": 3600000}}}
@@ -257,7 +257,7 @@ def persistence(identity: dict, state_dir: Path, *, ha: bool) -> None:
             kubectl(identity, "uncordon", cordoned)
         for kind, uid in reversed(created):
             current = json.loads(kubectl(identity, "get", kind, prefix, "-o", "json"))
-            if current["metadata"]["uid"] != uid or current["metadata"].get("labels", {}).get("bank10.io/probe") != prefix:
+            if current["metadata"]["uid"] != uid or current["metadata"].get("labels", {}).get("bank11.io/probe") != prefix:
                 raise ValueError("Probe object ownership changed; refusing cleanup")
             kubectl(identity, "delete", kind, prefix, "--wait=true", "--timeout=120s", timeout=150)
 
@@ -310,15 +310,63 @@ def lifecycle(identity: dict, state_dir: Path) -> None:
     print("Lifecycle passed: readiness withdrawal without restart, liveness recovery and retained PVCs")
 
 
+def network(identity: dict, state_dir: Path) -> None:
+    """Проверяет оба IP-пути из настоящих Pod, сохраняя DNS-имя для проверки TLS."""
+    allowed = (("front", "gateway", "/api/accounts/me", 401),
+               ("cash", "accounts", "/api/accounts/me", 401),
+               ("gateway", "cash", "/api/cash", 401),
+               ("front", "authorization", "/realms/bank/.well-known/openid-configuration", 200))
+    denied = (("front", "accounts"), ("accounts", "front"))
+    targets = {target for _, target, *_ in (*allowed, *denied)}
+    addresses = {}
+    for target in sorted(targets):
+        service = json.loads(kubectl(identity, "get", "service", target, "-o", "json"))["spec"]
+        if service.get("ipFamilyPolicy") != "RequireDualStack" or set(service["ipFamilies"]) != {"IPv4", "IPv6"}:
+            raise RuntimeError(f"Service {target} does not require both IP families")
+        addresses[target] = dict(zip(service["ipFamilies"], service["clusterIPs"]))
+
+    def request(client, server, family, path, *, wrong_name=False):
+        address = addresses[server][family]
+        name = "bank11-wrong.invalid" if wrong_name else server
+        resolved = f"[{address}]" if family == "IPv6" else address
+        args = ["curl", "--noproxy", "*", "--ipv6" if family == "IPv6" else "--ipv4",
+                "--cacert", "/run/trust/ca.crt", "--connect-timeout", "3", "--max-time", "8",
+                "--silent", "--output", "/dev/null", "--write-out", "%{http_code} %{time_connect}",
+                "--resolve", f"{name}:8443:{resolved}", f"https://{name}:8443{path}"]
+        # Код curl передаём явно: kubectl не должен превращать ожидаемый отказ в необработанную ошибку.
+        script = " ".join(shlex.quote(arg) for arg in args) + '; code=$?; printf " %s\\n" "$code"'
+        fields = kubectl(identity, "exec", "deployment/" + client, "--", "sh", "-c", script).strip().split()
+        if len(fields) != 3:
+            raise RuntimeError("Network probe returned an unexpected result")
+        return int(fields[0]), float(fields[1]), int(fields[2])
+
+    for family in ("IPv4", "IPv6"):
+        for client, server, path, status in allowed:
+            actual, connected, code = request(client, server, family, path)
+            if actual != status or code != 0 or connected <= 0:
+                raise RuntimeError(f"Allowed {family} path {client}->{server} failed (HTTP {actual}, curl {code})")
+        for client, server in denied:
+            actual, connected, code = request(client, server, family, "/")
+            if actual != 0 or connected != 0 or code != 28:
+                raise RuntimeError(f"Forbidden {family} path {client}->{server} was not dropped before connection")
+        if request("front", "gateway", family, "/", wrong_name=True)[2] != 60:
+            raise RuntimeError(f"TLS accepted a wrong service name over {family}")
+    save_receipt(state_dir / "network-proof.json", {"ipv4": True, "ipv6": True,
+                 "bidirectional_responses": True, "foreign_connections_denied": True, "tls_hostname_verified": True})
+    print("Network passed: real IPv4/IPv6 requests and replies, foreign-path denial and TLS hostname verification")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state-dir", type=Path, required=True)
-    parser.add_argument("operation", choices=("security", "persistence", "lifecycle"))
+    parser.add_argument("operation", choices=("security", "persistence", "lifecycle", "network"))
     args = parser.parse_args()
     identity = owned_identity(args.state_dir)
     source = json.loads((args.state_dir / "source.json").read_text(encoding="utf-8"))
     if args.operation == "security":
         security(identity, source["analytics"])
+    elif args.operation == "network":
+        network(identity, args.state_dir)
     elif args.operation == "persistence":
         persistence(identity, args.state_dir, ha=identity["profile"] == "ha")
     else:

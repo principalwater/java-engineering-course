@@ -5,8 +5,10 @@ metadata:
   labels:
     {{- include "bank.labels" . | nindent 4 }}
 spec:
-  selector: {app: authorization, bank10.io/instance: {{ .Release.Name }}}
-  ports: [{name: http, port: 8080, targetPort: 8080}]
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  selector: {app: authorization, bank11.io/instance: {{ .Release.Name }}}
+  ports: [{name: http, port: 8080, targetPort: 8080}, {name: https, port: 8443, targetPort: 8443}]
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -18,11 +20,11 @@ spec:
   replicas: 1
   strategy: {type: Recreate}
   selector:
-    matchLabels: {app: authorization, bank10.io/instance: {{ .Release.Name }}}
+    matchLabels: {app: authorization, bank11.io/instance: {{ .Release.Name }}}
   template:
     metadata:
-      labels: {app: authorization, bank10.io/instance: {{ .Release.Name }}, bank10.io/role: application}
-      annotations: {checksum/public-config: {{ index .Values.assets "bank10-authorization" | toJson | sha256sum }}}
+      labels: {app: authorization, bank11.io/instance: {{ .Release.Name }}, bank11.io/role: application}
+      annotations: {checksum/public-config: {{ index .Values.assets "bank11-authorization" | toJson | sha256sum }}}
     spec:
       automountServiceAccountToken: false
       nodeSelector:
@@ -41,10 +43,15 @@ spec:
             - {name: KC_HOSTNAME, value: {{ printf "https://auth-bank.valgrind-home.localhost:%v" .Values.global.externalPort | quote }}}
             - {name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC, value: "true"}
             - {name: KC_HTTP_ENABLED, value: "true"}
+            - {name: KC_HTTP_HOST, value: "::"}
+            - {name: KC_HTTPS_CERTIFICATE_FILE, value: /run/secrets/internal_tls.crt}
+            - {name: KC_HTTPS_CERTIFICATE_KEY_FILE, value: /run/secrets/internal_tls.key}
+            - {name: KC_HTTPS_PORT, value: "8443"}
+            - {name: KC_HTTP_MANAGEMENT_SCHEME, value: http}
             - {name: KC_PROXY_HEADERS, value: xforwarded}
             - {name: KC_CACHE, value: local}
             - {name: JAVA_OPTS_APPEND, value: "-Xms128m -Xmx384m -XX:ActiveProcessorCount=2"}
-          ports: [{name: http, containerPort: 8080}, {name: management, containerPort: 9000}]
+          ports: [{name: http, containerPort: 8080}, {name: https, containerPort: 8443}, {name: management, containerPort: 9000}]
           startupProbe:
             httpGet: {path: /health/started, port: management}
             periodSeconds: 5
@@ -70,7 +77,7 @@ spec:
             - {name: tmp, mountPath: /tmp}
             - {name: data, mountPath: /opt/keycloak/data}
       volumes:
-        - {name: setup, configMap: {name: bank10-authorization}}
+        - {name: setup, configMap: {name: bank11-authorization}}
         - {name: secrets, secret: {secretName: {{ printf "%s-authorization" .Values.global.secretPrefix }}, defaultMode: 0440}}
         - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 64Mi}}
         - {name: data, emptyDir: {medium: Memory, sizeLimit: 32Mi}}

@@ -6,7 +6,7 @@ storage: 2Gi
 global:
   kafkaCluster: bank-kafka
   storageClass: standard
-  nodeSelector: {bank10.io/worker: "true"}
+  nodeSelector: {bank11.io/worker: "true"}
 topics:
   bank.accounts.notifications.v1: {}
   bank.cash.notifications.v1: {}
@@ -14,9 +14,10 @@ topics:
   bank.notifications.receipts.v1: {}
   bank.accounts.analytics.v1: {deadLetter: false}
   bank.analytics.v1: {optional: true, deadLetter: false}
+  bank.business.failures.v1: {optional: true, deadLetter: false}
 users:
   accounts:
-    writes: [bank.accounts.notifications.v1, bank.accounts.analytics.v1, bank.notifications.receipts.v1.DLT]
+    writes: [bank.business.failures.v1, bank.accounts.notifications.v1, bank.accounts.analytics.v1, bank.notifications.receipts.v1.DLT]
     reads: [bank.notifications.receipts.v1]
     groups: [bank.accounts.notifications.v1]
   cash:
@@ -25,10 +26,10 @@ users:
     writes: [bank.transfer.notifications.v1]
   notifications:
     reads: [bank.accounts.notifications.v1, bank.cash.notifications.v1, bank.transfer.notifications.v1]
-    writes: [bank.notifications.receipts.v1, bank.accounts.notifications.v1.DLT, bank.cash.notifications.v1.DLT, bank.transfer.notifications.v1.DLT]
+    writes: [bank.business.failures.v1, bank.notifications.receipts.v1, bank.accounts.notifications.v1.DLT, bank.cash.notifications.v1.DLT, bank.transfer.notifications.v1.DLT]
     groups: [bank.notifications.v1]
   analytics:
     optional: true
-    reads: [bank.accounts.analytics.v1, bank.analytics.v1]
+    reads: [bank.accounts.analytics.v1, bank.analytics.v1, bank.business.failures.v1]
     writes: [bank.analytics.v1]
-    groups: [bank.analytics.accounts.ingress.v1, bank.analytics.personal.v1, bank.analytics.business.v1]
+    groups: [bank.analytics.accounts.ingress.v1, bank.analytics.personal.v1, bank.analytics.business.v1, bank.analytics.failures.v1]

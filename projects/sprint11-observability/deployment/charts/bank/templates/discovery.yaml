@@ -5,7 +5,9 @@ metadata:
   labels:
     {{- include "bank.labels" . | nindent 4 }}
 spec:
-  selector: {app: discovery, bank10.io/instance: {{ .Release.Name }}}
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  selector: {app: discovery, bank11.io/instance: {{ .Release.Name }}}
   ports: [{name: client, port: 2181, targetPort: 2181}]
 ---
 apiVersion: apps/v1
@@ -18,10 +20,10 @@ spec:
   serviceName: discovery
   replicas: 1
   selector:
-    matchLabels: {app: discovery, bank10.io/instance: {{ .Release.Name }}}
+    matchLabels: {app: discovery, bank11.io/instance: {{ .Release.Name }}}
   template:
     metadata:
-      labels: {app: discovery, bank10.io/instance: {{ .Release.Name }}, bank10.io/role: storage}
+      labels: {app: discovery, bank11.io/instance: {{ .Release.Name }}, bank11.io/role: storage}
     spec:
       automountServiceAccountToken: false
       nodeSelector:
@@ -76,7 +78,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: config-seed-{{ index .Values.assets "bank10-setup" "init-config.sh" | sha256sum | trunc 10 }}
+  name: config-seed-{{ index .Values.assets "bank11-setup" "init-config.sh" | sha256sum | trunc 10 }}
   labels:
     {{- include "bank.labels" . | nindent 4 }}
 spec:
@@ -84,7 +86,7 @@ spec:
   activeDeadlineSeconds: 300
   template:
     metadata:
-      labels: {app: config-seed, bank10.io/instance: {{ .Release.Name }}, bank10.io/role: initializer}
+      labels: {app: config-seed, bank11.io/instance: {{ .Release.Name }}, bank11.io/role: initializer}
     spec:
       automountServiceAccountToken: false
       restartPolicy: Never
@@ -107,5 +109,5 @@ spec:
             - {name: setup, mountPath: /setup, readOnly: true}
             - {name: tmp, mountPath: /tmp}
       volumes:
-        - {name: setup, configMap: {name: bank10-setup}}
+        - {name: setup, configMap: {name: bank11-setup}}
         - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 16Mi}}

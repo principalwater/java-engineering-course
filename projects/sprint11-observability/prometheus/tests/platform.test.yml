@@ -1,0 +1,58 @@
+rule_files:
+  - ../platform.rules.yml
+evaluation_interval: 30s
+tests:
+  - name: a down observability component is reported after three minutes
+    interval: 1m
+    input_series:
+      - series: 'up{job="grafana", instance="grafana:3000"}'
+        values: '1 1 0 0 0 0 0 0'
+      - series: 'up{job="zipkin", instance="zipkin:9411"}'
+        values: '1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: ObservabilityComponentDown
+        exp_alerts:
+          - exp_labels: {severity: warning, job: grafana, instance: "grafana:3000"}
+            exp_annotations:
+              summary: "grafana is down"
+              description: "Prometheus has failed to scrape grafana for 3 minutes."
+              action: "Check the grafana pod and its logs; the observability stack deliberately has no HA, a restart restores it."
+  - name: cardinality guards fire on the sample limit and on head series growth
+    interval: 1m
+    input_series:
+      - series: 'prometheus_target_scrapes_exceeded_sample_limit_total'
+        values: '0 0 0 1 2 3 4 5 6 7 8 9'
+      - series: 'prometheus_tsdb_head_series'
+        values: '120000x30'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: PrometheusScrapeSampleLimitHit
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "A scrape target exceeded its sample limit"
+              description: "A target produced more series than its sample_limit and was dropped for that scrape: a label with unbounded values is growing."
+              action: "Find the target with scrape_samples_scraped near the limit and the metric with the fastest growing label set (login, uri) on the Prometheus dashboard."
+      - eval_time: 20m
+        alertname: PrometheusHeadSeriesHigh
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "Prometheus tracks 120000 active series"
+              description: "The 384Mi memory limit is sized for far fewer series; growth this large ends in an OOM kill."
+              action: 'Use topk(10, count by (__name__) ({__name__=~".+"})) in Prometheus to find the metric that explodes.'
+  - name: delivery failures to Telegram surface through Alertmanager's own counters
+    interval: 1m
+    input_series:
+      - series: 'alertmanager_notifications_failed_total{integration="telegram"}'
+        values: '0 0 0 2 4 6 8 10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: AlertmanagerNotificationsFailing
+        exp_alerts:
+          - exp_labels: {severity: critical, integration: telegram}
+            exp_annotations:
+              summary: "Alertmanager cannot deliver telegram notifications"
+              description: "Delivery to Telegram is failing: operators are not being told about firing alerts."
+              action: "Read the Alertmanager log; verify the telegram_bot_token and telegram_chat_id Secret files and egress to the Telegram API (or the configured local receiver)."

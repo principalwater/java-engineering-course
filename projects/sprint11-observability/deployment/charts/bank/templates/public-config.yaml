@@ -1,8 +1,8 @@
 {{- if not (has .Values.global.environment (list "dev" "test" "prod")) }}
 {{- fail "global.environment must be dev, test or prod" }}
 {{- end }}
-{{- if ne .Release.Namespace (printf "bank10-%s" .Values.global.environment) }}
-{{- fail "release namespace must equal bank10-<environment>" }}
+{{- if ne .Release.Namespace (printf "bank11-%s" .Values.global.environment) }}
+{{- fail "release namespace must equal bank11-<environment>" }}
 {{- end }}
 {{- range $name, $data := .Values.assets }}
 ---
@@ -15,6 +15,6 @@ metadata:
 data:
   {{- toYaml $data | nindent 2 }}
 {{- end }}
-{{- if not (hasKey .Values.assets "bank10-setup") }}
+{{- if not (hasKey .Values.assets "bank11-setup") }}
 {{- fail "public assets missing: run kubernetes/prepare.py and pass its public-values.yaml" }}
 {{- end }}

@@ -7,11 +7,14 @@ prometheus/tests are not assets). promtool and amtool are the official binaries;
 with the reason stated, on a machine that does not have them.
 """
 
+import base64
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import unittest
 import xml.dom.minidom
 from functools import lru_cache
@@ -177,6 +180,83 @@ class AssetContractTest(unittest.TestCase):
                 self.assertFalse(datasource["editable"])
                 for value in datasource.get("secureJsonData", {}).values():
                     self.assertTrue(str(value).startswith("$__file{/run/secrets/"))
+
+    def test_grafana_bootstrap_grants_folder_view_without_promoting_the_operator(self):
+        """21.10.2026: Grafana 13.2.4 создаёт Bank11 без ACL, поэтому Viewer не видит панели."""
+        folder = yaml.safe_load(asset_text("grafana", "dashboards.yaml"))["providers"][0]["folderUid"]
+        state = {"role": "Editor", "permissions": [], "deny": False, "folder_reads": 0, "folder_error": None}
+        password = "fixture-admin-password"
+        reflected = "private-reflected-password"
+        authorization = "Basic " + base64.b64encode(f"bank11-admin:{password}".encode()).decode()
+
+        class Grafana(BaseHTTPRequestHandler):
+            def respond(self, status, body):
+                encoded = json.dumps(body).encode()
+                self.send_response(status)
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+
+            def dispatch(self):
+                if self.path == "/api/health":
+                    return self.respond(200, {"database": "ok"})
+                if self.headers.get("Authorization") != authorization:
+                    return self.respond(401, {})
+                size = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(size)) if size else {}
+                if self.command == "GET" and self.path.startswith("/api/users/lookup?"):
+                    return self.respond(200, {"id": 7})
+                if self.command == "GET" and self.path == f"/api/folders/{folder}":
+                    if state["folder_error"]:
+                        return self.respond(state["folder_error"], {"message": reflected})
+                    state["folder_reads"] += 1
+                    return self.respond(404 if state["folder_reads"] == 1 else 200, {"uid": folder})
+                if self.command == "PUT" and self.path == "/api/admin/users/7/password":
+                    return self.respond(200, {})
+                if self.command == "PATCH" and self.path == "/api/org/users/7":
+                    state["role"] = body.get("role")
+                    return self.respond(200, {})
+                if self.command == "POST" and self.path == f"/api/folders/{folder}/permissions":
+                    if state["folder_reads"] < 2:
+                        return self.respond(404, {"message": reflected})
+                    if state["deny"]:
+                        return self.respond(403, {"message": reflected})
+                    state["permissions"] = body.get("items")
+                    return self.respond(200, {})
+                self.respond(404, {})
+
+            do_GET = do_PUT = do_PATCH = do_POST = dispatch
+
+            def log_message(self, *_):
+                pass
+
+        with tempfile.TemporaryDirectory() as directory, HTTPServer(("127.0.0.1", 0), Grafana) as server:
+            root = Path(directory)
+            (root / "grafana_admin_password").write_text(password, encoding="utf-8")
+            (root / "grafana_operator_password").write_text("fixture-operator-password", encoding="utf-8")
+            # Выполняется сам asset; адрес сервиса и точка монтирования секретов заменяются на fixture.
+            script = asset_text("grafana", "grafana-bootstrap.sh").replace(
+                "http://grafana:3000", f"http://127.0.0.1:{server.server_port}").replace("/run/secrets", str(root))
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            try:
+                for denied, folder_error in ((False, None), (False, None), (True, None), (False, 503)):
+                    with self.subTest(permission_denied=denied, folder_error=folder_error):
+                        state["deny"] = denied
+                        state["folder_error"] = folder_error
+                        result = subprocess.run(["bash"], input=script, text=True, capture_output=True, timeout=20)
+                        output = result.stdout + result.stderr
+                        self.assertNotIn(reflected, output)
+                        if denied or folder_error:
+                            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                            self.assertIn(f"HTTP {folder_error or 403}", output)
+                        else:
+                            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                            self.assertEqual(state["role"], "Viewer")
+                            self.assertEqual(state["permissions"], [{"role": "Viewer", "permission": 1}])
+            finally:
+                server.shutdown()
+                worker.join()
 
     def test_logstash_allowlist_equals_the_strict_index_mapping(self):
         # dynamic: strict makes Elasticsearch reject any document with an unmapped field, so a field allowed

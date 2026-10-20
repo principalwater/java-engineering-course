@@ -1,7 +1,7 @@
 #!/bin/bash
 # Idempotent Grafana bootstrap, run as a finite Job: ensures the read-only operator user exists with the
-# Viewer role and the password from its Secret file. Datasources and dashboards are file-provisioned and need
-# no API calls. The administrator credential is read from its Secret file and never printed.
+# Viewer role, read access to the Bank11 folder and the password from its Secret file. Datasources and
+# dashboards are file-provisioned. The administrator credential is read from its Secret file and never printed.
 set -euo pipefail
 umask 077
 
@@ -37,7 +37,7 @@ call() {
 
 expect() {
     local status=$1 allowed=$2 what=$3
-    [[ " $allowed " == *" $status "* ]] || fail "$what returned HTTP ${status:-none}: $(head -c 300 "$work/response")"
+    [[ " $allowed " == *" $status "* ]] || fail "$what returned HTTP ${status:-none}"
 }
 
 echo "Waiting for Grafana to answer /api/health"
@@ -64,4 +64,17 @@ expect "$status" "200" "Setting the operator password"
 status="$(call PATCH "/api/org/users/$id" '{"role": "Viewer"}')"
 expect "$status" "200" "Assigning the Viewer role"
 
-echo "Grafana operator user $login exists with the Viewer role"
+# /api/health может отвечать до окончания file provisioning.
+for attempt in $(seq 1 60); do
+    status="$(call GET /api/folders/bank11)"
+    [[ "$status" == 200 ]] && break
+    expect "$status" "404" "Looking up the Bank11 folder"
+    [[ "$attempt" -lt 60 ]] || fail "Bank11 folder did not appear within the bootstrap deadline"
+    sleep 3
+done
+
+# На Grafana 13.2.4 у provisioned-папки пустой ACL: одной роли Viewer недостаточно для чтения её панелей.
+status="$(call POST /api/folders/bank11/permissions '{"items": [{"role": "Viewer", "permission": 1}]}')"
+expect "$status" "200" "Granting read access to the Bank11 folder"
+
+echo "Grafana operator user $login exists with the Viewer role and Bank11 folder read access"

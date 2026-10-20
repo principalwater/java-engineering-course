@@ -1101,7 +1101,7 @@ jobs:
   sprint11:
     needs: projects
     if: needs.projects.outputs.sprint11 == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Gradle plus a single-profile kind cluster with Cilium, OpenBao, Kafka, analytics and the observability stack.
     timeout-minutes: 90
     env:
@@ -1242,7 +1242,7 @@ jobs:
     needs: projects
     if: needs.projects.outputs.sprint11 == 'true'
     # A public-repository Ubuntu runner has 4 vCPUs / 16 GB; Jenkins owns the full build on its separate agent.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
       BANK_ALLOW_PLAINTEXT_TEST_SECRETS: 'true'

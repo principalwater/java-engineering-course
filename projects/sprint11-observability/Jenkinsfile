@@ -3,11 +3,11 @@ pipeline {
     options {
         skipDefaultCheckout(true)
         disableConcurrentBuilds()
-        timeout(time: 75, unit: 'MINUTES')
+        // Холодный Docker-демон агента скачивает образ узла kind, Cilium, OpenBao, Kafka и стек наблюдаемости, поэтому запас больше, чем у Sprint 10.
+        timeout(time: 120, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '10'))
     }
     environment {
-        BANK_ALLOW_PLAINTEXT_TEST_SECRETS = 'true'
         TESTCONTAINERS_RYUK_CONTAINER_IMAGE = 'ghcr.io/testcontainers/ryuk@sha256:dd3f023a6ed7015b3f95a49ccd65a2daf0c56e681422c12952b19a810dfa6298'
     }
     stages {
@@ -15,71 +15,189 @@ pipeline {
             steps {
                 checkout scm
                 script {
-                    env.BANK_STATE = "${pwd(tmp: true)}/bank10-state"
-                    env.BANK_SECRETS_DIR = "${pwd(tmp: true)}/bank10-secrets"
-                    env.BANK_PYTHON = "${pwd(tmp: true)}/bank10-python/bin/python"
+                    def temporary = pwd(tmp: true)
+                    env.BANK_PROJECT = "${env.WORKSPACE}/projects/sprint11-observability"
+                    env.BANK_STATE = "${temporary}/bank11-state"
+                    env.BANK_RUNNER = "${temporary}/bank11-runner"
+                    env.BANK_PYTHON_HOME = "${temporary}/bank11-python"
+                    env.BANK_PYTHON = "${temporary}/bank11-python/bin/python"
+                    def system = sh(returnStdout: true, script: 'uname -s').trim()
+                    env.BANK_AGENT_SYSTEM = system
+                    // Файловые тестовые секреты разрешены только изолированному одноразовому Linux CI-агенту: в нём
+                    // лежит лишь сид тестового OpenBao, его recovery-ключ и тестовые сертификаты, а не данные пользователя.
+                    // Любой другой агент (например macOS) обязан принести зашифрованный AES-источник: путь его
+                    // смонтированного тома задаёт среда агента.
+                    if (system == 'Linux') {
+                        env.BANK_ALLOW_PLAINTEXT_TEST_SECRETS = 'true'
+                        env.BANK_SECRETS_DIR = "${temporary}/bank11-secrets"
+                    } else {
+                        env.BANK_SECRETS_DIR = sh(returnStdout: true, script: 'printf %s "${BANK_SECRETS_DIR:-}"').trim()
+                        if (!env.BANK_SECRETS_DIR) {
+                            error 'A non-Linux agent must provide BANK_SECRETS_DIR pointing at its unlocked encrypted secret mount'
+                        }
+                    }
+                    echo "Running on agent ${env.NODE_NAME} (${system})"
                 }
+                // Ветка проекта должна содержать инфраструктуру Sprint 11: иначе ошибка всплыла бы только на середине
+                // долгого прогона, после сборки Gradle и создания кластера.
+                sh '''
+                    command -v free > /dev/null && free -m || true
+                    nproc || true
+                    df -h "$(dirname "$BANK_STATE")"
+                    for required in .github/scripts/setup-observability.sh infra/kubernetes/secrets.tf "$BANK_PROJECT/deployment/scripts/verify-observability.py"; do
+                        test -f "$required" || { echo "Missing $required: rebase the project branch onto the Sprint 11 infrastructure first" >&2; exit 1; }
+                    done
+                '''
+            }
+        }
+        stage('Install verified tools') {
+            steps {
+                sh 'python3 -m venv "$BANK_PYTHON_HOME"'
+                sh '"$BANK_PYTHON" -m pip install --disable-pip-version-check -r "$BANK_PROJECT/deployment/kubernetes/requirements.txt"'
+                script {
+                    // Общий скрипт сверяет архивы promtool и amtool с контрольными суммами вендора. Он написан под
+                    // GitHub Actions: каталог задаёт RUNNER_TEMP, а добавляемые в PATH пути он дописывает в GITHUB_PATH.
+                    // На агенте не-Linux promtool и amtool должны уже быть в PATH.
+                    if (env.BANK_AGENT_SYSTEM == 'Linux') {
+                        sh '''
+                            mkdir -p "$BANK_RUNNER"
+                            rm -f "$BANK_RUNNER/github-path"
+                            RUNNER_TEMP="$BANK_RUNNER" GITHUB_PATH="$BANK_RUNNER/github-path" bash .github/scripts/setup-observability.sh
+                        '''
+                        // PATH агента читается его же оболочкой: Groovy видит окружение контроллера.
+                        env.PATH = sh(returnStdout: true, script: 'printf %s "$(paste -sd: "$BANK_RUNNER/github-path"):$PATH"').trim()
+                    }
+                }
+                // Тесты наблюдаемости пропускают отсутствующий checker, поэтому его наличие проверяется здесь.
+                sh 'promtool --version && amtool --version'
             }
         }
         stage('Build and test') {
             steps {
-                dir('projects/sprint10-kafka') {
-                    sh './gradlew --no-daemon --console=plain check packageDeployment'
+                dir('projects/sprint11-observability') {
+                    sh './gradlew --no-daemon --console=plain --max-workers=2 check packageDeployment'
                 }
             }
         }
-        stage('Validate deployment') {
+        stage('Validate scripts, chart, OpenBao and observability contracts') {
             steps {
-                sh 'python3 -m venv "$BANK_STATE/../bank10-python"'
-                sh '"$BANK_PYTHON" -m pip install -r projects/sprint10-kafka/deployment/kubernetes/requirements.txt'
-                dir('projects/sprint10-kafka') {
+                dir('projects/sprint11-observability') {
                     sh '''
                         "$BANK_PYTHON" -m unittest discover -s deployment/scripts
                         "$BANK_PYTHON" -m unittest discover -s deployment/kubernetes -p 'test_*.py'
-                        "$BANK_PYTHON" deployment/scripts/init-secrets.py
-                        "$BANK_PYTHON" deployment/scripts/init-tls.py
-                        "$BANK_PYTHON" deployment/kubernetes/prepare.py --output-dir "$BANK_STATE" --superset
-                        if test -f "$BANK_STATE/cluster.json"; then
-                            "$BANK_PYTHON" deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" resume
-                        else
-                            "$BANK_PYTHON" deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" create --secrets-dir "$BANK_SECRETS_DIR"
-                        fi
-                        "$BANK_PYTHON" deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" secrets --secrets-dir "$BANK_SECRETS_DIR"
-                        "$BANK_PYTHON" deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" load-images
+                        "$BANK_PYTHON" -m unittest discover -s deployment/jenkins -p 'test_*.py'
                     '''
                 }
             }
         }
-        stage('Deploy reviewed plan') {
+        stage('Generate secret source and TLS material') {
             steps {
+                dir('projects/sprint11-observability') {
+                    sh '''
+                        "$BANK_PYTHON" deployment/scripts/init-secrets.py
+                        "$BANK_PYTHON" deployment/scripts/init-tls.py
+                        "$BANK_PYTHON" deployment/scripts/init-internal-tls.py
+                    '''
+                }
+            }
+        }
+        stage('Prepare values and create the isolated cluster') {
+            steps {
+                // Telegram выключен (значение по умолчанию): у CI нет настоящего токена и чата. Исходники и JAR
+                // дальше не меняются, поэтому одной подготовки хватает на все фазы развёртывания.
+                // Состояние сохраняется между сборками: остановленный кластер продолжается, а не создаётся заново.
                 sh '''
-                    "$BANK_PYTHON" infra/kubernetes/deploy.py plan --project-dir "$PWD/projects/sprint10-kafka" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
-                    "$BANK_PYTHON" infra/kubernetes/deploy.py apply --project-dir "$PWD/projects/sprint10-kafka" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
-                    "$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" ready
+                    "$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/prepare.py" --output-dir "$BANK_STATE" --environment test --profile single --external-port 8460 --analytics
+                    if test -f "$BANK_STATE/cluster.json"; then
+                        "$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/runtime.py" --state-dir "$BANK_STATE" resume
+                    else
+                        node_image="$("$BANK_PYTHON" -c 'import sys; sys.path.insert(0, sys.argv[1]); import runtime; print(runtime.NODE_IMAGE)' "$BANK_PROJECT/deployment/kubernetes")"
+                        docker pull "$node_image"
+                        "$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/runtime.py" --state-dir "$BANK_STATE" create --secrets-dir "$BANK_SECRETS_DIR" --environment test --profile single --external-port 8460
+                    fi
                 '''
             }
         }
-        stage('Verify real services and recovery') {
+        stage('Install trust, OpenBao TLS, Cilium and the Kafka operator') {
+            steps {
+                // TLS-секрету OpenBao нужен namespace bank11-system, который runtime создаёт до любого релиза.
+                sh '''
+                    "$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/runtime.py" --state-dir "$BANK_STATE" secrets --secrets-dir "$BANK_SECRETS_DIR"
+                    "$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/bao.py" --state-dir "$BANK_STATE" tls --secrets-dir "$BANK_SECRETS_DIR"
+                    "$BANK_PYTHON" infra/kubernetes/deploy.py plan --operator-only --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+                    "$BANK_PYTHON" infra/kubernetes/deploy.py apply --operator-only --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+                '''
+            }
+        }
+        stage('Install OpenBao and External Secrets Operator') {
             steps {
                 sh '''
-                    "$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/probe.py --state-dir "$BANK_STATE" security
-                    "$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/probe.py --state-dir "$BANK_STATE" persistence
-                    "$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/probe.py --state-dir "$BANK_STATE" lifecycle
-                    "$BANK_PYTHON" projects/sprint10-kafka/deployment/scripts/verify-runtime.py --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR" --analytics --faults
-                    "$BANK_PYTHON" infra/kubernetes/deploy.py noop --project-dir "$PWD/projects/sprint10-kafka" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+                    "$BANK_PYTHON" infra/kubernetes/deploy.py plan --secrets-only --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+                    "$BANK_PYTHON" infra/kubernetes/deploy.py apply --secrets-only --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
                 '''
+            }
+        }
+        stage('Initialize, configure and seed OpenBao') {
+            steps {
+                sh '''
+                    "$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/bao.py" --state-dir "$BANK_STATE" bootstrap --secrets-dir "$BANK_SECRETS_DIR"
+                    "$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/bao.py" --state-dir "$BANK_STATE" configure --secrets-dir "$BANK_SECRETS_DIR"
+                    "$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/bao.py" --state-dir "$BANK_STATE" import --secrets-dir "$BANK_SECRETS_DIR"
+                '''
+            }
+        }
+        stage('Load images and apply the reviewed plan') {
+            steps {
+                // Образы загружаются только после packageDeployment: их адреса содержимого совпадают с упакованными JAR.
+                sh '''
+                    "$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/runtime.py" --state-dir "$BANK_STATE" load-images
+                    "$BANK_PYTHON" infra/kubernetes/deploy.py plan --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+                    "$BANK_PYTHON" infra/kubernetes/deploy.py apply --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+                    "$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/runtime.py" --state-dir "$BANK_STATE" ready
+                '''
+            }
+        }
+        stage('Verify OpenBao seal recovery') {
+            steps {
+                sh '"$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/bao.py" --state-dir "$BANK_STATE" verify --secrets-dir "$BANK_SECRETS_DIR" --exercise-seal'
+            }
+        }
+        stage('Verify dual-stack policy, Kafka TLS, ACLs, persistence and lifecycle') {
+            steps {
+                sh '''
+                    "$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/probe.py" --state-dir "$BANK_STATE" network
+                    "$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/probe.py" --state-dir "$BANK_STATE" security
+                    "$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/probe.py" --state-dir "$BANK_STATE" persistence
+                    "$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/probe.py" --state-dir "$BANK_STATE" lifecycle
+                '''
+            }
+        }
+        stage('Verify real bank services and recovery') {
+            steps {
+                sh '"$BANK_PYTHON" "$BANK_PROJECT/deployment/scripts/verify-runtime.py" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR" --analytics --faults'
+            }
+        }
+        stage('Verify metrics, alerts, traces and logs') {
+            steps {
+                sh '"$BANK_PYTHON" "$BANK_PROJECT/deployment/scripts/verify-observability.py" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"'
+            }
+        }
+        stage('Verify the repeated plan') {
+            steps {
+                sh '"$BANK_PYTHON" infra/kubernetes/deploy.py noop --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"'
             }
         }
     }
     post {
         always {
-            junit testResults: 'projects/sprint10-kafka/**/build/test-results/**/*.xml', allowEmptyResults: true
-            archiveArtifacts artifacts: 'projects/sprint10-kafka/build/deployment/*.jar,projects/sprint10-kafka/**/build/libs/*-stubs.jar', allowEmptyArchive: true
+            junit testResults: 'projects/sprint11-observability/**/build/test-results/**/*.xml', allowEmptyResults: true
+            archiveArtifacts artifacts: 'projects/sprint11-observability/build/deployment/*.jar,projects/sprint11-observability/**/build/libs/*-stubs.jar', allowEmptyArchive: true
         }
         cleanup {
+            // Только остановка: PVC, образы, секреты и состояние развёртывания сохраняются для следующей сборки.
             sh '''
                 if test -n "${BANK_STATE:-}" && test -f "$BANK_STATE/cluster.json"; then
-                    "$BANK_PYTHON" projects/sprint10-kafka/deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" stop
+                    "$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/runtime.py" --state-dir "$BANK_STATE" stop
                 fi
             '''
         }

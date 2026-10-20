@@ -17,6 +17,7 @@ jobs:
       sprint08: ${{ steps.detect.outputs.sprint08 }}
       sprint09: ${{ steps.detect.outputs.sprint09 }}
       sprint10: ${{ steps.detect.outputs.sprint10 }}
+      sprint11: ${{ steps.detect.outputs.sprint11 }}
       exercises: ${{ steps.detect.outputs.exercises }}
       observability: ${{ steps.detect.outputs.observability }}
       kafka: ${{ steps.detect.outputs.kafka }}
@@ -74,6 +75,11 @@ jobs:
             echo "sprint10=true" >> "$GITHUB_OUTPUT"
           else
             echo "sprint10=false" >> "$GITHUB_OUTPUT"
+          fi
+          if test -f projects/sprint11-observability/build.gradle; then
+            echo "sprint11=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sprint11=false" >> "$GITHUB_OUTPUT"
           fi
           if test -f exercises/sprint01/junit5/pom.xml; then
             echo "exercises=true" >> "$GITHUB_OUTPUT"
@@ -1090,4 +1096,188 @@ jobs:
         run: |
           if test -f "$BANK_STATE/cluster.json"; then
             python3 projects/sprint10-kafka/deployment/kubernetes/runtime.py --state-dir "$BANK_STATE" stop
+          fi
+
+  sprint11:
+    needs: projects
+    if: needs.projects.outputs.sprint11 == 'true'
+    runs-on: ubuntu-latest
+    # Gradle plus a single-profile kind cluster with Cilium, OpenBao, Kafka, analytics and the observability stack.
+    timeout-minutes: 90
+    env:
+      BANK_ALLOW_PLAINTEXT_TEST_SECRETS: 'true'
+      BANK_PROJECT: ${{ github.workspace }}/projects/sprint11-observability
+      TESTCONTAINERS_RYUK_CONTAINER_IMAGE: ghcr.io/testcontainers/ryuk@sha256:dd3f023a6ed7015b3f95a49ccd65a2daf0c56e681422c12952b19a810dfa6298
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select isolated deployment paths
+        run: |
+          free -m
+          nproc
+          df -h "$RUNNER_TEMP"
+          {
+            echo "BANK_SECRETS_DIR=$RUNNER_TEMP/bank11-secrets"
+            echo "BANK_STATE=$RUNNER_TEMP/bank11-state"
+          } >> "$GITHUB_ENV"
+      - name: Set up Java 21 and Gradle cache
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: |
+            projects/sprint11-observability/**/*.gradle
+            projects/sprint11-observability/gradle/wrapper/gradle-wrapper.properties
+      - name: Set up Node 24.4 for the Gradle-owned Astro build
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24.4.0'
+          cache: npm
+          cache-dependency-path: projects/sprint11-observability/services/front/ui/package-lock.json
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: '1.11.6'
+          tofu_wrapper: false
+      - name: Install verified Kubernetes tools and deployment parser
+        run: |
+          bash .github/scripts/setup-kubernetes.sh
+          python3 -m venv "$RUNNER_TEMP/bank11-python"
+          "$RUNNER_TEMP/bank11-python/bin/pip" install -r "$BANK_PROJECT/deployment/kubernetes/requirements.txt"
+          echo "$RUNNER_TEMP/bank11-python/bin" >> "$GITHUB_PATH"
+      - name: Install verified Prometheus and Alertmanager configuration checkers
+        run: bash .github/scripts/setup-observability.sh
+      - name: Check all services and real Kafka producer-consumer contracts
+        working-directory: projects/sprint11-observability
+        run: ./gradlew --no-daemon --console=plain --max-workers=2 check packageDeployment
+      - name: Validate the Jenkins pipeline with the official controller
+        run: bash .github/scripts/verify-jenkinsfile.sh projects/sprint11-observability/Jenkinsfile
+      - name: Verify secret lifecycle TLS Helm chart OpenBao and observability contracts
+        working-directory: projects/sprint11-observability
+        run: |
+          # The observability tests skip a checker that is missing from PATH; fail here instead.
+          promtool --version
+          amtool --version
+          python3 -m unittest discover -s deployment/scripts
+          python3 -m unittest discover -s deployment/kubernetes -p 'test_*.py'
+          python3 -m unittest discover -s deployment/jenkins -p 'test_*.py'
+      - name: Generate the private secret source and TLS material
+        working-directory: projects/sprint11-observability
+        run: |
+          python3 deployment/scripts/init-secrets.py
+          python3 deployment/scripts/init-tls.py
+          python3 deployment/scripts/init-internal-tls.py
+      # Telegram delivery stays off (the default): CI has no real bot token or chat. Sources and packaged JARs
+      # are fixed from here on, so one preparation stays valid for every deployment phase.
+      - name: Prepare public values and create the isolated kind cluster
+        run: |
+          python3 "$BANK_PROJECT/deployment/kubernetes/prepare.py" --output-dir "$BANK_STATE" \
+            --environment test --profile single --external-port 8460 --analytics
+          python3 "$BANK_PROJECT/deployment/kubernetes/runtime.py" --state-dir "$BANK_STATE" create \
+            --secrets-dir "$BANK_SECRETS_DIR" --environment test --profile single --external-port 8460
+      # The OpenBao TLS Secret needs the owned bank11-system namespace, which the runtime creates before any release.
+      - name: Create owned namespaces and install the OpenBao TLS material
+        run: |
+          python3 "$BANK_PROJECT/deployment/kubernetes/runtime.py" --state-dir "$BANK_STATE" secrets --secrets-dir "$BANK_SECRETS_DIR"
+          python3 "$BANK_PROJECT/deployment/kubernetes/bao.py" --state-dir "$BANK_STATE" tls --secrets-dir "$BANK_SECRETS_DIR"
+      - name: Bootstrap Cilium and the Kafka operator
+        run: |
+          python3 infra/kubernetes/deploy.py plan --operator-only --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+          python3 infra/kubernetes/deploy.py apply --operator-only --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+      - name: Install pinned OpenBao and External Secrets Operator
+        run: |
+          python3 infra/kubernetes/deploy.py plan --secrets-only --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+          python3 infra/kubernetes/deploy.py apply --secrets-only --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+      - name: Initialize, configure and seed OpenBao
+        run: |
+          python3 "$BANK_PROJECT/deployment/kubernetes/bao.py" --state-dir "$BANK_STATE" bootstrap --secrets-dir "$BANK_SECRETS_DIR"
+          python3 "$BANK_PROJECT/deployment/kubernetes/bao.py" --state-dir "$BANK_STATE" configure --secrets-dir "$BANK_SECRETS_DIR"
+          python3 "$BANK_PROJECT/deployment/kubernetes/bao.py" --state-dir "$BANK_STATE" import --secrets-dir "$BANK_SECRETS_DIR"
+      # Images are loaded only after packageDeployment, so their content addresses match the packaged JARs.
+      - name: Load content-addressed images into the isolated cluster
+        run: python3 "$BANK_PROJECT/deployment/kubernetes/runtime.py" --state-dir "$BANK_STATE" load-images
+      - name: Review and apply the isolated Helm deployment plan
+        run: |
+          python3 infra/kubernetes/deploy.py plan --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+          python3 infra/kubernetes/deploy.py apply --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+          python3 "$BANK_PROJECT/deployment/kubernetes/runtime.py" --state-dir "$BANK_STATE" ready
+      - name: Verify OpenBao seal recovery
+        run: python3 "$BANK_PROJECT/deployment/kubernetes/bao.py" --state-dir "$BANK_STATE" verify --secrets-dir "$BANK_SECRETS_DIR" --exercise-seal
+      - name: Verify Kafka TLS ACLs and persistent data across broker restart
+        run: |
+          python3 "$BANK_PROJECT/deployment/kubernetes/probe.py" --state-dir "$BANK_STATE" security
+          python3 "$BANK_PROJECT/deployment/kubernetes/probe.py" --state-dir "$BANK_STATE" network
+          python3 "$BANK_PROJECT/deployment/kubernetes/probe.py" --state-dir "$BANK_STATE" persistence
+          python3 "$BANK_PROJECT/deployment/kubernetes/probe.py" --state-dir "$BANK_STATE" lifecycle
+      - name: Verify real bank UI API money notification and projection recovery
+        run: python3 "$BANK_PROJECT/deployment/scripts/verify-runtime.py" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR" --analytics --faults
+      - name: Verify metrics alerts traces and logs in the deployed observability stack
+        run: python3 "$BANK_PROJECT/deployment/scripts/verify-observability.py" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+      - name: Verify the repeated deployment plan
+        run: python3 infra/kubernetes/deploy.py noop --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
+      - name: Upload executable artifacts and contract evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sprint11-java21
+          path: |
+            projects/sprint11-observability/build/deployment/*.jar
+            projects/sprint11-observability/services/*/build/libs/*-stubs.jar
+            projects/sprint11-observability/libraries/*/build/libs/*-stubs.jar
+            projects/sprint11-observability/services/*/build/test-results/
+            projects/sprint11-observability/libraries/*/build/test-results/
+            projects/sprint11-observability/services/*/build/reports/tests/
+            projects/sprint11-observability/libraries/*/build/reports/tests/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Stop only owned Kubernetes workloads and preserve persistent data
+        if: always()
+        run: |
+          if test -n "${BANK_STATE:-}" && test -f "$BANK_STATE/cluster.json"; then
+            python3 "$BANK_PROJECT/deployment/kubernetes/runtime.py" --state-dir "$BANK_STATE" stop
+          fi
+
+  sprint11-jenkins:
+    needs: projects
+    if: needs.projects.outputs.sprint11 == 'true'
+    # A public-repository Ubuntu runner has 4 vCPUs / 16 GB; Jenkins owns the full build on its separate agent.
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      BANK_ALLOW_PLAINTEXT_TEST_SECRETS: 'true'
+      BANK_JENKINS_SCRIPT: ${{ github.workspace }}/projects/sprint11-observability/deployment/jenkins/ci.py
+    steps:
+      - name: Check out the exact source commit with its full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify the runner budget and select private runtime paths
+        run: |
+          free -m
+          nproc
+          df -h "$RUNNER_TEMP"
+          awk '/^MemTotal:/ { if ($2 < 15 * 1024 * 1024) { print "The full Jenkins pipeline requires a 16 GB runner" > "/dev/stderr"; exit 1 } }' /proc/meminfo
+          {
+            echo "BANK_JENKINS_HOME=$RUNNER_TEMP/bank11-jenkins-state"
+            echo "BANK_JENKINS_SECRETS_DIR=$RUNNER_TEMP/bank11-jenkins-secrets"
+          } >> "$GITHUB_ENV"
+      - name: Initialize private CI identities
+        run: python3 "$BANK_JENKINS_SCRIPT" init
+      - name: Start the controller and dedicated inbound agent with a TLS Docker daemon
+        timeout-minutes: 40
+        run: python3 "$BANK_JENKINS_SCRIPT" up
+      # The committed Jenkinsfile performs Gradle, OpenBao/ESO, Cilium, Kafka, analytics and observability checks.
+      # Its test environment leaves Telegram off; no application credentials or raw Jenkins console are published.
+      - name: Run the full Jenkins pipeline and verify its agent, commit and controller executors
+        timeout-minutes: 130
+        run: python3 "$BANK_JENKINS_SCRIPT" build
+      - name: Stop only the owned Jenkins containers
+        if: always()
+        timeout-minutes: 8
+        run: |
+          if test -n "${BANK_JENKINS_SECRETS_DIR:-}" && test -f "$BANK_JENKINS_SCRIPT"; then
+            python3 "$BANK_JENKINS_SCRIPT" stop --force
           fi

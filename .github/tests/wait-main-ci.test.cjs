@@ -39,8 +39,21 @@ test('main CI waits through missing and running states, with a bounded deadline'
   t.mock.timers.tick(30000);
   assert.equal((await pending).conclusion, 'success');
 
+  // A cold controller/agent image build plus the full Jenkins pipeline may outlast the native job budget.
+  let building = true;
+  const extended = fixture([]);
+  extended.github.rest.actions.listWorkflowRuns = async () => ({data: {workflow_runs:
+    [{...successful, status: building ? 'in_progress' : 'completed'}]}});
+  const jenkins = waitForMainCI(extended);
+  await new Promise(setImmediate);
+  t.mock.timers.tick(150 * 60 * 1000);
+  await new Promise(setImmediate);
+  building = false;
+  t.mock.timers.tick(30000);
+  assert.equal((await jenkins).conclusion, 'success');
+
   const timeout = assert.rejects(waitForMainCI(fixture([])), /Timed out waiting/);
   await new Promise(setImmediate);
-  t.mock.timers.tick(22 * 60 * 1000);
+  t.mock.timers.tick(210 * 60 * 1000);
   await timeout;
 });

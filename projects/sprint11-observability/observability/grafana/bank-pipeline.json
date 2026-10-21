@@ -942,7 +942,7 @@
     {
       "type": "timeseries",
       "title": "Dead letter queue size",
-      "description": "Retained quarantine bytes, not duplicate create conflicts. Inspect and resolve the protected DLQ before clearing its data.",
+      "description": "Retained quarantine bytes, not duplicate create conflicts. An empty Logstash 9.5.5 DLQ may contain a 1-byte segment header; values above 1 B require investigation. Inspect and resolve the protected DLQ before clearing its data.",
       "datasource": {
         "type": "prometheus",
         "uid": "bank-prometheus"

@@ -228,7 +228,7 @@ class TraceAndLogTest(unittest.TestCase):
         trace = trace_fixture()
         document = {"traceId": trace[0]["traceId"], "spanId": trace[1]["id"]}
         cases = ((200, [], 0), (404, {}, 0), (200, trace, 1), (200, [trace[0]], 0),
-                 (200, [{**trace[0], "traceId": "2" * 32}], 0))
+                 (200, [{**trace[1], "traceId": "2" * 32}], 0))
         for status, returned, matches in cases:
             with self.subTest(status=status, returned=returned), api(lambda path, body: (status, returned)) as port:
                 self.assertEqual(matches, observability.correlated_logs(port, [document]))

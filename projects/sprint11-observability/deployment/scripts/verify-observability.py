@@ -724,7 +724,10 @@ def analyze_logs(documents, services, needles, *, require_debug=False):
 
 def correlated_logs(port, documents):
     """Считает реальные совпадения traceId/spanId; Zipkin может вернуть HTTP 200 с пустым массивом."""
-    pairs = sorted({(doc["traceId"], doc["spanId"]) for doc in documents if doc.get("traceId") and doc.get("spanId")})[:LOG_TRACE_SAMPLE]
+    # Elasticsearch уже упорядочил события по убыванию времени; старые логи переживают память Zipkin.
+    pairs = list(dict.fromkeys(
+        (doc["traceId"], doc["spanId"]) for doc in documents if doc.get("traceId") and doc.get("spanId")
+    ))[:LOG_TRACE_SAMPLE]
     traces, matches = {}, 0
     for trace_id, span_id in pairs:
         if trace_id not in traces:

@@ -227,9 +227,25 @@ class TraceAndLogTest(unittest.TestCase):
     def test_log_correlation_requires_the_actual_logged_span(self):
         trace = trace_fixture()
         document = {"traceId": trace[0]["traceId"], "spanId": trace[1]["id"]}
-        for returned, matches in (([], 0), (trace, 1), ([{**trace[0], "traceId": "2" * 32}], 0)):
-            with self.subTest(returned=returned), api(lambda path, body: (200, returned)) as port:
+        cases = ((200, [], 0), (404, {}, 0), (200, trace, 1), (200, [trace[0]], 0),
+                 (200, [{**trace[0], "traceId": "2" * 32}], 0))
+        for status, returned, matches in cases:
+            with self.subTest(status=status, returned=returned), api(lambda path, body: (status, returned)) as port:
                 self.assertEqual(matches, observability.correlated_logs(port, [document]))
+
+    def test_log_correlation_samples_recent_pairs_before_retired_traces(self):
+        recent = {"traceId": "f" * 32, "spanId": "f" * 16}
+        stale = [{"traceId": f"{index:032x}", "spanId": f"{index:016x}"}
+                 for index in range(1, observability.LOG_TRACE_SAMPLE + 2)]
+        requests = []
+        def respond(path, body):
+            requests.append(path)
+            if path.endswith(recent["traceId"]):
+                return 200, [{"traceId": recent["traceId"], "id": recent["spanId"]}]
+            return 404, {}
+        with api(respond) as port:
+            self.assertEqual(1, observability.correlated_logs(port, [recent, recent, *stale]))
+        self.assertEqual(observability.LOG_TRACE_SAMPLE, len(requests))
 
 
 class RuntimeBoundaryTest(unittest.TestCase):

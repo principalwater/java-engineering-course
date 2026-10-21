@@ -375,6 +375,16 @@ def verify_profiles(alice, bob):
     return a, b
 
 
+def _verify_withdrawal_rejection(user):
+    before = user.account()["balanceMinor"]
+    command = cash(before + 1000, "WITHDRAW")
+    require(command["amountMinor"] <= 1_000_000_000_000, "Demo balance exceeds the bounded fixture budget")
+    rejected = user.money("/ui/cash", command)
+    require(rejected.get("status") == "REJECTED" and rejected.get("error") == "INSUFFICIENT_FUNDS", "Missing terminal rejection")
+    require(user.account()["balanceMinor"] == before, "Rejected withdrawal changed balance")
+    return command, rejected
+
+
 def verify_money(alice, bob, containers):
     a, b = alice.account(), bob.account()
     initial = a["balanceMinor"]
@@ -397,10 +407,7 @@ def verify_money(alice, bob, containers):
     require(alice.money("/ui/transfers", amount) == sent, "Transfer replay changed outcome")
     require(alice.account()["balanceMinor"] == before - 500 and bob.account()["balanceMinor"] == before_b + 500,
             "Transfer did not conserve the two own balances")
-    rejected_command = cash(alice.account()["balanceMinor"] + 1000, "WITHDRAW")
-    require(rejected_command["amountMinor"] <= 1_000_000_000_000, "Demo balance exceeds the bounded fixture budget")
-    rejected = alice.money("/ui/cash", rejected_command)
-    require(rejected.get("status") == "REJECTED" and rejected.get("error") == "INSUFFICIENT_FUNDS", "Missing terminal rejection")
+    rejected_command, rejected = _verify_withdrawal_rejection(alice)
     assert_success(alice.money("/ui/cash", cash(2000)))
     require(alice.money("/ui/cash", rejected_command) == rejected, "Rejected command changed after top-up")
     require(scalar(containers, "SELECT count(*) FROM accounts.ledger_entry WHERE owner_id='" + checked_uuid(a["accountId"])
@@ -704,6 +711,9 @@ def main():
                 recovery = importlib.util.module_from_spec(specification)
                 specification.loader.exec_module(recovery)
                 recovery.verify_analytics_failures(sys.modules[__name__], users, identity)
+            # Перезапуск Accounts сбрасывает process-local counter; новый реальный отказ проверяет текущую JVM.
+            _verify_withdrawal_rejection(users["alice"])
+            print("PASS committed withdrawal rejection after recovery; balance unchanged")
     finally:
         for user in users.values():
             if user is not None:

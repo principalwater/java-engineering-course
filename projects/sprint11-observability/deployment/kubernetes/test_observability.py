@@ -552,11 +552,21 @@ class RenderedChartTest(unittest.TestCase):
                     self.assertEqual(level, clients[f"{service}-client"]["data"]["LOGGING_LEVEL_DEV_PRINCIPALWATER_BANK"])
                     self.assertEqual(sampling, clients[f"{service}-client"]["data"]["MANAGEMENT_TRACING_SAMPLING_PROBABILITY"])
 
-    def test_logging_can_be_switched_off_without_touching_metrics_and_traces(self):
-        workloads = self.workloads(overrides=("global.observability.logging.enabled=false",))
-        self.assertEqual(set(workloads), LONG_RUNNING - {"elasticsearch", "kibana", "logstash"})
-        names = set(objects(overrides=("global.observability.logging.enabled=false",)))
-        self.assertFalse({"elasticsearch-data", "logstash-data"} & names)
+    def test_observability_switches_disable_exporters_with_their_destination_workloads(self):
+        for enabled, logging in ((True, True), (True, False), (False, True), (False, False)):
+            with self.subTest(observability=enabled, logging=logging):
+                overrides = (f"global.observability.enabled={str(enabled).lower()}",
+                             f"global.observability.logging.enabled={str(logging).lower()}")
+                workloads = self.workloads(analytics=True, overrides=overrides)
+                expected = LONG_RUNNING if logging else LONG_RUNNING - {"elasticsearch", "kibana", "logstash"}
+                self.assertEqual(set(workloads), expected if enabled else set())
+                resources = objects(analytics=True, overrides=overrides)
+                if not enabled or not logging:
+                    self.assertFalse({"elasticsearch-data", "logstash-data"} & set(resources))
+                for service in ("accounts", "cash", "transfer", "notifications", "front", "gateway", "analytics"):
+                    environment = resources[f"{service}-client"]["data"]
+                    self.assertEqual(str(enabled).lower(), environment["MANAGEMENT_ZIPKIN_TRACING_EXPORT_ENABLED"])
+                    self.assertEqual("tls" if enabled and logging else "none", environment["BANK_LOGGING_LOGSTASH_TRANSPORT"])
 
     def test_memory_requests_fit_the_vm_after_the_rest_of_the_release(self):
         for analytics in (False, True):

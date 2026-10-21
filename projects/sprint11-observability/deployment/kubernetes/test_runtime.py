@@ -90,6 +90,29 @@ class ClusterCreationTest(unittest.TestCase):
                     runtime.lifecycle(arguments, stop=True)
                 self.assertFalse(mutations)
 
+    def test_resume_refuses_api_readiness_deadline_before_restoring_scheduling(self):
+        # Не готовый после cold start API не должен пропускать uncordon и работу с OpenBao.
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            kubeconfig = state / "kubeconfig"
+            kubeconfig.touch()
+            node = "bank11-dev-single-control-plane"
+            identity = {"cluster": "bank11-dev-single", "namespace": "bank11-dev",
+                        "kubeconfig": str(kubeconfig), "context": "kind-bank11-dev-single",
+                        "nodes": {node: "a" * 64}}
+            scheduling = state / "scheduling.json"
+            scheduling.write_text(json.dumps({node: False}))
+            (state / "creation.json").write_text(json.dumps({"secrets_dir": str(state / "source")}))
+            with patch.object(runtime, "owned_identity", return_value=identity), \
+                    patch.object(runtime, "command"), patch.object(runtime, "kubectl", return_value="") as kubectl, \
+                    patch.object(runtime.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)), \
+                    patch.object(runtime.time, "monotonic", side_effect=[0, 1, 180]), \
+                    patch.object(runtime.time, "sleep"):
+                with self.assertRaisesRegex(RuntimeError, "API readiness timed out"):
+                    runtime.lifecycle(argparse.Namespace(state_dir=state), stop=False)
+            kubectl.assert_not_called()
+            self.assertEqual(json.loads(scheduling.read_text()), {node: False})
+
     def test_resume_distinguishes_partial_bootstrap_from_missing_initialized_openbao(self):
         import bao
         for installed, recovery in ((False, False), (False, True), (True, True)):

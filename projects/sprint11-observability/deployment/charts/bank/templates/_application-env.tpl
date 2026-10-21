@@ -13,10 +13,10 @@ SPRING_CLOUD_ZOOKEEPER_DISCOVERY_INSTANCE_SSL_PORT: "8443"
 BANK_CONFIG_IMPORT: {{ printf "zookeeper:,vault:///kv/%s/%s" $root.Release.Namespace $name | quote }}
 BANK_VAULT_ENABLED: "true"
 BANK_VAULT_ROLE: {{ printf "%s-%s" $root.Release.Namespace $name | quote }}
-MANAGEMENT_ZIPKIN_TRACING_EXPORT_ENABLED: "true"
+MANAGEMENT_ZIPKIN_TRACING_EXPORT_ENABLED: {{ $root.Values.global.observability.enabled | quote }}
 MANAGEMENT_TRACING_SAMPLING_PROBABILITY: {{ ternary "0.1" "1.0" (eq $root.Values.global.environment "prod") | quote }}
 LOGGING_LEVEL_DEV_PRINCIPALWATER_BANK: {{ ternary "INFO" "DEBUG" (eq $root.Values.global.environment "prod") | quote }}
-BANK_LOGGING_LOGSTASH_TRANSPORT: tls
+BANK_LOGGING_LOGSTASH_TRANSPORT: {{ ternary "tls" "none" (and $root.Values.global.observability.enabled $root.Values.global.observability.logging.enabled) | quote }}
 BANK_LOGGING_LOGSTASH_TRUST_STORE: file:/tmp/bank-trust.jks
 BANK_LOGGING_LOGSTASH_TRUST_STORE_TYPE: JKS
 BANK_LOGGING_LOGSTASH_TRUST_STORE_PASSWORD: changeit

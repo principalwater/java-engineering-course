@@ -391,6 +391,8 @@ def lifecycle(args: argparse.Namespace, *, stop: bool) -> None:
             if result.returncode == 0:
                 break
             time.sleep(2)
+        else:
+            raise RuntimeError("Owned cluster API readiness timed out; scheduling and recovery remain unchanged")
         owned_identity(args.state_dir)
     import bao
     bao_scope = {**identity, "namespace": bao.OPENBAO_NAMESPACE}

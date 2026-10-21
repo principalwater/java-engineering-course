@@ -61,7 +61,8 @@ server:
     initialDelaySeconds: 30
     failureThreshold: 6
     periodSeconds: 10
-    timeoutSeconds: 3
+    # На общей локальной VM короткий CPU/IO stall не должен перезапечатывать исправный Raft-сервер.
+    timeoutSeconds: 10
   dataStorage:
     enabled: true
     size: 1Gi

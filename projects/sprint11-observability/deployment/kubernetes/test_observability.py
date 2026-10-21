@@ -1,8 +1,8 @@
 """Проверка ресурсов наблюдаемости и объектов из шаблонов чарта без работающего стенда.
 
-Статические проверки читают каталоги zipkin/, prometheus/, grafana/ и elk/; проверки шаблонов запускают
+Статические проверки читают каталоги observability/{zipkin,prometheus,grafana,elk}/; проверки шаблонов запускают
 `helm template` с файлами из этих каталогов в ConfigMap bank11-zipkin, bank11-prometheus, bank11-grafana и
-bank11-elk. Включаются только обычные файлы верхнего уровня; подкаталоги вроде prometheus/tests исключены.
+bank11-elk. Включаются только обычные файлы верхнего уровня; подкаталоги вроде observability/prometheus/tests исключены.
 Используются официальные promtool и amtool; при их отсутствии тесты пропускаются с указанием причины.
 """
 
@@ -26,6 +26,7 @@ from prepare import prepare, project_dir
 
 PROJECT = project_dir()
 CHART = PROJECT / "deployment/charts/bank"
+OBSERVABILITY = PROJECT / "observability"
 ASSET_DIRECTORIES = {"bank11-zipkin": "zipkin", "bank11-prometheus": "prometheus",
                      "bank11-grafana": "grafana", "bank11-elk": "elk"}
 PROMTOOL = shutil.which("promtool")
@@ -53,11 +54,11 @@ STRIMZI_OPERATOR_MIB = 384
 
 
 def asset_files(directory: str) -> dict[str, Path]:
-    return {path.name: path for path in sorted((PROJECT / directory).iterdir()) if path.is_file()}
+    return {path.name: path for path in sorted((OBSERVABILITY / directory).iterdir()) if path.is_file()}
 
 
 def asset_text(directory: str, name: str) -> str:
-    return (PROJECT / directory / name).read_text(encoding="utf-8")
+    return (OBSERVABILITY / directory / name).read_text(encoding="utf-8")
 
 
 def mebibytes(quantity: str) -> float:
@@ -308,7 +309,7 @@ class PromtoolTest(unittest.TestCase):
 
     def test_rules_and_their_unit_tests_pass(self):
         self.promtool("check", "rules", *[str(path) for name, path in asset_files("prometheus").items() if name.endswith(".rules.yml")])
-        tests = sorted((PROJECT / "prometheus/tests").glob("*.test.yml"))
+        tests = sorted((OBSERVABILITY / "prometheus/tests").glob("*.test.yml"))
         self.assertTrue(tests)
         self.promtool("test", "rules", *map(str, tests))
 

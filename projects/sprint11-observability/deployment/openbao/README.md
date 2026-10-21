@@ -17,7 +17,7 @@ root-токеном (только во внешнем зашифрованном
 | Команда | Действие (идемпотентно, секреты не печатаются) |
 |---|---|
 | `tls` | создаёт namespace `bank11-system` (метка владельца) и Secret `openbao-tls` (`tls.crt`, `tls.key`, `ca.crt`); изменённый материал не заменяет |
-| — | OpenTofu: `helm_release` `openbao` в `bank11-system`, `wait = false`, `values = [file(openbao/values.yaml)]`, чарт `oci://ghcr.io/openbao/charts/openbao@sha256:7d0ac0321c10c70d4fda3529416a33abb037d4cca01ab70c8acdf9a02b12adb8` |
+| - | OpenTofu: `helm_release` `openbao` в `bank11-system`, `wait = false`, `values = [file(deployment/openbao/values.yaml)]`, чарт `oci://ghcr.io/openbao/charts/openbao@sha256:7d0ac0321c10c70d4fda3529416a33abb037d4cca01ab70c8acdf9a02b12adb8` |
 | `bootstrap` | init (1 доля Shamir) один раз, recovery сохраняется до unseal, затем unseal и ожидание active |
 | `unseal` | только unseal после `runtime.py resume`/рестарта пода; init не выполняет |
 | `configure` | требует HMAC-аудит; монтирует KV v2 `kv/` и auth `kubernetes/`, пишет политики и роли |
@@ -45,7 +45,7 @@ Reset, adoption, ротации и восстановление из снимк�
 ## Пути, политики и роли
 
 Значение `bank11-<имя>` из `secret-bindings.json` хранится в `kv/<namespace>/<имя>` (ключ KV = целевое имя файла или
-свойство). Однострочные значения сохраняются без завершающего перевода строки, PEM-файлы — без изменений.
+свойство). Однострочные значения сохраняются без завершающего перевода строки, PEM-файлы - без изменений.
 Gateway получает отдельную роль для собственного TLS-ключа; OAuth2/БД-секреты ему не выдаются.
 
 | Кто | Роль и политика | Доступ |
@@ -60,14 +60,14 @@ Gateway получает отдельную роль для собственно
 
 - ServiceAccount `<сервис>` и `eso` создаёт чарт в namespace окружения (`bank11-dev` и т. д.).
 - Spring Cloud Vault: `spring.cloud.vault.uri=https://openbao.bank11-system.svc.cluster.local:8200`,
-  `authentication=KUBERNETES`, `kubernetes.role=<namespace>-<сервис>`, `kubernetes.service-account-token-file` —
+  `authentication=KUBERNETES`, `kubernetes.role=<namespace>-<сервис>`, `kubernetes.service-account-token-file` -
   projected-токен с `audience: openbao`, `kv.backend=kv`, trust store с `internal_ca.pem`,
   `spring.config.import=vault:///kv/<namespace>/<сервис>` (контекстное расположение: стандартное `vault://` читает ещё
   `<сервис>/<профиль>`, которые политика запрещает).
 - ESO: namespace-scoped `SecretStore` с `provider.openBao`: `server` как выше, `path: kv`, `version: v2`,
   `caProvider` с `ca.crt` из публичного ConfigMap; `auth.kubernetes.path: kubernetes`,
   `role: <namespace>-eso`, `serviceAccountRef: {name: eso, audiences: [openbao]}`.
-  `ExternalSecret.remoteRef.key = <namespace>/<имя>`, `property` — конкретное поле; `deletionPolicy: Retain`
+  `ExternalSecret.remoteRef.key = <namespace>/<имя>`, `property` - конкретное поле; `deletionPolicy: Retain`
   сохраняет последнюю подтверждённую копию при недоступности OpenBao.
 - Strimzi получает SCRAM-пароли из синхронизированных ESO Secrets через `KafkaUser.authentication.password.valueFrom`.
   Оператор самостоятельно выпускает CA/сертификаты Kafka: это производные идентичности кластера, как и короткие

@@ -203,7 +203,7 @@ def load_recovery(path: Path, cluster: str) -> dict:
 
 
 def expected_image() -> str:
-    image = yaml.safe_load((project_dir() / "openbao/values.yaml").read_text(encoding="utf-8"))["server"]["image"]
+    image = yaml.safe_load((project_dir() / "deployment/openbao/values.yaml").read_text(encoding="utf-8"))["server"]["image"]
     return f"{image['registry']}/{image['repository']}:{image['tag']}"
 
 

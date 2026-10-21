@@ -307,8 +307,8 @@ def expected_services(values, analytics):
 
 def public_logins(project):
     """Имена операторов берутся из скриптов начальной настройки: пароли хранятся отдельно, имена не секретны."""
-    grafana = (Path(project) / "grafana/grafana-bootstrap.sh").read_text(encoding="utf-8")
-    elastic = (Path(project) / "elk/elasticsearch-bootstrap.sh").read_text(encoding="utf-8")
+    grafana = (Path(project) / "observability/grafana/grafana-bootstrap.sh").read_text(encoding="utf-8")
+    elastic = (Path(project) / "observability/elk/elasticsearch-bootstrap.sh").read_text(encoding="utf-8")
     patterns = {
         "grafana_operator": (grafana, r"^login=([A-Za-z0-9_-]+)$"),
         "grafana_admin": (grafana, r'user = "([A-Za-z0-9_-]+):%s"'),
@@ -324,7 +324,7 @@ def public_logins(project):
 
 def pipeline_ids(project):
     """Идентификаторы плагинов реального конвейера Logstash: по ним видно, что загружен не пример из образа."""
-    text = (Path(project) / "elk/bank-logs.conf").read_text(encoding="utf-8")
+    text = (Path(project) / "observability/elk/bank-logs.conf").read_text(encoding="utf-8")
     return set(re.findall(r'^\s*id\s*=>\s*"([^"]+)"', text, re.M))
 
 
@@ -387,7 +387,7 @@ def lacking(wanted, found, what):
 
 def check_prometheus(stack, report):
     port = stack.forwards.port("prometheus")
-    jobs = [item["job_name"] for item in load_yaml(stack.project / "prometheus/prometheus.yml")["scrape_configs"]]
+    jobs = [item["job_name"] for item in load_yaml(stack.project / "observability/prometheus/prometheus.yml")["scrape_configs"]]
     values = load_yaml(stack.project / "deployment/charts/bank/values.yaml")
     services = expected_services(values, stack.analytics)
     apps = values["apps"]
@@ -476,7 +476,7 @@ def check_rules(stack, report):
     port = stack.forwards.port("prometheus")
     with report.guarded("alert rules"):
         expected = set()
-        for path in sorted((stack.project / "prometheus").glob("*.rules.yml")):
+        for path in sorted((stack.project / "observability/prometheus").glob("*.rules.yml")):
             expected.update(rule["alert"] for group in load_yaml(path)["groups"] for rule in group["rules"] if "alert" in rule)
         def loaded():
             groups = get_json(port, "/api/v1/rules?type=alert")["data"]["groups"]
@@ -502,7 +502,7 @@ def check_alertmanager(stack, report):
         config = yaml.safe_load(status["config"]["original"])
         receivers = {item["name"] for item in config["receivers"]}
         require(config["route"]["receiver"] in receivers, "Alertmanager route points to an unknown receiver")
-        telegram = {item["name"] for item in load_yaml(stack.project / "prometheus/alertmanager.yml")["receivers"]}
+        telegram = {item["name"] for item in load_yaml(stack.project / "observability/prometheus/alertmanager.yml")["receivers"]}
         if stack.telegram:
             require(telegram <= receivers, "Alertmanager lacks the configured Telegram receivers")
             detail = f"configuration is valid with receivers {sorted(receivers)}; no notification was sent"
@@ -858,9 +858,9 @@ def check_grafana(stack, report):
     port = stack.forwards.port("grafana")
     logins = public_logins(stack.project)
     operator = basic(logins["grafana_operator"], stack.password("grafana_operator_password"))
-    folder = load_yaml(stack.project / "grafana/dashboards.yaml")["providers"][0]["folder"]
+    folder = load_yaml(stack.project / "observability/grafana/dashboards.yaml")["providers"][0]["folder"]
     expected = {}
-    for path in sorted((stack.project / "grafana").glob("bank-*.json")):
+    for path in sorted((stack.project / "observability/grafana").glob("bank-*.json")):
         document = json.loads(path.read_text(encoding="utf-8"))
         expected[document["uid"]] = document
 
@@ -883,7 +883,7 @@ def check_grafana(stack, report):
     with report.guarded("grafana datasources"):
         admin = basic(logins["grafana_admin"], stack.password("grafana_admin_password"))
         listed = {item["uid"]: item for item in get_json(port, "/api/datasources", headers=admin)}
-        provisioned = load_yaml(stack.project / "grafana/datasources.yaml")["datasources"]
+        provisioned = load_yaml(stack.project / "observability/grafana/datasources.yaml")["datasources"]
         for source in provisioned:
             item = listed.get(source["uid"])
             require(item is not None, "Datasource is not provisioned: " + source["uid"])
@@ -946,7 +946,7 @@ def check_kibana(stack, report):
         login = public_logins(stack.project)["elastic_operator"]
         auth = basic(login, stack.password("elk_operator_password"))
         port = stack.forwards.port("kibana")
-        view = json.loads((stack.project / "elk/kibana-data-view.json").read_text(encoding="utf-8"))["data_view"]
+        view = json.loads((stack.project / "observability/elk/kibana-data-view.json").read_text(encoding="utf-8"))["data_view"]
         def available():
             status = get_json(port, "/api/status", headers=auth)
             return [] if status["status"]["overall"]["level"] == "available" else ["Kibana is not available"]

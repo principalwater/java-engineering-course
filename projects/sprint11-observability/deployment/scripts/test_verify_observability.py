@@ -86,7 +86,7 @@ class DashboardApiTest(unittest.TestCase):
         self.assertEqual(500, requests[0]["maxDataPoints"])
 
     def test_missing_dashboards_cannot_pass_an_empty_chart_run(self):
-        sources = observability.load_yaml(observability.PROJECT / "grafana/datasources.yaml")["datasources"]
+        sources = observability.load_yaml(observability.PROJECT / "observability/grafana/datasources.yaml")["datasources"]
         def respond(path, body, headers):
             if path == "/api/health":
                 return 200, {"database": "ok"}

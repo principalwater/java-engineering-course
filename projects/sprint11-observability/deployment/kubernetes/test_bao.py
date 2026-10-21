@@ -517,7 +517,7 @@ class ForwardTest(Scenario):
 
 class ValuesContractTest(unittest.TestCase):
     def test_helm_values_keep_verified_tls_persistent_raft_digest_pins_and_hmac_audit(self):
-        values = yaml.safe_load((project_dir() / "openbao/values.yaml").read_text())
+        values = yaml.safe_load((project_dir() / "deployment/openbao/values.yaml").read_text())
         server, raft = values["server"], values["server"]["ha"]
         self.assertFalse(values["global"]["tlsDisable"])
         self.assertEqual((raft["enabled"], raft["replicas"], raft["raft"]["enabled"]), (True, 1, True))

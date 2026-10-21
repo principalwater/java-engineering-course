@@ -26,7 +26,7 @@ PUBLIC_ASSETS = {
 for component in ("zipkin", "prometheus", "grafana", "elk"):
     PUBLIC_ASSETS[f"bank11-{component}"] = {
         path.name: str(path.relative_to(Path(__file__).resolve().parents[2]))
-        for path in sorted((Path(__file__).resolve().parents[2] / component).iterdir())
+        for path in sorted((Path(__file__).resolve().parents[2] / "observability" / component).iterdir())
         if path.is_file() and not path.is_symlink()
     }
 ANALYTICS_ASSETS = {
@@ -107,7 +107,7 @@ def chart_digest(project: Path) -> str:
 def source_digest(project: Path, analytics: bool, superset: bool = False) -> str:
     files = {project / relative for sources in (PUBLIC_ASSETS | (ANALYTICS_ASSETS if analytics else {})).values()
              for relative in sources.values()}
-    files.update(path for directory in ("deployment/charts", "deployment/kubernetes", "openbao", "zipkin", "prometheus", "grafana", "elk") for path in (project / directory).rglob("*")
+    files.update(path for directory in ("deployment/charts", "deployment/kubernetes", "deployment/openbao", "observability") for path in (project / directory).rglob("*")
                  if path.is_file() and "__pycache__" not in path.parts)
     files.update(project / name for name in ("Dockerfile", "config/jvm-network.security", "deployment/authorization/Dockerfile", "deployment/edge/Dockerfile"))
     if superset:

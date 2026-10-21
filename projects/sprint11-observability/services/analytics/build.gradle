@@ -1,4 +1,5 @@
 plugins { id 'org.springframework.boot' }
+springBoot { mainClass = 'dev.principalwater.bank.analytics.AnalyticsApplication' }
 dependencies {
     implementation project(':bank-service-client')
     implementation 'org.springframework.boot:spring-boot-starter-data-cassandra'

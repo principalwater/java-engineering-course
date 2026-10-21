@@ -1,6 +1,7 @@
 package dev.principalwater.bank.analytics;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verify;
@@ -18,19 +19,128 @@ import dev.principalwater.bank.analytics.dao.ActivityExportQueue;
 import dev.principalwater.bank.analytics.dao.AnalyticsInbox;
 import dev.principalwater.bank.analytics.model.AnalyticsProjection;
 import dev.principalwater.bank.analytics.model.AnalyticsView;
+import dev.principalwater.bank.analyticsdemo.AnalyticsDemo;
 import dev.principalwater.bank.contract.BankEvent;
 import dev.principalwater.bank.contract.UiActivityRequest;
 import dev.principalwater.bank.contract.UiActivitySection;
 import dev.principalwater.bank.contract.UiActivityType;
+import java.time.Clock;
+import java.time.LocalDate;
 import java.time.YearMonth;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 class AnalyticsIntegrationTest extends AnalyticsTestBase {
     @Autowired private AnalyticsInbox inbox;
     @Autowired private ActivityExportQueue exports;
+    @Autowired private PlatformTransactionManager transactions;
+
+    @Test
+    void optInDemoReplaysFourteenCompleteUtcDaysWithoutChangingExistingOwnersOrMonthlyAdmission() {
+        BankEvent existing = event();
+        inbox.acceptBackend(existing);
+        String original =
+                jdbc.queryForObject(
+                        "SELECT payload::text FROM analytics_inbox WHERE event_id=?",
+                        String.class,
+                        existing.eventId());
+        AnalyticsDemo demo =
+                new AnalyticsDemo(
+                        jdbc,
+                        mapper,
+                        new TransactionTemplate(transactions),
+                        Clock.fixed(NOW, ZoneOffset.UTC));
+        LocalDate lastDay = LocalDate.of(2026, 10, 16);
+        assertThrows(
+                IllegalArgumentException.class, () -> demo.load(false, "bank11-test", lastDay));
+        assertThrows(IllegalArgumentException.class, () -> demo.load(true, "bank11-prod", lastDay));
+        assertThrows(IllegalStateException.class, () -> demo.load(true, "bank11-dev", lastDay));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> demo.load(true, "bank11-test", lastDay.plusDays(1)));
+        assertEquals(1, count());
+
+        int generated = demo.load(true, "bank11-test", lastDay);
+        assertTrue(generated >= 300 && generated <= 450);
+        List<String> stored =
+                jdbc.queryForList(
+                        "SELECT payload::text FROM analytics_inbox ORDER BY event_id",
+                        String.class);
+        List<Integer> monthly =
+                jdbc.queryForList(
+                        "SELECT accepted FROM analytics_ui_months ORDER BY owner_id,month",
+                        Integer.class);
+        assertEquals(generated, demo.load(true, "bank11-test", lastDay));
+        assertEquals(
+                stored,
+                jdbc.queryForList(
+                        "SELECT payload::text FROM analytics_inbox ORDER BY event_id",
+                        String.class));
+        assertEquals(
+                monthly,
+                jdbc.queryForList(
+                        "SELECT accepted FROM analytics_ui_months ORDER BY owner_id,month",
+                        Integer.class));
+        assertEquals(generated + 1, count());
+        assertEquals(
+                original,
+                jdbc.queryForObject(
+                        "SELECT payload::text FROM analytics_inbox WHERE event_id=?",
+                        String.class,
+                        existing.eventId()));
+        assertEquals(
+                0,
+                jdbc.queryForObject(
+                        "SELECT count(*) FROM analytics_inbox WHERE owner_id=?",
+                        Integer.class,
+                        BOB));
+        assertEquals(
+                3,
+                jdbc.queryForObject(
+                        "SELECT count(DISTINCT owner_id) FROM analytics_inbox WHERE owner_id<>?",
+                        Integer.class,
+                        ALICE));
+        assertEquals(
+                14,
+                jdbc.queryForObject(
+                        "SELECT count(DISTINCT (occurred_at AT TIME ZONE 'UTC')::date) FROM analytics_inbox WHERE owner_id<>?",
+                        Integer.class,
+                        ALICE));
+        assertEquals(
+                LocalDate.of(2026, 10, 3),
+                jdbc.queryForObject(
+                        "SELECT min((occurred_at AT TIME ZONE 'UTC')::date) FROM analytics_inbox",
+                        LocalDate.class));
+        assertEquals(
+                lastDay,
+                jdbc.queryForObject(
+                        "SELECT max((occurred_at AT TIME ZONE 'UTC')::date) FROM analytics_inbox WHERE owner_id<>?",
+                        LocalDate.class,
+                        ALICE));
+        assertTrue(
+                jdbc.queryForList("SELECT DISTINCT event_type FROM analytics_inbox", String.class)
+                        .containsAll(
+                                List.of(
+                                        "DEPOSIT",
+                                        "WITHDRAW",
+                                        "NOTIFICATION_AVAILABLE",
+                                        "NOTIFICATION_READ",
+                                        "SCREEN_OPENED",
+                                        "FORM_OPENED",
+                                        "PROFILE_UPDATED")));
+        assertEquals(
+                generated,
+                jdbc.queryForObject(
+                        "SELECT count(*) FROM analytics_inbox WHERE owner_id<>? AND NOT cassandra_done AND NOT warehouse_done",
+                        Integer.class,
+                        ALICE));
+        assertTrue(monthly.stream().allMatch(accepted -> accepted > 0 && accepted < 1000));
+    }
 
     @Test
     void freshFactsPrecedeDueRetriesAndSuccessfulRepublishBackoffIsBounded() {

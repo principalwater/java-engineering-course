@@ -20,33 +20,44 @@ TTL event_date + INTERVAL 7 DAY TO VOLUME 'cold', event_date + INTERVAL 180 DAY 
 SETTINGS storage_policy = 'bank_tiered';
 
 -- Явный DEFINER даёт BI только агрегаты без SELECT на исходные owner rows.
+-- 30 UTC-дней сохраняют тренд на границе месяцев; только три резервных UUID относятся к demo.
 CREATE OR REPLACE VIEW bank_analytics.financial_daily
 DEFINER = bank_writer SQL SECURITY DEFINER
 AS SELECT event_date AS date,
+    if(owner_id IN (toUUID('de110000-0000-4000-8000-000000000001'),
+        toUUID('de110000-0000-4000-8000-000000000002'),
+        toUUID('de110000-0000-4000-8000-000000000003')), 'demo', 'live') AS data_origin,
     sumIf(amount_minor, event_type = 'DEPOSIT') AS incoming_minor,
     -sumIf(amount_minor, event_type = 'WITHDRAW') AS outgoing_minor,
     -sumIf(amount_minor, event_type = 'TRANSFER_OUT') AS transfer_minor,
     countIf(event_type IN ('DEPOSIT','WITHDRAW','TRANSFER_OUT')) AS operations_count,
     uniqExact(owner_id) AS accounts_count
 FROM bank_analytics.events FINAL
-WHERE event_date >= toStartOfMonth(toDate(now('UTC'))) AND event_date < addMonths(toStartOfMonth(toDate(now('UTC'))), 1)
+WHERE event_date >= subtractDays(toDate(now('UTC')), 29) AND event_date <= toDate(now('UTC'))
     AND event_type IN ('DEPOSIT','WITHDRAW','TRANSFER_OUT')
-GROUP BY event_date;
+GROUP BY event_date, data_origin;
 
 CREATE OR REPLACE VIEW bank_analytics.engagement_daily
 DEFINER = bank_writer SQL SECURITY DEFINER
-AS SELECT event_date AS date, source, event_type, section, sum(events_count) AS events_count
+AS SELECT event_date AS date,
+    if(owner_id IN (toUUID('de110000-0000-4000-8000-000000000001'),
+        toUUID('de110000-0000-4000-8000-000000000002'),
+        toUUID('de110000-0000-4000-8000-000000000003')), 'demo', 'live') AS data_origin,
+    source, event_type, section, sum(events_count) AS events_count
 FROM bank_analytics.activity_snapshots FINAL
-WHERE event_date >= toStartOfMonth(toDate(now('UTC'))) AND event_date < addMonths(toStartOfMonth(toDate(now('UTC'))), 1)
+WHERE event_date >= subtractDays(toDate(now('UTC')), 29) AND event_date <= toDate(now('UTC'))
     AND event_type IN ('CABINET_VIEW','PROFILE_UPDATED','SCREEN_OPENED','FORM_OPENED')
-GROUP BY event_date, source, event_type, section;
+GROUP BY event_date, data_origin, source, event_type, section;
 
 CREATE OR REPLACE VIEW bank_analytics.notification_daily
 DEFINER = bank_writer SQL SECURITY DEFINER
 AS SELECT event_date AS date,
+    if(owner_id IN (toUUID('de110000-0000-4000-8000-000000000001'),
+        toUUID('de110000-0000-4000-8000-000000000002'),
+        toUUID('de110000-0000-4000-8000-000000000003')), 'demo', 'live') AS data_origin,
     sumIf(events_count, event_type = 'NOTIFICATION_AVAILABLE') AS available_count,
     sumIf(events_count, event_type = 'NOTIFICATION_READ') AS read_count
 FROM bank_analytics.activity_snapshots FINAL
-WHERE event_date >= toStartOfMonth(toDate(now('UTC'))) AND event_date < addMonths(toStartOfMonth(toDate(now('UTC'))), 1)
+WHERE event_date >= subtractDays(toDate(now('UTC')), 29) AND event_date <= toDate(now('UTC'))
     AND event_type IN ('NOTIFICATION_AVAILABLE','NOTIFICATION_READ')
-GROUP BY event_date;
+GROUP BY event_date, data_origin;

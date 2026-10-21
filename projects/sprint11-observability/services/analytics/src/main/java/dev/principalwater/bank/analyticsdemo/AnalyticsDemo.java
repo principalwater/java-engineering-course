@@ -51,7 +51,7 @@ public final class AnalyticsDemo {
                     "Analytics demo end date must be the last complete UTC day");
         return transaction.execute(
                 status -> {
-                    verifyDatabase(namespace);
+                    verifyDatabase();
                     int count = 0;
                     for (LocalDate day = lastDay.minusDays(DAYS - 1);
                             !day.isAfter(lastDay);
@@ -72,16 +72,13 @@ public final class AnalyticsDemo {
                 });
     }
 
-    private void verifyDatabase(String namespace) {
+    private void verifyDatabase() {
         Boolean allowed =
                 jdbc.queryForObject(
                         """
-                SELECT current_schema() = 'analytics' AND
-                    ((current_database() = 'bank' AND current_user = 'analytics') OR
-                     (? = 'bank11-test' AND current_database() = 'bank_test'))
+                SELECT current_schema() = 'analytics' AND current_user = 'analytics'
                 """,
-                        Boolean.class,
-                        namespace);
+                        Boolean.class);
         if (!Boolean.TRUE.equals(allowed))
             throw new IllegalStateException("Analytics demo database identity is not allowed");
     }

@@ -1,6 +1,7 @@
 package dev.principalwater.bank.analytics;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.clearInvocations;
@@ -14,12 +15,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.zaxxer.hikari.HikariDataSource;
 import dev.principalwater.bank.analytics.controller.AnalyticsController;
 import dev.principalwater.bank.analytics.dao.ActivityExportQueue;
 import dev.principalwater.bank.analytics.dao.AnalyticsInbox;
 import dev.principalwater.bank.analytics.model.AnalyticsProjection;
 import dev.principalwater.bank.analytics.model.AnalyticsView;
 import dev.principalwater.bank.analyticsdemo.AnalyticsDemo;
+import dev.principalwater.bank.analyticsdemo.AnalyticsDemoApplication;
 import dev.principalwater.bank.contract.BankEvent;
 import dev.principalwater.bank.contract.UiActivityRequest;
 import dev.principalwater.bank.contract.UiActivitySection;
@@ -29,9 +32,14 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Properties;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.mock.env.MockEnvironment;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -41,7 +49,8 @@ class AnalyticsIntegrationTest extends AnalyticsTestBase {
     @Autowired private PlatformTransactionManager transactions;
 
     @Test
-    void optInDemoReplaysFourteenCompleteUtcDaysWithoutChangingExistingOwnersOrMonthlyAdmission() {
+    void optInDemoReplaysFourteenCompleteUtcDaysWithoutChangingExistingOwnersOrMonthlyAdmission()
+            throws Exception {
         BankEvent existing = event();
         inbox.acceptBackend(existing);
         String original =
@@ -49,7 +58,7 @@ class AnalyticsIntegrationTest extends AnalyticsTestBase {
                         "SELECT payload::text FROM analytics_inbox WHERE event_id=?",
                         String.class,
                         existing.eventId());
-        AnalyticsDemo demo =
+        AnalyticsDemo wrongRole =
                 new AnalyticsDemo(
                         jdbc,
                         mapper,
@@ -57,13 +66,56 @@ class AnalyticsIntegrationTest extends AnalyticsTestBase {
                         Clock.fixed(NOW, ZoneOffset.UTC));
         LocalDate lastDay = LocalDate.of(2026, 10, 16);
         assertThrows(
-                IllegalArgumentException.class, () -> demo.load(false, "bank11-test", lastDay));
-        assertThrows(IllegalArgumentException.class, () -> demo.load(true, "bank11-prod", lastDay));
-        assertThrows(IllegalStateException.class, () -> demo.load(true, "bank11-dev", lastDay));
+                IllegalArgumentException.class,
+                () -> wrongRole.load(false, "bank11-test", lastDay));
+        assertThrows(
+                IllegalArgumentException.class, () -> wrongRole.load(true, "bank11-prod", lastDay));
+        assertThrows(
+                IllegalStateException.class, () -> wrongRole.load(true, "bank11-dev", lastDay));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> demo.load(true, "bank11-test", lastDay.plusDays(1)));
+                () -> wrongRole.load(true, "bank11-test", lastDay.plusDays(1)));
         assertEquals(1, count());
+
+        MockEnvironment vault =
+                new MockEnvironment()
+                        .withProperty("spring.cloud.vault.enabled", "true")
+                        .withProperty("spring.cloud.vault.authentication", "KUBERNETES")
+                        .withProperty("spring.cloud.vault.kubernetes.role", "bank11-dev-analytics")
+                        .withProperty("BANK_CONFIG_IMPORT", "vault:///kv/bank11-dev/analytics");
+        assertEquals("bank11-dev", AnalyticsDemoApplication.namespace(vault));
+        vault.setProperty("BANK_CONFIG_IMPORT", "vault:///kv/bank11-prod/analytics");
+        assertThrows(
+                IllegalArgumentException.class, () -> AnalyticsDemoApplication.namespace(vault));
+        vault.setProperty("BANK_CONFIG_IMPORT", "vault:///kv/bank11-dev/analytics");
+        vault.setProperty("spring.cloud.vault.enabled", "false");
+        assertThrows(
+                IllegalArgumentException.class, () -> AnalyticsDemoApplication.namespace(vault));
+        vault.setProperty("spring.cloud.vault.enabled", "true");
+        vault.setProperty("spring.cloud.vault.kubernetes.role", "bank11-prod-analytics");
+        assertThrows(
+                IllegalArgumentException.class, () -> AnalyticsDemoApplication.namespace(vault));
+
+        // Собственный контейнер даёт настоящую роль analytics, без production-исключения для имени
+        // тестовой БД.
+        jdbc.execute(
+                "DO $$ BEGIN CREATE ROLE analytics LOGIN PASSWORD 'demo-fixture-password'; EXCEPTION WHEN duplicate_object THEN NULL; END $$");
+        jdbc.execute("GRANT USAGE ON SCHEMA analytics TO analytics");
+        jdbc.execute("GRANT SELECT,INSERT,UPDATE ON ALL TABLES IN SCHEMA analytics TO analytics");
+        DriverManagerDataSource fixture =
+                new DriverManagerDataSource(
+                        jdbc.getDataSource().unwrap(HikariDataSource.class).getJdbcUrl(),
+                        "analytics",
+                        "demo-fixture-password");
+        Properties connection = new Properties();
+        connection.setProperty("currentSchema", "analytics");
+        fixture.setConnectionProperties(connection);
+        AnalyticsDemo demo =
+                new AnalyticsDemo(
+                        new JdbcTemplate(fixture),
+                        mapper,
+                        new TransactionTemplate(new DataSourceTransactionManager(fixture)),
+                        Clock.fixed(NOW, ZoneOffset.UTC));
 
         int generated = demo.load(true, "bank11-test", lastDay);
         assertTrue(generated >= 300 && generated <= 450);
@@ -140,6 +192,13 @@ class AnalyticsIntegrationTest extends AnalyticsTestBase {
                         Integer.class,
                         ALICE));
         assertTrue(monthly.stream().allMatch(accepted -> accepted > 0 && accepted < 1000));
+        var start = LocalDate.of(2026, 10, 1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        var end = LocalDate.of(2026, 11, 1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        assertTrue(inbox.warehousePending(start, end));
+        jdbc.update(
+                "UPDATE analytics_inbox SET warehouse_done=true WHERE event_id=?",
+                existing.eventId());
+        assertFalse(inbox.warehousePending(start, end));
     }
 
     @Test

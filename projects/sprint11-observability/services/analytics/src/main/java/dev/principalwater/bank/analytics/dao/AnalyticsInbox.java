@@ -290,13 +290,17 @@ public class AnalyticsInbox {
     }
 
     public boolean warehousePending(Instant start, Instant end) {
-        // Эта HTTP-сводка читает event-stream mart: UI snapshot ждёт Cassandra отдельно и не
-        // должен скрывать уже подтверждённую независимую финансовую CH-проекцию.
+        // Сводка читает только live event-stream mart: UI snapshots и demo не блокируют её
+        // готовность.
         Boolean pending =
                 jdbc.queryForObject(
                         """
                 SELECT EXISTS(SELECT 1 FROM analytics_inbox WHERE occurred_at >= ? AND occurred_at < ?
-                AND NOT warehouse_done AND event_type NOT IN ('SCREEN_OPENED','FORM_OPENED'))
+                AND NOT warehouse_done AND event_type NOT IN ('SCREEN_OPENED','FORM_OPENED')
+                AND owner_id NOT IN (
+                    'de110000-0000-4000-8000-000000000001'::uuid,
+                    'de110000-0000-4000-8000-000000000002'::uuid,
+                    'de110000-0000-4000-8000-000000000003'::uuid))
                 """,
                         Boolean.class,
                         Timestamp.from(start),

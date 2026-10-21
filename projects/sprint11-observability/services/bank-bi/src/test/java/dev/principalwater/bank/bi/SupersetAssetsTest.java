@@ -185,10 +185,22 @@ class SupersetAssetsTest {
         Set<String> charts = new HashSet<>();
         Set<String> datasets = new HashSet<>();
         for (Map.Entry<String, JsonNode> file : files.entrySet()) {
-            if (file.getKey().startsWith("bank/charts/"))
+            if (file.getKey().startsWith("bank/charts/")) {
                 charts.add(file.getValue().path("uuid").asText());
-            if (file.getKey().startsWith("bank/datasets/"))
+                JsonNode chart = file.getValue();
+                assertOriginDimension(chart.path("params").path("groupby"));
+                JsonNode query = JSON.readTree(chart.path("query_context").asText());
+                assertOriginDimension(query.path("queries").get(0).path("columns"));
+            }
+            if (file.getKey().startsWith("bank/datasets/")) {
                 datasets.add(file.getValue().path("uuid").asText());
+                assertThat(file.getValue().path("columns"))
+                        .anyMatch(
+                                column ->
+                                        column.path("column_name").asText().equals("data_origin")
+                                                && column.path("groupby").asBoolean()
+                                                && column.path("filterable").asBoolean());
+            }
         }
         assertThat(charts).containsExactlyInAnyOrderElementsOf(CHART_UUIDS);
         assertThat(datasets)
@@ -208,6 +220,23 @@ class SupersetAssetsTest {
                 "dc4d369f-41d6-350f-8cb1-bcf61986d7a5",
                 CHART_UUIDS.subList(0, 2),
                 1);
+    }
+
+    private static void assertOriginDimension(JsonNode dimensions) {
+        List<JsonNode> origins = new ArrayList<>();
+        dimensions.forEach(
+                column -> {
+                    if (column.path("label").asText().equals("Источник данных"))
+                        origins.add(column);
+                });
+        assertThat(origins)
+                .singleElement()
+                .satisfies(
+                        origin -> {
+                            assertThat(origin.path("expressionType").asText()).isEqualTo("SQL");
+                            assertThat(origin.path("columnType").asText()).isEqualTo("GROUPBY");
+                            assertThat(origin.path("sqlExpression").asText()).isNotBlank();
+                        });
     }
 
     private static void assertDashboard(

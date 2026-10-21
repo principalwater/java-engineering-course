@@ -11,6 +11,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -33,9 +34,7 @@ public class AnalyticsDemoApplication {
         application.setAdditionalProfiles("analytics-demo");
         try (var context = application.run(args)) {
             var settings = context.getEnvironment();
-            if (Arrays.stream(settings.getActiveProfiles())
-                    .anyMatch(profile -> profile.equals("prod") || profile.equals("production")))
-                throw new IllegalArgumentException("Analytics demo is forbidden in production");
+            String namespace = namespace(settings);
             AnalyticsDemo demo =
                     new AnalyticsDemo(
                             context.getBean(JdbcTemplate.class),
@@ -47,12 +46,32 @@ public class AnalyticsDemoApplication {
                     demo.load(
                             settings.getProperty(
                                     "bank.analytics.demo.enabled", Boolean.class, false),
-                            settings.getRequiredProperty("bank.analytics.demo.namespace"),
+                            namespace,
                             LocalDate.parse(
                                     settings.getRequiredProperty("bank.analytics.demo.end-date")));
             LOG.info(
                     "DEMO analytics queued count={} source=synthetic-demo; no ledger changes",
                     count);
         }
+    }
+
+    public static String namespace(Environment settings) {
+        if (Arrays.stream(settings.getActiveProfiles())
+                        .anyMatch(profile -> profile.equals("prod") || profile.equals("production"))
+                || !settings.getProperty("spring.cloud.vault.enabled", Boolean.class, false)
+                || !"KUBERNETES".equals(settings.getProperty("spring.cloud.vault.authentication")))
+            throw new IllegalArgumentException(
+                    "Analytics demo requires non-production Kubernetes Vault authentication");
+        String role = settings.getRequiredProperty("spring.cloud.vault.kubernetes.role");
+        if (!role.matches("bank11-(dev|test)-analytics"))
+            throw new IllegalArgumentException("Analytics demo Vault role is not allowed");
+        String namespace = role.substring(0, role.length() - "-analytics".length());
+        // Тот же обязательный ConfigData import получает credentials: свободная namespace-опция их
+        // не выбирает.
+        if (!("vault:///kv/" + namespace + "/analytics")
+                .equals(settings.getProperty("BANK_CONFIG_IMPORT")))
+            throw new IllegalArgumentException(
+                    "Analytics demo requires the matching explicit Vault KV import");
+        return namespace;
     }
 }

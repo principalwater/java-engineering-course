@@ -172,6 +172,10 @@ public class ClickHouseWarehouse implements AutoCloseable {
                     count() AS eventCount, max(toUnixTimestamp64Milli(occurred_at)) AS updatedAtMillis
                 FROM bank_analytics.events FINAL
                 WHERE event_date >= {start:Date} AND event_date < {end:Date}
+                    AND owner_id NOT IN (
+                        toUUID('de110000-0000-4000-8000-000000000001'),
+                        toUUID('de110000-0000-4000-8000-000000000002'),
+                        toUUID('de110000-0000-4000-8000-000000000003'))
                 GROUP BY GROUPING SETS ((date), ()) ORDER BY summary, date LIMIT 32
                 SETTINGS max_execution_time=2, max_rows_to_read=100000, max_bytes_to_read=16777216,
                     read_overflow_mode='throw', max_result_rows=32, result_overflow_mode='throw',

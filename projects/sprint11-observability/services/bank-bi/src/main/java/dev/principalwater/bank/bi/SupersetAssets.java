@@ -23,6 +23,14 @@ final class SupersetAssets {
     private static final String ROOT = "ROOT_ID";
     private static final String GRID = "GRID_ID";
     private static final String CHILDREN = "children";
+    private static final String ORIGIN_COLUMN = "data_origin";
+    private static final Map<String, String> ORIGIN_LABEL =
+            Map.of(
+                    "expressionType", "SQL",
+                    "sqlExpression",
+                            "if(data_origin = 'demo', 'Демонстрационные (demo)', 'Рабочие (live)')",
+                    "label", "Источник данных",
+                    "columnType", "GROUPBY");
 
     enum Chart {
         MONEY(
@@ -109,6 +117,7 @@ final class SupersetAssets {
                     "financial_daily",
                     List.of(
                             "date",
+                            ORIGIN_COLUMN,
                             "incoming_minor",
                             "outgoing_minor",
                             "transfer_minor",
@@ -128,12 +137,18 @@ final class SupersetAssets {
             dataset(
                     zip,
                     "engagement_daily",
-                    List.of("date", "source", "event_type", "section", "events_count"),
+                    List.of(
+                            "date",
+                            ORIGIN_COLUMN,
+                            "source",
+                            "event_type",
+                            "section",
+                            "events_count"),
                     Map.of("events", "sum(events_count)"));
             dataset(
                     zip,
                     "notification_daily",
-                    List.of("date", "available_count", "read_count"),
+                    List.of("date", ORIGIN_COLUMN, "available_count", "read_count"),
                     Map.of("available", "sum(available_count)", "read", "sum(read_count)"));
             for (Chart definition : Chart.values()) {
                 charts.add(
@@ -192,6 +207,10 @@ final class SupersetAssets {
                                         Map.<String, Object>of(
                                                 "column_name",
                                                 name,
+                                                "verbose_name",
+                                                name.equals(ORIGIN_COLUMN)
+                                                        ? "Источник данных"
+                                                        : name,
                                                 "is_dttm",
                                                 name.equals("date"),
                                                 "type",
@@ -236,7 +255,9 @@ final class SupersetAssets {
                         "columns",
                         fields,
                         "metrics",
-                        measures));
+                        measures,
+                        "description",
+                        "Дневные агрегаты за 30 UTC-дней; demo - демонстрационные данные, live - рабочие события"));
     }
 
     private static Map<String, Object> chart(
@@ -250,7 +271,9 @@ final class SupersetAssets {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("viz_type", visualization);
         params.put("metrics", metrics);
-        params.put("groupby", groups);
+        List<Object> dimensions = new ArrayList<>(groups);
+        dimensions.add(ORIGIN_LABEL);
+        params.put("groupby", dimensions);
         params.put("time_range", "No filter");
         params.put("granularity_sqla", "date");
         params.put("time_grain_sqla", "P1D");
@@ -280,8 +303,9 @@ final class SupersetAssets {
                                         "label",
                                         "date",
                                         "expressionType",
-                                        "SQL"))
-                        : groups);
+                                        "SQL"),
+                                ORIGIN_LABEL)
+                        : dimensions);
         query.put("metrics", metrics);
         query.put("row_limit", 1000);
         query.put("is_timeseries", timeSeries);

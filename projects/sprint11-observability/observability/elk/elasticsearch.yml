@@ -7,7 +7,7 @@ network.host: 0.0.0.0
 discovery.type: single-node
 xpack.security.enabled: true
 # HTTP остаётся внутри namespace; каждый запрос требует аутентификации. В одноузловом режиме
-# transport TLS не нужен. TLS для HTTP-слушателя задаётся отдельно при развёртывании.
+# transport TLS не нужен. HTTP этого локального контура защищён NetworkPolicy, без TLS.
 xpack.security.http.ssl.enabled: false
 # Machine learning и Watcher лишь заняли бы часть heap в 256m; оповещения Kibana их не используют.
 xpack.ml.enabled: false

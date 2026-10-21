@@ -207,7 +207,7 @@
     {
       "type": "timeseries",
       "title": "Failed withdrawals by login",
-      "description": "",
+      "description": "Оценка прироста счётчика в скользящем $__rate_interval. Интервалы перекрываются: точки не суммируются; итог за выбранный диапазон показан отдельно. Prometheus экстраполирует прирост, поэтому возможны дробные значения.",
       "datasource": {
         "type": "prometheus",
         "uid": "bank-prometheus"
@@ -265,7 +265,8 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "sum"
+            "lastNotNull",
+            "max"
           ],
           "showLegend": true
         },
@@ -285,7 +286,7 @@
     {
       "type": "timeseries",
       "title": "Failed withdrawals by reason",
-      "description": "reason is the BankError name of the rejection (bounded enum).",
+      "description": "Оценка прироста счётчика в скользящем $__rate_interval. Интервалы перекрываются: точки не суммируются; итог за выбранный диапазон показан отдельно. Prometheus экстраполирует прирост, поэтому возможны дробные значения.",
       "datasource": {
         "type": "prometheus",
         "uid": "bank-prometheus"
@@ -343,7 +344,8 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "sum"
+            "lastNotNull",
+            "max"
           ],
           "showLegend": true
         },
@@ -577,7 +579,7 @@
     {
       "type": "timeseries",
       "title": "Failed transfers by sender",
-      "description": "",
+      "description": "Оценка прироста счётчика в скользящем $__rate_interval. Интервалы перекрываются: точки не суммируются; итог за выбранный диапазон показан отдельно. Prometheus экстраполирует прирост, поэтому возможны дробные значения.",
       "datasource": {
         "type": "prometheus",
         "uid": "bank-prometheus"
@@ -635,7 +637,8 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "sum"
+            "lastNotNull",
+            "max"
           ],
           "showLegend": true
         },
@@ -727,7 +730,7 @@
     {
       "type": "timeseries",
       "title": "Failed transfers by reason",
-      "description": "",
+      "description": "Оценка прироста счётчика в скользящем $__rate_interval. Интервалы перекрываются: точки не суммируются; итог за выбранный диапазон показан отдельно. Prometheus экстраполирует прирост, поэтому возможны дробные значения.",
       "datasource": {
         "type": "prometheus",
         "uid": "bank-prometheus"
@@ -785,7 +788,8 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "sum"
+            "lastNotNull",
+            "max"
           ],
           "showLegend": true
         },
@@ -952,7 +956,7 @@
     {
       "type": "timeseries",
       "title": "Failed notifications by login",
-      "description": "",
+      "description": "Оценка прироста счётчика в скользящем $__rate_interval. Интервалы перекрываются: точки не суммируются; итог за выбранный диапазон показан отдельно. Prometheus экстраполирует прирост, поэтому возможны дробные значения.",
       "datasource": {
         "type": "prometheus",
         "uid": "bank-prometheus"
@@ -1010,7 +1014,8 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "sum"
+            "lastNotNull",
+            "max"
           ],
           "showLegend": true
         },

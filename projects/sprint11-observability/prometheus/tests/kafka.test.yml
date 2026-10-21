@@ -22,7 +22,7 @@ tests:
       - eval_time: 29m
         alertname: KafkaDeadLetterTopicReceivedMessages
         exp_alerts: []
-  - name: consumer lag alert groups by group and topic after ten minutes
+  - name: consumer lag groups by group and topic and unknown offsets cannot mask high lag
     interval: 1m
     input_series:
       - series: 'kafka_consumergroup_lag{consumergroup="bank.notifications.v1", topic="bank.cash.notifications.v1", partition="0"}'
@@ -31,6 +31,13 @@ tests:
         values: '60x30'
       - series: 'kafka_consumergroup_lag{consumergroup="bank.analytics.v1", topic="bank.analytics.v1", partition="0"}'
         values: '5x30'
+      - series: 'kafka_consumergroup_lag{consumergroup="bank.accounts.notifications.v1", topic="bank.accounts.notifications.v1", partition="0"}'
+        values: '101x30'
+      # -1 означает отсутствие committed offset: две неизвестные партиции не должны скрывать лаг 101.
+      - series: 'kafka_consumergroup_lag{consumergroup="bank.accounts.notifications.v1", topic="bank.accounts.notifications.v1", partition="1"}'
+        values: '-1x30'
+      - series: 'kafka_consumergroup_lag{consumergroup="bank.accounts.notifications.v1", topic="bank.accounts.notifications.v1", partition="2"}'
+        values: '-1x30'
     alert_rule_test:
       - eval_time: 12m
         alertname: KafkaConsumerGroupLagHigh
@@ -38,6 +45,11 @@ tests:
           - exp_labels: {severity: warning, consumergroup: "bank.notifications.v1", topic: "bank.cash.notifications.v1"}
             exp_annotations:
               summary: "Consumer group bank.notifications.v1 lags 120 messages on bank.cash.notifications.v1"
+              description: "The group has been more than 100 messages behind for 10 minutes: the consumer is slow, stuck, or gone."
+              action: "Check the consuming service (accounts, notifications or analytics) for errors and rebalances; see the lag panels on the Kafka topics dashboard."
+          - exp_labels: {severity: warning, consumergroup: "bank.accounts.notifications.v1", topic: "bank.accounts.notifications.v1"}
+            exp_annotations:
+              summary: "Consumer group bank.accounts.notifications.v1 lags 101 messages on bank.accounts.notifications.v1"
               description: "The group has been more than 100 messages behind for 10 minutes: the consumer is slow, stuck, or gone."
               action: "Check the consuming service (accounts, notifications or analytics) for errors and rebalances; see the lag panels on the Kafka topics dashboard."
   - name: a crashed broker has no up series, so absence of a healthy target is the signal

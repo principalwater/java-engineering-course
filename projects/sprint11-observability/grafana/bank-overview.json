@@ -1071,7 +1071,7 @@
     {
       "type": "stat",
       "title": "Consumer lag (all groups)",
-      "description": "Messages not yet consumed, summed over groups.",
+      "description": "Суммарный лаг групп по партициям с подтверждёнными offsets; неизвестные значения -1 исключены.",
       "datasource": {
         "type": "prometheus",
         "uid": "bank-prometheus"
@@ -1083,7 +1083,7 @@
             "uid": "bank-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(kafka_consumergroup_lag)",
+          "expr": "sum(kafka_consumergroup_lag >= 0)",
           "legendFormat": "",
           "range": true,
           "instant": false,

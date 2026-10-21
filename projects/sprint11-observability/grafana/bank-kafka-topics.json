@@ -456,7 +456,7 @@
             "uid": "bank-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (consumergroup, topic) (kafka_consumergroup_lag{consumergroup=~\"$group\", topic=~\"$topic\"})",
+          "expr": "sum by (consumergroup, topic) (kafka_consumergroup_lag{consumergroup=~\"$group\", topic=~\"$topic\"} >= 0)",
           "legendFormat": "{{consumergroup}} / {{topic}}",
           "range": true,
           "instant": false,
@@ -618,7 +618,7 @@
     {
       "type": "table",
       "title": "Lag per partition now",
-      "description": "",
+      "description": "Лаг каждой партиции выбранных групп, включая 0. Партиции без подтверждённого consumer offset (значение -1) не показаны.",
       "datasource": {
         "type": "prometheus",
         "uid": "bank-prometheus"
@@ -630,7 +630,7 @@
             "uid": "bank-prometheus"
           },
           "editorMode": "code",
-          "expr": "kafka_consumergroup_lag{consumergroup=~\"$group\", topic=~\"$topic\"} > 0",
+          "expr": "kafka_consumergroup_lag{consumergroup=~\"$group\", topic=~\"$topic\"} >= 0",
           "legendFormat": "",
           "range": false,
           "instant": true,
@@ -670,7 +670,7 @@
             "inspect": false
           },
           "mappings": [],
-          "noValue": "No lag on the selected groups and topics"
+          "noValue": "No lag data for the selected groups and topics"
         },
         "overrides": []
       },

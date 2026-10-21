@@ -1109,7 +1109,7 @@
             "uid": "bank-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (request) (rate(kafka_network_requestmetrics_totaltimems_count[$__rate_interval]))",
+          "expr": "sum by (request) (rate(kafka_network_requestmetrics_totaltimems_count_total[$__rate_interval]))",
           "legendFormat": "{{request}}",
           "range": true,
           "instant": false,

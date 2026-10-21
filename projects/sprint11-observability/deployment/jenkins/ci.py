@@ -85,6 +85,7 @@ QUEUE_TIMEOUT = 600
 # Больше 120-минутного таймаута pipeline: зависшую сборку должен объявить Jenkins, а не этот клиент.
 BUILD_TIMEOUT = 7800
 HTTP_TIMEOUT = 30
+CONSOLE_MAX_BYTES = 32 * 1024 * 1024
 CERTIFICATE_RENEWAL_SECONDS = 14 * 24 * 3600
 TLS_ADDRESSES = ("127.0.0.1", "::1")
 STAGE_LINE = re.compile(r"^\[Pipeline\] \{ \((.+)\)$")
@@ -567,15 +568,19 @@ class Controller:
         self._base = f"https://127.0.0.1:{port}"
 
     def request(self, method: str, path: str, *, authenticated: bool = True, data: bytes | None = None,
-                headers: dict | None = None) -> tuple[int, http.client.HTTPMessage, bytes]:
+                headers: dict | None = None, max_bytes: int | None = None) -> tuple[int, http.client.HTTPMessage, bytes]:
         request = urllib.request.Request(self._base + path, data=data, method=method, headers=headers or {})
         if authenticated:
             request.add_header("Authorization", self._authorization)
         try:
-            with self._opener.open(request, timeout=HTTP_TIMEOUT) as response:
-                return response.status, response.headers, response.read()
+            response = self._opener.open(request, timeout=HTTP_TIMEOUT)
         except urllib.error.HTTPError as error:
-            return error.code, error.headers, error.read()
+            response = error
+        with response:
+            body = response.read(max_bytes + 1 if max_bytes is not None else -1)
+            if max_bytes is not None and len(body) > max_bytes:
+                raise RuntimeError("Controller response exceeded the byte limit")
+            return response.status, response.headers, body
 
     def json(self, path: str) -> dict:
         status, _, body = self.request("GET", path)
@@ -661,6 +666,13 @@ class Controller:
                 time.sleep(3)
         raise RuntimeError(f"Build {number} did not finish within the client timeout; it keeps running on the controller")
 
+    def completed_console(self, number: int, log: Path) -> None:
+        """После building=false полная консоль заменяет возможный неполный progressiveText; тело остаётся приватным."""
+        status, _, body = self.request("GET", f"/job/{JOB_NAME}/{number}/consoleText", max_bytes=CONSOLE_MAX_BYTES)
+        if status != 200:
+            raise RuntimeError(f"Cannot read the completed console of build {number} (HTTP {status})")
+        write_private(log, body)
+
 
 def connect(layout: Layout) -> Controller | None:
     initialized = (layout.agent_secrets / "tls_ca.pem").is_file() and (layout.controller_secrets / "admin_password").is_file()
@@ -737,15 +749,23 @@ def command_build(args: argparse.Namespace) -> None:
         if time.monotonic() >= deadline:
             raise RuntimeError(f"Build {number} did not finish within the client timeout")
         time.sleep(3)
-    if details["result"] != "SUCCESS":
-        raise RuntimeError(f"Build {number} finished with {details['result']}; the full console is in {log}")
-    console = log.read_text(encoding="utf-8", errors="replace")
+    progressive_bytes = log.stat().st_size
+    controller.completed_console(number, log)
+    completed = log.read_bytes()
+    console = completed.decode("utf-8", "replace")
     nodes = set(NODE_LINE.findall(console))
+    pipeline_markers = len(re.findall(r"^\[Pipeline\]", console, re.MULTILINE))
+    summary = (f"progressive bytes={progressive_bytes}; completed bytes={len(completed)}; "
+               f"pipeline markers={pipeline_markers}; "
+               f"expected node seen={AGENT_NAME in nodes}; unexpected nodes={len(nodes - {AGENT_NAME})}")
+    if details["result"] != "SUCCESS":
+        raise RuntimeError(f"Build {number} finished with {details['result']}; {summary}; the full console is in {log}")
     revisions = {action["lastBuiltRevision"]["SHA1"] for action in details["actions"] if action.get("lastBuiltRevision")}
     executors = {item["displayName"]: item["numExecutors"] for item in
                  controller.json("/computer/api/json?tree=computer[displayName,numExecutors]")["computer"]}
     if nodes != {AGENT_NAME}:
-        raise RuntimeError(f"Build {number} ran on {sorted(nodes) or 'no node'} instead of only {AGENT_NAME}")
+        raise RuntimeError(f"Build {number} did not prove execution only on {AGENT_NAME}; {summary}; "
+                           f"the full console is in {log}")
     if revisions != {head}:
         raise RuntimeError(f"Build {number} used revisions {sorted(revisions)} instead of the snapshot {head}")
     if any(count for name, count in executors.items() if name != AGENT_NAME):

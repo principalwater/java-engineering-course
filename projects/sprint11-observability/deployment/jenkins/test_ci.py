@@ -2,7 +2,9 @@
 
 import argparse
 import contextlib
+import http.server
 import io
+import json
 import os
 from pathlib import Path
 import shutil
@@ -13,6 +15,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import urllib.request
 from unittest import mock
 
 import ci
@@ -72,7 +75,8 @@ class SnapshotTest(unittest.TestCase):
         controller = mock.Mock()
         controller.started_build.return_value = 1
         sensitive = "fixture-credential-must-stay-private"
-        controller.follow.side_effect = lambda number, log, deadline: ci.write_private(log, sensitive.encode())
+        controller.follow.side_effect = lambda number, log, deadline: ci.write_private(log, b"")
+        controller.completed_console.side_effect = lambda number, log: ci.write_private(log, sensitive.encode())
         controller.json.return_value = {"building": False, "result": "FAILURE"}
         captured = io.StringIO()
         environment = {"BANK_JENKINS_HOME": str(layout.root), ci.SECRETS_ENVIRONMENT: str(layout.secret_source),
@@ -87,6 +91,95 @@ class SnapshotTest(unittest.TestCase):
         log = layout.logs / "build-1.log"
         self.assertEqual(sensitive, log.read_text())
         self.assertEqual(0o600, log.stat().st_mode & 0o777)
+
+    def test_completed_console_is_authoritative_for_build_verification(self):
+        """Пустой progressiveText до конца сборки не должен терять узел; финальные HTTP-ошибки и секреты закрыты."""
+        layout = ci.Layout(Path(self.directory.name) / "state", Path(self.directory.name) / "secrets")
+        layout.logs.mkdir(parents=True)
+        head = ci.git(["rev-parse", "HEAD"], cwd=self.repository).strip()
+        sensitive = "fixture-credential-must-stay-private"
+        complete = f"[Pipeline] Start of Pipeline\nRunning on {ci.AGENT_NAME} in /workspace\n{sensitive}\n"
+        scenario = {}
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def send(self, status, body=b"", headers=None):
+                self.send_response(status)
+                for name, value in (headers or {}).items():
+                    self.send_header(name, value)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self):
+                self.send(201, headers={"Location": "/queue/item/1/"})
+
+            def do_GET(self):
+                if self.path == "/login":
+                    self.send(200)
+                elif self.path == "/crumbIssuer/api/json":
+                    self.send(200, json.dumps({"crumbRequestField": "Jenkins-Crumb", "crumb": "fixture"}).encode())
+                elif self.path.startswith(f"/computer/{ci.AGENT_NAME}/"):
+                    self.send(200, b'{"offline":false}')
+                elif self.path == "/queue/item/1/api/json":
+                    self.send(200, b'{"executable":{"number":1}}')
+                elif "/logText/progressiveText?" in self.path:
+                    self.send(200, b"", {"X-Text-Size": "0"})
+                elif self.path.endswith("/consoleText"):
+                    self.send(scenario.get("status", 200), scenario["console"].encode())
+                elif self.path.startswith("/computer/api/json?"):
+                    self.send(200, json.dumps({"computer": [
+                        {"displayName": "Built-In Node", "numExecutors": scenario.get("executors", 0)},
+                        {"displayName": ci.AGENT_NAME, "numExecutors": 1}]}).encode())
+                else:
+                    self.send(200, json.dumps({"building": False, "result": "SUCCESS", "actions": [
+                        {"lastBuiltRevision": {"SHA1": scenario.get("revision", head)}}]}).encode())
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join, 5)
+        self.addCleanup(server.shutdown)
+        controller = ci.Controller.__new__(ci.Controller)
+        controller._base = f"http://127.0.0.1:{server.server_port}"
+        controller._authorization = "Basic fixture"
+        controller._opener = urllib.request.build_opener(ci.NoRedirect)
+        cases = [
+            ({"console": complete}, None),
+            ({"console": ""}, "completed bytes=0; pipeline markers=0"),
+            ({"console": f"[Pipeline] Start of Pipeline\n{sensitive}\n"}, "pipeline markers=1"),
+            ({"console": sensitive, "status": 403}, "completed console.*HTTP 403"),
+            ({"console": sensitive, "limit": 8}, "response exceeded.*byte limit"),
+            ({"console": complete.replace(ci.AGENT_NAME, sensitive)}, "unexpected nodes=1"),
+            ({"console": complete, "revision": "f" * 40}, "used revisions"),
+            ({"console": complete, "executors": 1}, "controller has executors"),
+        ]
+        environment = {"BANK_JENKINS_HOME": str(layout.root), ci.SECRETS_ENVIRONMENT: str(layout.secret_source),
+                       ci.PLAINTEXT_ENVIRONMENT: "true"}
+        for values, expected in cases:
+            scenario.clear()
+            scenario.update(values)
+            captured = io.StringIO()
+            with self.subTest(expected=expected), mock.patch.dict(os.environ, environment), \
+                    mock.patch.object(ci.sys, "platform", "linux"), \
+                    mock.patch.object(ci, "REPOSITORY", self.repository), \
+                    mock.patch.object(ci, "Controller", return_value=controller), \
+                    mock.patch.object(ci, "CONSOLE_MAX_BYTES", values.get("limit", 32 * 1024 * 1024), create=True), \
+                    contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
+                if expected:
+                    with self.assertRaisesRegex(RuntimeError, expected) as failure:
+                        ci.command_build(argparse.Namespace(timeout=5))
+                    self.assertNotIn(sensitive, str(failure.exception))
+                else:
+                    ci.command_build(argparse.Namespace(timeout=5))
+                    self.assertIn("succeeded only", captured.getvalue())
+                    log = layout.logs / "build-1.log"
+                    self.assertEqual(complete, log.read_text())
+                    self.assertEqual(0o600, log.stat().st_mode & 0o777)
+                self.assertNotIn(sensitive, captured.getvalue())
 
 
 class SecretSourceTest(unittest.TestCase):

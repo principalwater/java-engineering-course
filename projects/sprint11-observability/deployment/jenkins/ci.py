@@ -418,10 +418,11 @@ def ensure_image(role: str) -> str:
 
 
 def prepare_agent_volume(image: str) -> None:
-    # Контейнер Docker-демона здесь ничего не создаёт; один раз отдаём рабочий том пользователю агента.
+    # Нейтральный путь не требует обхода закрытого home пользователя Jenkins от root без DAC_OVERRIDE.
+    destination = "/work"
     docker("run", "--rm", "--user", "0:0", "--cap-drop", "ALL", "--cap-add", "CHOWN", "--security-opt",
-           "no-new-privileges", "--entrypoint", "chown", "--mount", f"type=volume,src={VOLUME_AGENT},dst={AGENT_ROOT}",
-           image, f"{JENKINS_UID}:{JENKINS_UID}", AGENT_ROOT, timeout=120)
+           "no-new-privileges", "--entrypoint", "chown", "--mount", f"type=volume,src={VOLUME_AGENT},dst={destination}",
+           image, f"{JENKINS_UID}:{JENKINS_UID}", destination, timeout=120)
 
 
 def publish_secrets(volume: str, image: str, files: dict[str, bytes]) -> None:

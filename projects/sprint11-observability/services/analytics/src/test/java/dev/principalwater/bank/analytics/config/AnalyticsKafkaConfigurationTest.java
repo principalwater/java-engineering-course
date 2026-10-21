@@ -1,6 +1,7 @@
 package dev.principalwater.bank.analytics.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,13 +18,13 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.core.env.SystemEnvironmentPropertySource;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+import org.springframework.kafka.core.KafkaAdmin;
 
 class AnalyticsKafkaConfigurationTest {
     @TempDir Path secrets;
 
     @Test
-    void nativeSecretAndStandardSpringTlsPropertiesReachBothAnalyticsClientFactories()
-            throws Exception {
+    void nativeSecretAndStandardSpringTlsPropertiesReachEveryAnalyticsClient() throws Exception {
         Files.writeString(secrets.resolve("bank.kafka.password"), "fixture-password\n");
         Path authority = secrets.resolve("ca.crt");
         Files.writeString(authority, "fixture-public-ca");
@@ -68,13 +69,19 @@ class AnalyticsKafkaConfigurationTest {
                             Map<?, ?> consumer =
                                     context.getBean(DefaultKafkaConsumerFactory.class)
                                             .getConfigurationProperties();
-                            for (Map<?, ?> settings : java.util.List.of(producer, consumer)) {
+                            Map<?, ?> admin =
+                                    context.getBean(KafkaAdmin.class).getConfigurationProperties();
+                            for (Map<?, ?> settings :
+                                    java.util.List.of(producer, consumer, admin)) {
                                 assertEquals("SASL_SSL", settings.get("security.protocol"));
                                 assertEquals("SCRAM-SHA-512", settings.get("sasl.mechanism"));
                                 assertEquals("PEM", settings.get("ssl.truststore.type"));
                                 assertEquals(
                                         authority.toString(),
                                         settings.get("ssl.truststore.location"));
+                                assertNotNull(
+                                        settings.get("sasl.jaas.config"),
+                                        "Every Kafka client must authenticate with its service principal");
                                 var login =
                                         JaasContext.loadClientContext(
                                                         Map.of(

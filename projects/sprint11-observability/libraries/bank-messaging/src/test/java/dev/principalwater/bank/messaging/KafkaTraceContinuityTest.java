@@ -31,6 +31,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.core.KafkaAdmin;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
@@ -71,6 +72,8 @@ class KafkaTraceContinuityTest {
                         "management.tracing.sampling.probability=1.0")
                 .run(
                         context -> {
+                            String clusterId = context.getBean(KafkaAdmin.class).clusterId();
+                            assertThat(clusterId).isNotBlank();
                             Tracer tracer = context.getBean(Tracer.class);
                             Span request = tracer.nextSpan().name("request").start();
                             Tracer.SpanInScope scope = tracer.withSpan(request);
@@ -101,6 +104,10 @@ class KafkaTraceContinuityTest {
                                                 assertThat(receive.traceId())
                                                         .isEqualTo(send.traceId());
                                                 assertThat(receive.parentId()).isEqualTo(send.id());
+                                                assertThat(send.remoteServiceName())
+                                                        .endsWith(clusterId);
+                                                assertThat(receive.remoteServiceName())
+                                                        .endsWith(clusterId);
                                             });
                             // Собственные фабрики Kafka подключены к реестру метрик клиентов.
                             assertThat(context.getBean(MeterRegistry.class).getMeters())

@@ -1,5 +1,6 @@
 package dev.principalwater.bank.analytics.config;
 
+import dev.principalwater.bank.messaging.KafkaAdminConfiguration;
 import dev.principalwater.bank.messaging.KafkaClientProperties;
 import dev.principalwater.bank.messaging.KafkaConsumerSignals;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -33,7 +34,7 @@ import org.springframework.util.backoff.FixedBackOff;
 
 @EnableKafka
 @Configuration(proxyBeanMethods = false)
-@Import(KafkaConsumerSignals.class)
+@Import({KafkaConsumerSignals.class, KafkaAdminConfiguration.class})
 public class AnalyticsKafka {
     private static final Logger LOG = LoggerFactory.getLogger(AnalyticsKafka.class);
     // Одну партицию читает один поток каждой группы; между ограниченными попытками даём

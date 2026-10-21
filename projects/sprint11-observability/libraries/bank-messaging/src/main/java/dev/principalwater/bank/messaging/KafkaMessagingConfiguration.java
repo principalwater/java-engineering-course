@@ -42,7 +42,7 @@ import org.springframework.util.backoff.FixedBackOff;
 @EnableKafka
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(KafkaProperties.class)
-@Import(KafkaConsumerSignals.class)
+@Import({KafkaConsumerSignals.class, KafkaAdminConfiguration.class})
 public class KafkaMessagingConfiguration {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaMessagingConfiguration.class);
 

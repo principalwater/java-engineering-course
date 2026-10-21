@@ -6,6 +6,52 @@ global:
   kafkaCluster: bank-kafka
   analyticsEnabled: false
   chartRevision: ""
+  observability:
+    enabled: true
+    logging:
+      enabled: true
+    retention:
+      metricsTime: 7d
+      metricsSize: 1GB
+      logsTime: 7d
+      alertmanagerTime: 120h
+    storage:
+      prometheus: 2Gi
+      alertmanager: 128Mi
+      grafana: 256Mi
+      elasticsearch: 4Gi
+      logstash: 1Gi
+    publicHosts:
+      grafana: grafana-bank.valgrind-home.localhost
+      kibana: kibana-bank.valgrind-home.localhost
+    alerting:
+      telegram:
+        enabled: false
+        apiUrl: https://api.telegram.org
+    scrape:
+      webPort: 8080
+      workerPort: 9400
+      webPath: /actuator/prometheus
+      workerPath: /actuator/prometheus
+    images:
+      zipkin: openzipkin/zipkin:3.6.1@sha256:d17e856dcbba7ffeefbbfc252f89ab78a4ab6faed47e646d46daad78f91b5ee2
+      prometheus: prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
+      alertmanager: prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
+      grafana: grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
+      elasticsearch: docker.elastic.co/elasticsearch/elasticsearch:9.5.5@sha256:13b4a40bb095774f5fda635e45fd5677cc6a26565e42b24997b0c72b88e75984
+      kibana: docker.elastic.co/kibana/kibana:9.5.5@sha256:13b72ce7222c36e4213229004ae62a87aeb32fd372ebfa6fb38f7a3285fdbb78
+      logstash: docker.elastic.co/logstash/logstash:9.5.5@sha256:d170c92166492ff82433395734121dcd2c73140038a03e252299384a01c9aae5
+      logstashExporter: kuskoman/logstash-exporter:v1.9.2@sha256:1fa5ef435073d83525d54809cb4e5e4b5375a774e368c92677c854c6e6524902
+    resources:
+      zipkin: {requests: {cpu: 50m, memory: 192Mi}, limits: {cpu: 500m, memory: 320Mi}}
+      prometheus: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: "1", memory: 384Mi}}
+      alertmanager: {requests: {cpu: 10m, memory: 32Mi}, limits: {cpu: 200m, memory: 64Mi}}
+      grafana: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: "1", memory: 512Mi}}
+      elasticsearch: {requests: {cpu: 200m, memory: 640Mi}, limits: {cpu: "1.5", memory: 768Mi}}
+      kibana: {requests: {cpu: 100m, memory: 768Mi}, limits: {cpu: "1", memory: 1536Mi}}
+      logstash: {requests: {cpu: 100m, memory: 512Mi}, limits: {cpu: "1", memory: 640Mi}}
+      logstashExporter: {requests: {cpu: 10m, memory: 16Mi}, limits: {cpu: 100m, memory: 48Mi}}
+      job: {requests: {cpu: 10m, memory: 32Mi}, limits: {cpu: 200m, memory: 128Mi}}
   nodeSelector:
     bank11.io/worker: "true"
 edge:

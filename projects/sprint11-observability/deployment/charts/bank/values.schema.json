@@ -47,6 +47,9 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "observability": {
+          "type": "object"
         }
       }
     },
@@ -176,10 +179,19 @@
     "network": {
       "type": "object"
     },
-    "observability": {
+    "openbao": {
       "type": "object"
     },
-    "openbao": {
+    "zipkin": {
+      "type": "object"
+    },
+    "prometheus": {
+      "type": "object"
+    },
+    "grafana": {
+      "type": "object"
+    },
+    "elk": {
       "type": "object"
     }
   },

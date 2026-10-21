@@ -1,0 +1,326 @@
+{{- $obs := .Values.global.observability }}
+{{- if $obs.enabled }}
+{{- $promAsset := .Values.assets }}
+{{- $release := .Release.Name }}
+{{- $prefix := .Values.global.secretPrefix }}
+{{- $kafka := .Values.global.kafkaCluster }}
+{{- $claims := dict "prometheus-data" $obs.storage.prometheus "alertmanager-data" $obs.storage.alertmanager }}
+{{- range $name, $size := $claims }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "bank.labels" $ | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ $.Values.global.storageClass }}
+  resources:
+    requests: {storage: {{ $size }}}
+{{- end }}
+
+{{- range $service := list (dict "name" "prometheus" "port" 9090) (dict "name" "alertmanager" "port" 9093) }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $service.name }}
+  labels:
+    {{- include "bank.labels" $ | nindent 4 }}
+spec:
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  selector: {app: {{ $service.name }}, bank11.io/instance: {{ $release }}}
+  ports: [{name: http, port: {{ $service.port }}, targetPort: http}]
+{{- end }}
+{{- $rules := list }}
+{{- $ruleContents := dict }}
+{{- range $key, $content := $promAsset }}{{ if hasSuffix ".rules.yml" $key }}{{ $rules = append $rules $key }}{{ $_ := set $ruleContents $key $content }}{{ end }}{{ end }}
+
+{{- /* Scrape target lists rendered from apps.*: an optional service that is not deployed is never scraped. */}}
+{{- $webTargets := list }}
+{{- $workerTargets := list }}
+{{- $workerServices := list }}
+{{- range $name, $app := .Values.apps }}
+{{- if or (not $app.optional) $.Values.global.analyticsEnabled }}
+{{- if ne (toString $app.web) "false" }}
+{{- $webTargets = append $webTargets (dict "targets" (list (printf "%s:%v" $name $obs.scrape.webPort)) "labels" (dict "service" $name "__metrics_path__" $obs.scrape.webPath)) }}
+{{- else }}
+{{- $workerTargets = append $workerTargets (dict "targets" (list (printf "%s-metrics:%v" $name $obs.scrape.workerPort)) "labels" (dict "service" $name "__metrics_path__" $obs.scrape.workerPath)) }}
+{{- $workerServices = append $workerServices $name }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- $clickhouseTargets := list }}
+{{- if .Values.global.analyticsEnabled }}
+{{- $clickhouseTargets = list (dict "targets" (list "clickhouse-metrics:9363") "labels" (dict "service" "clickhouse")) }}
+{{- end }}
+{{- $alertmanagerConfig := "route:\n  receiver: local\nreceivers:\n  - name: local\n" }}
+{{- if $obs.alerting.telegram.enabled }}
+{{- $alertmanagerConfig = replace "@TELEGRAM_API_URL@" $obs.alerting.telegram.apiUrl (index $promAsset "alertmanager.yml") }}
+{{- end }}
+
+{{- /* ---------------------------------------------------------------- generated configuration */}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-targets
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+data:
+  bank-web.json: {{ toJson $webTargets | quote }}
+  bank-worker.json: {{ toJson $workerTargets | quote }}
+  clickhouse.json: {{ toJson $clickhouseTargets | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+data:
+  alertmanager.yml: |
+    {{- $alertmanagerConfig | nindent 4 }}
+
+{{- /* Metrics-only Services: they publish ports the application Services do not expose and keep scrape traffic off them. */}}
+{{- range $name := $workerServices }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-metrics
+  labels:
+    {{- include "bank.labels" $ | nindent 4 }}
+spec:
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  selector: {app: {{ $name }}, bank11.io/instance: {{ $release }}}
+  ports: [{name: metrics, port: {{ $obs.scrape.workerPort }}, targetPort: {{ $obs.scrape.workerPort }}}]
+{{- end }}
+{{- if .Values.global.analyticsEnabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clickhouse-metrics
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  selector: {app: clickhouse, bank11.io/instance: {{ $release }}}
+  ports: [{name: metrics, port: 9363, targetPort: 9363}]
+{{- end }}
+---
+# Headless Service позволяет Prometheus находить каждый pod Kafka, включая контроллеры, через DNS.
+# Неготовые pod тоже публикуются: работающий, но неготовый брокер виден как up == 0 и не исчезает из целей.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-jmx-metrics
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector: {strimzi.io/cluster: {{ $kafka }}, strimzi.io/kind: Kafka, strimzi.io/name: {{ $kafka }}-kafka}
+  ports: [{name: metrics, port: 9404, targetPort: 9404}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-exporter-metrics
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  selector: {strimzi.io/cluster: {{ $kafka }}, strimzi.io/kind: Kafka, strimzi.io/name: {{ $kafka }}-kafka-exporter}
+  ports: [{name: metrics, port: 9404, targetPort: 9404}]
+
+{{- /* ---------------------------------------------------------------- Prometheus */}}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: prometheus
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  serviceName: prometheus
+  replicas: 1
+  selector:
+    matchLabels: {app: prometheus, bank11.io/instance: {{ $release }}}
+  template:
+    metadata:
+      labels: {app: prometheus, bank11.io/instance: {{ $release }}, bank11.io/role: storage}
+      annotations:
+        checksum/public-config: {{ pick $promAsset "prometheus.yml" | toJson | sha256sum }}
+        checksum/rules: {{ $ruleContents | toJson | sha256sum }}
+        checksum/targets: {{ dict "web" $webTargets "worker" $workerTargets "clickhouse" $clickhouseTargets | toJson | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      # Service links подставили бы ELASTICSEARCH_*, LOGSTASH_* и другие переменные в образы, читающие настройки из окружения.
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      nodeSelector:
+        {{- toYaml .Values.global.nodeSelector | nindent 8 }}
+      securityContext:
+        runAsUser: 65534
+        runAsGroup: 65534
+        runAsNonRoot: true
+        fsGroup: 65534
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: prometheus
+          image: {{ $obs.images.prometheus | quote }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            # Хранение ограничено сроком и размером; действует первое достигнутое ограничение. Лимит размера
+            # оставляет на томе место для WAL.
+            - --storage.tsdb.retention.time={{ $obs.retention.metricsTime }}
+            - --storage.tsdb.retention.size={{ $obs.retention.metricsSize }}
+            - --web.listen-address=:9090
+            - --query.timeout=30s
+          env:
+            # GC Go учитывает лимит контейнера до того, как память закончится и сработает OOM kill.
+            - {name: GOMEMLIMIT, value: 320MiB}
+          ports: [{name: http, containerPort: 9090}]
+          startupProbe:
+            httpGet: {path: /-/ready, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            # Восстановление WAL после аварийной остановки может занять минуты.
+            failureThreshold: 120
+          readinessProbe:
+            httpGet: {path: /-/ready, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: {path: /-/healthy, port: http}
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+          securityContext:
+            {{- include "bank.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml $obs.resources.prometheus | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /etc/prometheus, readOnly: true}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: data, mountPath: /prometheus}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        # Один projected-том: вложенный mount внутри read-only ConfigMap не смог бы создать свою точку монтирования.
+        - name: config
+          projected:
+            sources:
+              - configMap:
+                  name: bank11-prometheus
+                  items:
+                    - {key: prometheus.yml, path: prometheus.yml}
+                    {{- range $rules }}
+                    - {key: {{ . }}, path: {{ printf "rules/%s" . }}}
+                    {{- end }}
+              - configMap:
+                  name: prometheus-targets
+                  items:
+                    - {key: bank-web.json, path: targets/bank-web.json}
+                    - {key: bank-worker.json, path: targets/bank-worker.json}
+                    - {key: clickhouse.json, path: targets/clickhouse.json}
+        - name: secrets
+          secret:
+            secretName: {{ printf "%s-prometheus" $prefix }}
+            defaultMode: 0440
+            items: [{key: grafana_metrics_password, path: grafana_metrics_password}]
+        - {name: data, persistentVolumeClaim: {claimName: prometheus-data}}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 16Mi}}
+
+{{- /* ---------------------------------------------------------------- Alertmanager */}}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: alertmanager
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  serviceName: alertmanager
+  replicas: 1
+  selector:
+    matchLabels: {app: alertmanager, bank11.io/instance: {{ $release }}}
+  template:
+    metadata:
+      labels: {app: alertmanager, bank11.io/instance: {{ $release }}, bank11.io/role: storage}
+      annotations: {checksum/config: {{ $alertmanagerConfig | sha256sum }}}
+    spec:
+      automountServiceAccountToken: false
+      # Service links подставили бы ELASTICSEARCH_*, LOGSTASH_* и другие переменные в образы, читающие настройки из окружения.
+      enableServiceLinks: false
+      nodeSelector:
+        {{- toYaml .Values.global.nodeSelector | nindent 8 }}
+      securityContext:
+        runAsUser: 65534
+        runAsGroup: 65534
+        runAsNonRoot: true
+        fsGroup: 65534
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: alertmanager
+          image: {{ $obs.images.alertmanager | quote }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+            - --data.retention={{ $obs.retention.alertmanagerTime }}
+            - --web.listen-address=:9093
+            # Одна реплика: gossip открыл бы лишний порт без других участников кластера.
+            - --cluster.listen-address=
+          ports: [{name: http, containerPort: 9093}]
+          startupProbe:
+            httpGet: {path: /-/ready, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 24
+          readinessProbe:
+            httpGet: {path: /-/ready, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: {path: /-/healthy, port: http}
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+          securityContext:
+            {{- include "bank.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml $obs.resources.alertmanager | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /etc/alertmanager, readOnly: true}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: data, mountPath: /alertmanager}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: config, configMap: {name: alertmanager-config}}
+        - name: secrets
+          secret:
+            secretName: {{ printf "%s-alertmanager" $prefix }}
+            optional: {{ not $obs.alerting.telegram.enabled }}
+            defaultMode: 0440
+            items:
+              - {key: telegram_bot_token, path: telegram_bot_token}
+              - {key: telegram_chat_id, path: telegram_chat_id}
+        - {name: data, persistentVolumeClaim: {claimName: alertmanager-data}}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 8Mi}}
+
+{{- end }}

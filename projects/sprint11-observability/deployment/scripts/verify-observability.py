@@ -44,7 +44,7 @@ FORWARD_START_SECONDS = 30
 WAIT_SECONDS = 120
 SETTLE_SECONDS = 240
 POLL_SECONDS = 2
-# Порты и путь целей из chart (observability.scrape) и BANK_OBSERVABILITY_METRICS_SERVER_PORT worker-а.
+# Порты и путь целей из chart (global.observability.scrape) и BANK_OBSERVABILITY_METRICS_SERVER_PORT worker-а.
 WEB_PORT = 8080
 WORKER_PORT = 9400
 METRICS_PATH = "/actuator/prometheus"

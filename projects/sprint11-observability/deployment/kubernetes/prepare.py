@@ -136,13 +136,19 @@ def prepare(output: Path, *, environment: str, profile: str, analytics: bool, su
             assets[config_map][key] = contents
     values = {
         "global": {"environment": environment, "externalPort": external_port, "analyticsEnabled": analytics,
-                   "chartRevision": chart_digest(project)},
+                   "chartRevision": chart_digest(project),
+                   "observability": {"alerting": {"telegram": {"enabled": telegram}}}},
         "kafka": {"profile": profile, "analyticsEnabled": analytics},
         "superset": {"enabled": superset},
         "assets": assets,
         "openbao": {"bindings": secret_bindings(project, analytics, superset, telegram=telegram)},
-        "observability": {"alerting": {"telegram": {"enabled": telegram}}},
     }
+    for component in ("zipkin", "prometheus", "grafana", "elk"):
+        values[component] = {"assets": assets.pop(f"bank11-{component}")}
+    # Public deployment flags keep scrape targets aligned with the selected applications.
+    applications = yaml.safe_load((project / "deployment/charts/bank/values.yaml").read_text(encoding="utf-8"))["apps"]
+    values["prometheus"]["apps"] = {name: {key: app[key] for key in ("web", "optional") if key in app}
+                                  for name, app in applications.items()}
     if images:
         expected = {*APPS[:-1], "authorization", "edge"}
         if analytics:

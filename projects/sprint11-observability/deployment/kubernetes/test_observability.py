@@ -1,10 +1,9 @@
-"""Contracts of the observability assets and their rendered chart objects, checked without a daemon.
+"""Проверка ресурсов наблюдаемости и объектов из шаблонов чарта без работающего стенда.
 
-The static checks read the zipkin/, prometheus/, grafana/ and elk/ directories; the rendered checks run
-`helm template` with those directories exposed as the bank11-zipkin, bank11-prometheus, bank11-grafana and
-bank11-elk asset ConfigMaps (every regular file directly inside a directory, subdirectories such as
-prometheus/tests are not assets). promtool and amtool are the official binaries; their tests are skipped,
-with the reason stated, on a machine that does not have them.
+Статические проверки читают каталоги zipkin/, prometheus/, grafana/ и elk/; проверки шаблонов запускают
+`helm template` с файлами из этих каталогов в ConfigMap bank11-zipkin, bank11-prometheus, bank11-grafana и
+bank11-elk. Включаются только обычные файлы верхнего уровня; подкаталоги вроде prometheus/tests исключены.
+Используются официальные promtool и amtool; при их отсутствии тесты пропускаются с указанием причины.
 """
 
 import base64
@@ -32,8 +31,8 @@ ASSET_DIRECTORIES = {"bank11-zipkin": "zipkin", "bank11-prometheus": "prometheus
 PROMTOOL = shutil.which("promtool")
 AMTOOL = shutil.which("amtool")
 
-# Secret objects and the files (keys) the observability workloads read from them. kubernetes/secret-bindings.json
-# must provide exactly these; the chart creates none of them.
+# Объекты Secret и их ключи, читаемые компонентами наблюдаемости. kubernetes/secret-bindings.json
+# должен предоставлять именно их; чарт не создаёт эти секреты.
 SECRET_CONTRACT = {
     "bank11-prometheus": {"grafana_metrics_password"},
     "bank11-alertmanager": {"telegram_bot_token", "telegram_chat_id"},
@@ -47,7 +46,7 @@ SECRET_CONTRACT = {
 LONG_RUNNING = {"zipkin", "prometheus", "alertmanager", "grafana", "elasticsearch", "kibana", "logstash"}
 DATASOURCES = {"bank-prometheus": "prometheus", "bank-alertmanager": "alertmanager",
                "bank-zipkin": "zipkin", "bank-logs": "elasticsearch"}
-# 12 GiB VM minus kernel, kind node daemons and page cache.
+# Из 12 ГиБ VM вычтены ядро, службы узла kind и файловый кеш.
 VM_MEMORY_MIB = 12 * 1024
 RESERVED_MIB = 2 * 1024
 STRIMZI_OPERATOR_MIB = 384
@@ -73,8 +72,6 @@ def render(analytics: bool, overrides: tuple = ()) -> tuple:
         destination = Path(directory) / "values"
         prepare(destination, environment="dev", profile="single", analytics=analytics, superset=False, external_port=8460)
         values = yaml.safe_load((destination / "public-values.yaml").read_text(encoding="utf-8"))
-        for config_map, source in ASSET_DIRECTORIES.items():
-            values["assets"][config_map] = {name: path.read_text(encoding="utf-8") for name, path in asset_files(source).items()}
         override_file = Path(directory) / "values-with-observability.yaml"
         override_file.write_text(yaml.safe_dump(values), encoding="utf-8")
         arguments = [argument for override in overrides for argument in ("--set", override)]
@@ -140,7 +137,7 @@ class AssetContractTest(unittest.TestCase):
                 self.assertIn(rule["labels"]["severity"], {"critical", "warning"})
                 for annotation in ("summary", "description", "action"):
                     self.assertTrue(rule["annotations"].get(annotation), annotation)
-                # A typo in a job selector would silently disable the alert.
+                # Опечатка в селекторе job незаметно отключила бы оповещение.
                 for operator, selector in re.findall(r'\bjob(=~|=)"([^"]+)"', rule["expr"]):
                     matching = [job for job in jobs if (re.fullmatch(selector, job) if operator == "=~" else selector == job)]
                     self.assertTrue(matching, f"job{operator}{selector} matches no scrape job of prometheus.yml")
@@ -161,7 +158,7 @@ class AssetContractTest(unittest.TestCase):
                     self.assertIn(panel["datasource"]["uid"], provisioned)
                     for target in panel["targets"]:
                         self.assertIn(target["datasource"]["uid"], provisioned)
-                        # A missing series must show as no data; a vector(0) fallback would read as "all fine".
+                        # Отсутствие ряда должно давать «нет данных»; vector(0) создал бы ложное благополучие.
                         self.assertNotIn("vector(", target.get("expr", ""))
 
     def test_http_dashboard_charts_error_rates_and_error_latency_quantiles(self):
@@ -259,8 +256,8 @@ class AssetContractTest(unittest.TestCase):
                 worker.join()
 
     def test_logstash_allowlist_equals_the_strict_index_mapping(self):
-        # dynamic: strict makes Elasticsearch reject any document with an unmapped field, so a field allowed
-        # through the pipeline but absent from the template (or the reverse) floods the dead letter queue.
+        # dynamic: strict отклоняет документы с полями вне mapping; расхождение списка полей pipeline
+        # и шаблона заполнило бы очередь недоставленных документов.
         pipeline = asset_text("elk", "bank-logs.conf")
         allowed = set(re.findall(r'"\^([A-Za-z@_]+)\$"', pipeline[pipeline.index("prune {"):]))
         template = json.loads(asset_text("elk", "index-template.json"))["template"]["mappings"]
@@ -281,7 +278,7 @@ class AssetContractTest(unittest.TestCase):
         data_view = json.loads(asset_text("elk", "kibana-data-view.json"))["data_view"]
         objects_by_id = {}
         for line in asset_text("elk", "kibana-objects.ndjson").splitlines():
-            # kibana-bootstrap.sh strips the leading type/id pair with sed, so the key order is part of the contract.
+            # kibana-bootstrap.sh удаляет начальные type/id через sed, поэтому порядок ключей значим.
             self.assertRegex(line, r'^\{"type":"[a-z-]+","id":"[A-Za-z0-9_-]+","attributes":')
             item = json.loads(line)
             objects_by_id[item["id"]] = item
@@ -348,7 +345,7 @@ class PromtoolTest(unittest.TestCase):
 @unittest.skipUnless(AMTOOL, "amtool is not installed; install the official Alertmanager release to run this check")
 class AlertmanagerTest(unittest.TestCase):
     def test_rendered_configuration_is_valid_and_reads_credentials_from_files(self):
-        text = objects(kind="ConfigMap", overrides=("observability.alerting.telegram.enabled=true",))["alertmanager-config"]["data"]["alertmanager.yml"]
+        text = objects(kind="ConfigMap", overrides=("global.observability.alerting.telegram.enabled=true",))["alertmanager-config"]["data"]["alertmanager.yml"]
         config = yaml.safe_load(text)
         for receiver in config["receivers"]:
             for telegram in receiver["telegram_configs"]:
@@ -458,8 +455,8 @@ class RenderedChartTest(unittest.TestCase):
                                       f"{workload['metadata']['name']}: {source['name']}/{item['key']}")
 
     def test_telegram_receiver_can_point_at_a_local_fake(self):
-        override = ("observability.alerting.telegram.enabled=true",
-                    "observability.alerting.telegram.apiUrl=http://telegram-fake:8081")
+        override = ("global.observability.alerting.telegram.enabled=true",
+                    "global.observability.alerting.telegram.apiUrl=http://telegram-fake:8081")
         text = objects(kind="ConfigMap", overrides=override)["alertmanager-config"]["data"]["alertmanager.yml"]
         self.assertEqual(yaml.safe_load(text)["global"]["telegram_api_url"], "http://telegram-fake:8081")
         self.assertNotIn("@TELEGRAM_API_URL@", objects(kind="ConfigMap")["alertmanager-config"]["data"]["alertmanager.yml"])
@@ -467,7 +464,7 @@ class RenderedChartTest(unittest.TestCase):
     def test_monitoring_update_preserves_application_pods_but_changed_client_configuration_rolls_them(self):
         current = objects()
         monitoring = objects(overrides=("global.chartRevision=" + "a" * 64,
-                                        "observability.retention.metricsTime=6d"))
+                                        "global.observability.retention.metricsTime=6d"))
         clients = objects(overrides=("global.externalPort=8461",))
         for name, workload in current.items():
             if workload["kind"] != "Deployment":
@@ -480,9 +477,9 @@ class RenderedChartTest(unittest.TestCase):
                             monitoring["prometheus"]["spec"]["template"])
 
     def test_logging_can_be_switched_off_without_touching_metrics_and_traces(self):
-        workloads = self.workloads(overrides=("observability.logging.enabled=false",))
+        workloads = self.workloads(overrides=("global.observability.logging.enabled=false",))
         self.assertEqual(set(workloads), LONG_RUNNING - {"elasticsearch", "kibana", "logstash"})
-        names = set(objects(overrides=("observability.logging.enabled=false",)))
+        names = set(objects(overrides=("global.observability.logging.enabled=false",)))
         self.assertFalse({"elasticsearch-data", "logstash-data"} & names)
 
     def test_memory_requests_fit_the_vm_after_the_rest_of_the_release(self):

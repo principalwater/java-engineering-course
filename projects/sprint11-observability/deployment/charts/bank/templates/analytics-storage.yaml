@@ -9,7 +9,7 @@
 {{- if eq $store.name "clickhouse" }}
 {{- $initialization = printf "%s\n%s\n%s" $initialization (index $.Values.assets "bank11-analytics-setup" "init-clickhouse.sql") (index $.Values.assets "bank11-analytics-setup" "activity-marts.sql") }}
 {{- $startup = pick (index $.Values.assets "bank11-analytics-setup") "start-clickhouse.sh" "clickhouse-users.xml" "clickhouse-storage.xml" }}
-{{- $_ := set $startup "clickhouse-prometheus.xml" (index $.Values.assets "bank11-prometheus" "clickhouse-prometheus.xml") }}
+{{- $_ := set $startup "clickhouse-prometheus.xml" (index $.Values.prometheus.assets "clickhouse-prometheus.xml") }}
 {{- end }}
 ---
 apiVersion: v1

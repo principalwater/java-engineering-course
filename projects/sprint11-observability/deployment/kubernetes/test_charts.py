@@ -2,6 +2,7 @@
 
 import copy
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -17,6 +18,7 @@ class BankChartTest(unittest.TestCase):
         cls.directory = tempfile.TemporaryDirectory(prefix="bank11-chart-")
         cls.project = project_dir()
         cls.models = {}
+        cls.sources = {}
         for profile, analytics, superset in (("single", False, False), ("single", True, True), ("ha", False, False)):
             destination = Path(cls.directory.name) / f"{profile}-{analytics}"
             prepare(destination, environment="dev", profile=profile, analytics=analytics,
@@ -25,6 +27,12 @@ class BankChartTest(unittest.TestCase):
                                        "--namespace", "bank11-dev", "-f", str(destination / "public-values.yaml")],
                                       capture_output=True, text=True, check=True)
             cls.models[(profile, analytics)] = list(yaml.safe_load_all(rendered.stdout))
+            cls.sources[(profile, analytics)] = {}
+            for document in re.split(r"(?m)^---\s*$", rendered.stdout):
+                resource = yaml.safe_load(document)
+                if isinstance(resource, dict):
+                    source = re.search(r"(?m)^# Source: (.+)$", document).group(1)
+                    cls.sources[(profile, analytics)][(resource["kind"], resource["metadata"]["name"])] = source
 
     @classmethod
     def tearDownClass(cls):
@@ -33,6 +41,19 @@ class BankChartTest(unittest.TestCase):
     def resources(self, profile="single", analytics=False, kind=None):
         objects = self.models[(profile, analytics)]
         return {item["metadata"]["name"]: item for item in objects if item and item["kind"] == kind}
+
+    def test_observability_resources_are_owned_by_real_application_subcharts(self):
+        """Ресурсы принадлежат дочерним чартам; одних записей в dependencies для этого недостаточно."""
+        owners = {("Deployment", "zipkin"): "zipkin", ("StatefulSet", "prometheus"): "prometheus",
+                  ("StatefulSet", "alertmanager"): "prometheus", ("StatefulSet", "grafana"): "grafana",
+                  ("StatefulSet", "elasticsearch"): "elk", ("StatefulSet", "logstash"): "elk",
+                  ("Deployment", "kibana"): "elk"}
+        owners.update({("ConfigMap", f"bank11-{component}"): component
+                       for component in ("zipkin", "prometheus", "grafana", "elk")})
+        for mode, sources in self.sources.items():
+            for identity, component in owners.items():
+                with self.subTest(mode=mode, resource=identity):
+                    self.assertTrue(sources[identity].startswith(f"bank/charts/{component}/templates/"), sources[identity])
 
     def test_dedicated_ha_quorum_and_persistent_single_are_distinct(self):
         single = self.resources(kind="KafkaNodePool")

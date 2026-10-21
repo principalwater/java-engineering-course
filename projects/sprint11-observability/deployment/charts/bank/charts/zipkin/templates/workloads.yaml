@@ -1,0 +1,85 @@
+{{- $obs := .Values.global.observability }}
+{{- if $obs.enabled }}
+{{- $zipkinAsset := .Values.assets }}
+{{- $release := .Release.Name }}
+{{- range $service := list (dict "name" "zipkin" "port" 9411) }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $service.name }}
+  labels:
+    {{- include "bank.labels" $ | nindent 4 }}
+spec:
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  selector: {app: {{ $service.name }}, bank11.io/instance: {{ $release }}}
+  ports: [{name: http, port: {{ $service.port }}, targetPort: http}]
+{{- end }}
+{{- /* ---------------------------------------------------------------- Zipkin */}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zipkin
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: zipkin, bank11.io/instance: {{ $release }}}
+  template:
+    metadata:
+      labels: {app: zipkin, bank11.io/instance: {{ $release }}, bank11.io/role: observability}
+      annotations: {checksum/public-config: {{ $zipkinAsset | toJson | sha256sum }}}
+    spec:
+      automountServiceAccountToken: false
+      # Service links подставили бы ELASTICSEARCH_*, LOGSTASH_* и другие переменные в образы, читающие настройки из окружения.
+      enableServiceLinks: false
+      nodeSelector:
+        {{- toYaml .Values.global.nodeSelector | nindent 8 }}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: zipkin
+          image: {{ $obs.images.zipkin | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: STORAGE_TYPE, value: mem}
+            # Heap согласован с MEM_MAX_SPANS в zipkin/application.yml; ExitOnOutOfMemoryError позволяет
+            # kubelet перезапустить зависшую JVM, не оставляя её частично работающей.
+            - {name: JAVA_OPTS, value: "-Xms96m -Xmx128m -XX:+ExitOnOutOfMemoryError"}
+          ports: [{name: http, containerPort: 9411}]
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 120
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+          securityContext:
+            {{- include "bank.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml $obs.resources.zipkin | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /zipkin/config, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap:
+            name: bank11-zipkin
+            items: [{key: application.yml, path: application.yml}]
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 64Mi}}
+
+{{- end }}

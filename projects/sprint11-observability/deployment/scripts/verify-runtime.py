@@ -357,9 +357,9 @@ def verify_profiles(alice, bob):
     today = datetime.now(timezone.utc).date()
     birthday = date(today.year - 18, today.month, min(today.day, calendar.monthrange(today.year - 18, today.month)[1]))
     alice.json("PUT", "/ui/account", {"fullName": "Age boundary", "birthDate": birthday.isoformat(), "version": original["version"]}, expected=422)
-    for user, login in ((alice, "alice"), (bob, "bob")):
+    for user, full_name in ((alice, "Иванова Алиса Сергеевна"), (bob, "Петров Борис Иванович")):
         account = user.account()
-        update = {"fullName": account.get("fullName") or login + " Runtime", "birthDate": account.get("birthDate") or "1990-06-15",
+        update = {"fullName": full_name, "birthDate": account.get("birthDate") or "1990-06-15",
                   "version": account["version"]}
         changed = user.json("PUT", "/ui/account", update)
         require(changed["version"] == account["version"] + 1, "Profile version did not advance")

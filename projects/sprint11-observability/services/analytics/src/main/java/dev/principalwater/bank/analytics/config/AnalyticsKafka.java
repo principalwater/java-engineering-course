@@ -1,6 +1,7 @@
 package dev.principalwater.bank.analytics.config;
 
 import dev.principalwater.bank.messaging.KafkaClientProperties;
+import dev.principalwater.bank.messaging.KafkaConsumerSignals;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.util.Map;
@@ -11,9 +12,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
-import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.kafka.KafkaException;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -24,9 +25,6 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.MicrometerConsumerListener;
 import org.springframework.kafka.core.MicrometerProducerListener;
 import org.springframework.kafka.core.ProducerFactory;
-import org.springframework.kafka.event.ConsumerRetryAuthEvent;
-import org.springframework.kafka.event.ConsumerStoppedEvent;
-import org.springframework.kafka.event.KafkaEvent;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.listener.RetryListener;
@@ -35,6 +33,7 @@ import org.springframework.util.backoff.FixedBackOff;
 
 @EnableKafka
 @Configuration(proxyBeanMethods = false)
+@Import(KafkaConsumerSignals.class)
 public class AnalyticsKafka {
     private static final Logger LOG = LoggerFactory.getLogger(AnalyticsKafka.class);
     // Одну партицию читает один поток каждой группы; между ограниченными попытками даём
@@ -99,18 +98,6 @@ public class AnalyticsKafka {
         meters.ifAvailable(
                 registry -> factory.addListener(new MicrometerConsumerListener<>(registry)));
         return factory;
-    }
-
-    @Bean
-    ApplicationListener<KafkaEvent> analyticsConsumerFailureLogger() {
-        return event -> {
-            if (event instanceof ConsumerStoppedEvent stopped
-                    && stopped.getReason() != ConsumerStoppedEvent.Reason.NORMAL) {
-                LOG.warn("Analytics consumer stopped: {}", stopped.getReason());
-            } else if (event instanceof ConsumerRetryAuthEvent retry) {
-                LOG.warn("Analytics consumer authorization retry: {}", retry.getReason());
-            }
-        };
     }
 
     @Bean

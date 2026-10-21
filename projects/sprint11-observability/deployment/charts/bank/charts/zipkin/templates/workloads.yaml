@@ -50,7 +50,7 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - {name: STORAGE_TYPE, value: mem}
-            # Heap согласован с MEM_MAX_SPANS в zipkin/application.yml; ExitOnOutOfMemoryError позволяет
+            # Heap согласован с max-spans в observability/zipkin/application.yml; ExitOnOutOfMemoryError позволяет
             # kubelet перезапустить зависшую JVM, не оставляя её частично работающей.
             - {name: JAVA_OPTS, value: "-Xms96m -Xmx128m -XX:+ExitOnOutOfMemoryError"}
           ports: [{name: http, containerPort: 9411}]

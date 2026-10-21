@@ -38,6 +38,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
@@ -46,6 +47,8 @@ import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.DataAccessException;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
@@ -57,10 +60,12 @@ import org.springframework.transaction.support.TransactionTemplate;
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
             "spring.application.name=workflow_test",
+            "logging.level.dev.principalwater.bank.runtime.workflow.MoneyWorkflow=DEBUG",
             "spring.config.import=classpath:bank-common.properties",
             "spring.flyway.locations=classpath:db/workflow,classpath:db/delivery,classpath:db/kafka"
         })
 @AutoConfigureObservability
+@ExtendWith(OutputCaptureExtension.class)
 class MoneyWorkflowTest extends PostgresTestBase {
     private static final Instant NOW = Instant.parse("2026-10-17T12:00:00Z");
     private static final UUID ACCOUNT = UUID.fromString("0e3cd699-67b1-48a1-b60a-fae32a67ce42");
@@ -133,26 +138,26 @@ class MoneyWorkflowTest extends PostgresTestBase {
                             fixture.jdbc()
                                     .queryForObject(
                                             """
-                    SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema()
-                    AND table_name='bank_intent' AND column_name='traceparent'
-                    """,
+                                            SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema()
+                                            AND table_name='bank_intent' AND column_name='traceparent'
+                                            """,
                                             Integer.class))
                     .isZero();
             UUID id = UUID.randomUUID();
             fixture.jdbc()
                     .update(
                             """
-                    INSERT INTO bank_intent(id,issuer,subject,operation_type,request_id,payload)
-                    VALUES (?,'issuer','subject','DEPOSIT',?,'{"amountMinor":100}'::jsonb)
-                    """,
+                            INSERT INTO bank_intent(id,issuer,subject,operation_type,request_id,payload)
+                            VALUES (?,'issuer','subject','DEPOSIT',?,'{"amountMinor":100}'::jsonb)
+                            """,
                             id,
                             UUID.randomUUID());
             fixture.jdbc()
                     .update(
                             """
-                    INSERT INTO bank_kafka_outbox(id,topic,message_key,message_id,payload,status)
-                    VALUES (?,'bank.cash.notifications.v1','owner','historical','{"amountMinor":100}'::jsonb,'PUBLISHED')
-                    """,
+                            INSERT INTO bank_kafka_outbox(id,topic,message_key,message_id,payload,status)
+                            VALUES (?,'bank.cash.notifications.v1','owner','historical','{"amountMinor":100}'::jsonb,'PUBLISHED')
+                            """,
                             id);
             fixture.migrate("latest");
             assertThat(
@@ -182,7 +187,8 @@ class MoneyWorkflowTest extends PostgresTestBase {
     }
 
     @Test
-    void lostResponseRecoversSameCommandAndNotificationWithoutRepeatingCompletedCommand() {
+    void lostResponseRecoversSameCommandAndNotificationWithoutRepeatingCompletedCommand(
+            CapturedOutput output) {
         InternalOperation command = BankFixtures.deposit(BankFixtures.actor("alice"), 400);
         OperationResult success = success(command);
         when(client.post(eq("accounts"), any(), eq(command), eq(OperationResult.class)))
@@ -191,11 +197,27 @@ class MoneyWorkflowTest extends PostgresTestBase {
         OperationResult pending = workflow.execute(command);
         assertThat(pending.status()).isEqualTo(OperationStatus.PENDING);
         assertThat(pending.balanceMinor()).isNull();
+        assertThat(output.getAll())
+                .contains("Financial workflow deferred: unknown downstream outcome");
+        assertThat(completedLogs(output)).isZero();
         jdbc.update("UPDATE bank_intent SET next_attempt_at = now() - interval '1 second'");
         MoneyWorkflow restarted = restarted();
         restarted.pendingIds().forEach(restarted::recover);
         assertThat(restarted.execute(command)).isEqualTo(success);
         assertThat(workflow.execute(command)).isEqualTo(success);
+        assertThat(completedLogs(output)).isEqualTo(1);
+        assertThat(output.getAll()).contains("Financial workflow claimed: DEPOSIT");
+        assertThat(
+                        output.getAll()
+                                .lines()
+                                .filter(line -> line.contains("Financial workflow"))
+                                .toList())
+                .allSatisfy(
+                        line ->
+                                assertThat(line)
+                                        .doesNotContain(
+                                                command.operationId().toString(),
+                                                command.actor().login()));
         verify(client, times(2))
                 .post("accounts", "/internal/accounts/operations", command, OperationResult.class);
 
@@ -326,7 +348,8 @@ class MoneyWorkflowTest extends PostgresTestBase {
     }
 
     @Test
-    void localCompletionRollsBackWhenNotificationInsertFailsAndExpiredLeaseCanRecover() {
+    void localCompletionRollsBackWhenNotificationInsertFailsAndExpiredLeaseCanRecover(
+            CapturedOutput output) {
         InternalOperation command = BankFixtures.deposit(BankFixtures.actor("alice"), 100);
         when(client.post(eq("accounts"), any(), eq(command), eq(OperationResult.class)))
                 .thenReturn(success(command));
@@ -339,6 +362,7 @@ class MoneyWorkflowTest extends PostgresTestBase {
                     .isTrue();
             assertThat(jdbc.queryForObject("SELECT count(*) FROM bank_kafka_outbox", Integer.class))
                     .isZero();
+            assertThat(completedLogs(output)).isZero();
         } finally {
             jdbc.execute("ALTER TABLE bank_kafka_outbox DROP CONSTRAINT fixture_reject_outbox");
         }
@@ -346,8 +370,16 @@ class MoneyWorkflowTest extends PostgresTestBase {
         MoneyWorkflow restarted = restarted();
         restarted.pendingIds().forEach(restarted::recover);
         assertThat(restarted.execute(command)).isEqualTo(success(command));
+        assertThat(completedLogs(output)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM bank_kafka_outbox", Integer.class))
                 .isEqualTo(1);
+    }
+
+    private long completedLogs(CapturedOutput output) {
+        return output.getAll()
+                .lines()
+                .filter(line -> line.contains("Financial workflow completed:"))
+                .count();
     }
 
     @Test

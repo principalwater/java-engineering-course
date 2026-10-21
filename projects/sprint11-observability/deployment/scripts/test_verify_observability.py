@@ -155,10 +155,16 @@ def trace_fixture():
         if kind:
             item["kind"] = kind
         return item
-    return [span(1, "http get", "cash", kind="SERVER", tags={"http.method": "GET"}),
-            span(2, "query", "cash", 1, tags={"jdbc.query": "select"}),
-            span(3, "notifications publish", "cash", 1, "PRODUCER", {"messaging.system": "kafka"}),
-            span(4, "notifications receive", "notifications", 3, "CONSUMER", {"messaging.system": "kafka"})]
+    return [span(1, "http post", "front", kind="SERVER", tags={"http.method": "POST"}),
+            span(2, "http post", "front", 1, "CLIENT", {"http.method": "POST"}),
+            span(3, "http post", "gateway", 2, "SERVER", {"http.method": "POST"}),
+            span(4, "http post", "gateway", 3, "CLIENT", {"http.method": "POST"}),
+            span(5, "http post", "cash", 4, "SERVER", {"http.method": "POST"}),
+            span(6, "http post", "cash", 5, "CLIENT", {"http.method": "POST"}),
+            span(7, "http post", "accounts", 6, "SERVER", {"http.method": "POST"}),
+            span(8, "query", "accounts", 7, tags={"jdbc.query": "select"}),
+            span(9, "notifications publish", "accounts", 7, "PRODUCER", {"messaging.system": "kafka"}),
+            span(10, "notifications receive", "notifications", 9, "CONSUMER", {"messaging.system": "kafka"})]
 
 
 class TraceAndLogTest(unittest.TestCase):
@@ -168,16 +174,26 @@ class TraceAndLogTest(unittest.TestCase):
         self.assertEqual([], problems)
         self.assertEqual(1, facts["chains"])
         cycle = copy.deepcopy(good)
-        cycle[2]["parentId"] = cycle[3]["id"]
+        cycle[-2]["parentId"] = cycle[-1]["id"]
         mixed = copy.deepcopy(good)
-        mixed[3]["traceId"] = "2" * 32
+        mixed[-1]["traceId"] = "2" * 32
         invalid = copy.deepcopy(good)
-        invalid[3]["id"] = "0" * 16
-        for broken in (cycle, mixed, invalid):
-            with self.subTest(broken=broken):
+        invalid[-1]["id"] = "0" * 16
+        missing_hop = copy.deepcopy(good)
+        missing_hop[2]["localEndpoint"]["serviceName"] = "other"
+        bypassed_gateway = copy.deepcopy(good)
+        bypassed_gateway[4]["parentId"] = good[0]["id"]
+        unrelated_jdbc = copy.deepcopy(good)
+        unrelated_jdbc[-3]["parentId"] = good[0]["id"]
+        unrelated_kafka = copy.deepcopy(good)
+        unrelated_kafka[-2]["parentId"] = good[0]["id"]
+        cases = {"cycle": cycle, "mixed trace ids": mixed, "zero span id": invalid, "missing service": missing_hop,
+                 "bypassed gateway": bypassed_gateway, "unrelated JDBC": unrelated_jdbc, "unrelated Kafka": unrelated_kafka}
+        for name, broken in cases.items():
+            with self.subTest(case=name):
                 facts, problems = observability.analyze_traces([broken], {"cash", "notifications"}, ())
-            self.assertEqual(0, facts["chains"])
-            self.assertTrue(problems)
+                self.assertEqual(0, facts["chains"])
+                self.assertTrue(problems)
 
     def test_trace_url_and_nested_log_secrets_are_reported_without_values(self):
         secret = "private-fixture-password"

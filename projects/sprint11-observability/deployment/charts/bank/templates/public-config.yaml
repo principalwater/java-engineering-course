@@ -16,5 +16,5 @@ data:
   {{- toYaml $data | nindent 2 }}
 {{- end }}
 {{- if not (hasKey .Values.assets "bank11-setup") }}
-{{- fail "public assets missing: run kubernetes/prepare.py and pass its public-values.yaml" }}
+{{- fail "public assets missing: run deployment/kubernetes/prepare.py and pass its public-values.yaml" }}
 {{- end }}

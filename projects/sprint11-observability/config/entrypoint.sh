@@ -16,7 +16,7 @@ if [ -d /run/trust ]; then
   printf '%s\n' '-Djavax.net.ssl.trustStore=/tmp/bank-trust.jks' \
     '-Djavax.net.ssl.trustStorePassword=changeit' '-Djavax.net.ssl.trustStoreType=JKS' > /tmp/bank-jvm.options
 fi
-# emptyDir survives a container restart; old readiness must not admit a new JVM.
+# emptyDir переживает перезапуск контейнера; старый маркер не должен объявлять новую JVM готовой.
 probe_directory=${BANK_PROBES_DIRECTORY:-/tmp/bank-probes}
 rm -f "$probe_directory/live" "$probe_directory/ready"
 # JDK scrape-worker: по 5 с на запрос/ответ и не более 8 соединений, включая idle.

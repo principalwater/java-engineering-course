@@ -83,6 +83,9 @@ class MoneyIntegrationTest extends AccountsTestBase {
                 meters.find(failure.getMetricName())
                         .tag("reason", "INSUFFICIENT_FUNDS")
                         .tag(type == OperationType.TRANSFER ? "sender" : "login", alice.login());
+        if (type == OperationType.TRANSFER) {
+            counter.tag("recipient", bob.login());
+        }
         Counter previous = counter.counter();
         double before = previous == null ? 0 : previous.count();
         InternalOperation command =
@@ -112,9 +115,9 @@ class MoneyIntegrationTest extends AccountsTestBase {
                 1,
                 jdbc.queryForObject(
                         """
-                SELECT count(*) FROM bank_kafka_outbox WHERE topic=? AND message_key=?
-                AND payload->>'reason'='INSUFFICIENT_FUNDS' AND (payload->>'requestedAmountMinor')::bigint=100
-                """,
+                        SELECT count(*) FROM bank_kafka_outbox WHERE topic=? AND message_key=?
+                        AND payload->>'reason'='INSUFFICIENT_FUNDS' AND (payload->>'requestedAmountMinor')::bigint=100
+                        """,
                         Integer.class,
                         BankTopics.BUSINESS_FAILURES,
                         owner.toString()));
@@ -223,7 +226,8 @@ class MoneyIntegrationTest extends AccountsTestBase {
         Actor bob = ready("bob");
         money.execute(BankFixtures.deposit(alice, 1_000));
         jdbc.execute(
-                "ALTER TABLE bank_kafka_outbox ADD CONSTRAINT reject_transfer_fixture CHECK (payload->>'type' <> 'TRANSFER_IN')");
+                "ALTER TABLE bank_kafka_outbox ADD CONSTRAINT reject_transfer_fixture CHECK"
+                        + " (payload->>'type' <> 'TRANSFER_IN')");
         try {
             InternalOperation transfer =
                     new InternalOperation(

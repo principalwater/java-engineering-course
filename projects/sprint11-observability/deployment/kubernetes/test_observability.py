@@ -68,21 +68,21 @@ def mebibytes(quantity: str) -> float:
 
 
 @lru_cache(maxsize=None)
-def render(analytics: bool, overrides: tuple = ()) -> tuple:
+def render(analytics: bool, overrides: tuple = (), environment: str = "dev") -> tuple:
     with tempfile.TemporaryDirectory(prefix="bank11-observability-") as directory:
         destination = Path(directory) / "values"
-        prepare(destination, environment="dev", profile="single", analytics=analytics, superset=False, external_port=8460)
+        prepare(destination, environment=environment, profile="single", analytics=analytics, superset=False, external_port=8460)
         values = yaml.safe_load((destination / "public-values.yaml").read_text(encoding="utf-8"))
         override_file = Path(directory) / "values-with-observability.yaml"
         override_file.write_text(yaml.safe_dump(values), encoding="utf-8")
         arguments = [argument for override in overrides for argument in ("--set", override)]
-        rendered = subprocess.run(["helm", "template", "bank", str(CHART), "--namespace", "bank11-dev",
+        rendered = subprocess.run(["helm", "template", "bank", str(CHART), "--namespace", f"bank11-{environment}",
                                    "-f", str(override_file), *arguments], capture_output=True, text=True, check=True)
     return tuple(item for item in yaml.safe_load_all(rendered.stdout) if isinstance(item, dict))
 
 
-def objects(analytics: bool = False, kind: str = None, overrides: tuple = ()) -> dict:
-    return {item["metadata"]["name"]: item for item in render(analytics, overrides) if kind is None or item["kind"] == kind}
+def objects(analytics: bool = False, kind: str = None, overrides: tuple = (), environment: str = "dev") -> dict:
+    return {item["metadata"]["name"]: item for item in render(analytics, overrides, environment) if kind is None or item["kind"] == kind}
 
 
 def containers(workload: dict) -> list:
@@ -333,6 +333,45 @@ class PromtoolTest(unittest.TestCase):
             path.write_text(yaml.safe_dump(fixture), encoding="utf-8")
             self.promtool("test", "rules", str(path))
 
+    def test_business_totals_and_top_lists_keep_retired_series_and_agree_at_the_same_time(self):
+        # Перезапуск Pod не стирает события внутри окна; stat и top должны запрашивать один instant.
+        dashboard = dashboards()["bank-business.json"]
+        scenarios = (
+            ("new growing", ("_x5 1 2 3 4",), "9m", 4),
+            ("new constant", ("_x5 1x3",), "9m", 1),
+            ("retired growing", ("_x5 1 2 3 stale _x2",), "10m", 3),
+            ("retired single", ("_x5 1 stale _x3",), "10m", 1),
+            ("known single", ("100 _x4 103 stale _x3",), "10m", 3),
+            ("known unchanged single", ("100 _x4 100 stale _x3",), "10m", 0),
+            ("known single after reset", ("100 _x4 2 stale _x3",), "10m", 2),
+            ("reset with baseline", ("0 2 4 0 1 2 3 4 5 6 7",), "10m", 10),
+            ("new reset estimate", ("_x5 1 2 0 1",), "9m", 3),
+            ("retired and current instances", ("_x5 1 2 3 stale _x2", "_x7 1 2"), "10m", 5),
+            ("expired", ("_x5 1 stale _x20",), "20m", None),
+        )
+        tests = []
+        for metric, label, total_id, top_id in (
+                ("bank_cash_withdrawal_failures_total", "login", 2, 3),
+                ("bank_transfer_failures_total", "sender", 7, 8),
+                ("bank_notification_failures_total", "login", 14, 15)):
+            total = next(panel for panel in panels(dashboard) if panel["id"] == total_id)["targets"][0]
+            top = next(panel for panel in panels(dashboard) if panel["id"] == top_id)["targets"][0]
+            for name, values, at, expected in scenarios:
+                tests.append({"name": f"{metric}: {name}", "interval": "1m", "input_series": [
+                    {"series": metric + '{' + f'{label}="subject",instance="pod-{index}"' + '}', "values": value}
+                    for index, value in enumerate(values)], "promql_expr_test": [
+                        {"expr": target["expr"].replace("$__range", "10m"), "eval_time": at,
+                         "exp_samples": [] if expected is None else [{"labels": labels, "value": expected}]}
+                        for target, labels in ((total, '{}'), (top, '{' + f'{label}="subject"' + '}'))]})
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "business-window.test.yml"
+            path.write_text(yaml.safe_dump({"evaluation_interval": "30s", "tests": tests}), encoding="utf-8")
+            self.promtool("test", "rules", str(path))
+        for identity in (2, 7, 14):
+            target = next(panel for panel in panels(dashboard) if panel["id"] == identity)["targets"][0]
+            self.assertTrue(target["instant"])
+            self.assertFalse(target["range"])
+
     def test_rendered_scrape_configuration_is_valid(self):
         config_maps = objects(analytics=True, kind="ConfigMap")
         with tempfile.TemporaryDirectory() as directory:
@@ -503,6 +542,15 @@ class RenderedChartTest(unittest.TestCase):
                 self.assertNotEqual(template, clients[name]["spec"]["template"], name)
         self.assertNotEqual(current["prometheus"]["spec"]["template"],
                             monitoring["prometheus"]["spec"]["template"])
+
+    def test_environment_selects_safe_debug_diagnostics_and_sampling_for_every_bank_service(self):
+        # Раньше DEBUG существовал только в неактивном профиле local и не доходил до ELK стенда.
+        for environment, level, sampling in (("dev", "DEBUG", "1.0"), ("test", "DEBUG", "1.0"), ("prod", "INFO", "0.1")):
+            clients = objects(analytics=True, kind="ConfigMap", environment=environment)
+            for service in ("accounts", "cash", "transfer", "notifications", "front", "gateway", "analytics"):
+                with self.subTest(environment=environment, service=service):
+                    self.assertEqual(level, clients[f"{service}-client"]["data"]["LOGGING_LEVEL_DEV_PRINCIPALWATER_BANK"])
+                    self.assertEqual(sampling, clients[f"{service}-client"]["data"]["MANAGEMENT_TRACING_SAMPLING_PROBABILITY"])
 
     def test_logging_can_be_switched_off_without_touching_metrics_and_traces(self):
         workloads = self.workloads(overrides=("global.observability.logging.enabled=false",))

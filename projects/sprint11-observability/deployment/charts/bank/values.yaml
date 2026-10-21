@@ -108,7 +108,7 @@ platform:
   cassandraStorage: 2Gi
   clickhouseHotStorage: 2Gi
   clickhouseColdStorage: 2Gi
-# Public source assets are supplied by kubernetes/prepare.py; never secret contents.
+# Публичные файлы предоставляет deployment/kubernetes/prepare.py; значения секретов сюда не попадают.
 assets: {}
 openbao:
   bindings: {}

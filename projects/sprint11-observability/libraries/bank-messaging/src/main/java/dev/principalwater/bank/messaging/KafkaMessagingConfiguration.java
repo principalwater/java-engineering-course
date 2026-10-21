@@ -21,6 +21,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -41,6 +42,7 @@ import org.springframework.util.backoff.FixedBackOff;
 @EnableKafka
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(KafkaProperties.class)
+@Import(KafkaConsumerSignals.class)
 public class KafkaMessagingConfiguration {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaMessagingConfiguration.class);
 

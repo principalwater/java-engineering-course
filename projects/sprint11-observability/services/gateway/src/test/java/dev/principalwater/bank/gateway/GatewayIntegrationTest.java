@@ -17,12 +17,15 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.availability.AvailabilityChangeEvent;
 import org.springframework.boot.availability.ReadinessState;
 import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -35,6 +38,7 @@ import org.springframework.test.web.reactive.server.WebTestClient;
         properties = "management.tracing.sampling.probability=1.0")
 @AutoConfigureWebTestClient
 @AutoConfigureObservability
+@ExtendWith(OutputCaptureExtension.class)
 class GatewayIntegrationTest extends SecurityTestBase {
     private static final AtomicReference<String> RECEIVED_TOKEN = new AtomicReference<>();
     private static final AtomicReference<String> RECEIVED_TRACEPARENT = new AtomicReference<>();
@@ -116,7 +120,7 @@ class GatewayIntegrationTest extends SecurityTestBase {
     }
 
     @Test
-    void forwardsActualUserJwtAndStripsCallerSuppliedOwner() {
+    void forwardsActualUserJwtAndStripsCallerSuppliedOwner(CapturedOutput output) {
         String token = JWT.user("alice", "alice", "accounts.read");
         client.get()
                 .uri("/api/accounts/me")
@@ -131,6 +135,10 @@ class GatewayIntegrationTest extends SecurityTestBase {
                 .isEqualTo("alice");
         assertEquals("Bearer " + token, RECEIVED_TOKEN.get());
         assertFalse(RECEIVED_OWNER_HEADER.get());
+        assertTrue(output.getAll().contains("Untrusted identity headers removed"));
+        assertFalse(output.getAll().contains("foreign-owner"));
+        assertFalse(output.getAll().contains("foreign-account"));
+        assertFalse(output.getAll().contains(token));
     }
 
     @Test

@@ -587,18 +587,53 @@ def analyze_traces(traces, services, needles):
             if children <= reachable:
                 break
             reachable.update(children)
-        if features == {"http", "jdbc", "kafka"} and valid_ids and orphans == 0 and roots == 1 and reachable == identifiers:
+        if (features == {"http", "jdbc", "kafka"} and valid_ids and orphans == 0
+                and roots == 1 and reachable == identifiers and complete_bank_chain(trace)):
             chains.append(trace[0]["traceId"])
         elif len(features) > best[0]:
             best = (len(features), f"{sorted(features)} orphans={orphans} roots={roots}")
     problems = [f"no spans from {sorted(services - seen)}"] if services - seen else []
     if not chains:
-        problems.append("no complete trace links an HTTP request, a JDBC query and a Kafka producer to its consumer "
+        problems.append("no complete trace links front -> gateway -> cash/transfer -> accounts, an Accounts JDBC query "
+                        "and a Kafka producer to its consumer "
                         f"with consistent parent ids (best partial trace: {best[1]}; {len(traces)} traces read)")
     facts = {"traces": len(traces), "spans": sum(len(trace) for trace in traces), "kinds": counts, "chains": len(chains), "chain_examples": chains[:5],
              "services": sorted(name for name in seen if name)}
     facts["leaks"] = [f"{key}: {found} x{count}" for (key, found), count in sorted(leaks.items())]
     return facts, problems
+
+
+def complete_bank_chain(trace):
+    """Одних типов span недостаточно: запрос должен пройти банковские сервисы по порядку."""
+    parents = {}
+    servers = {}
+    producers = {span["id"] for span in trace if "kafka-producer" in span_kinds(span)}
+    for span in trace:
+        parents.setdefault(span["id"], set()).update([span["parentId"]] if span.get("parentId") else [])
+        if "http-server" in span_kinds(span):
+            service = (span.get("localEndpoint") or {}).get("serviceName")
+            servers.setdefault(service, set()).add(span["id"])
+
+    def ancestors(identifier):
+        found, pending = set(), list(parents.get(identifier, ()))
+        while pending:
+            parent = pending.pop()
+            if parent not in found:
+                found.add(parent)
+                pending.extend(parents.get(parent, ()))
+        return found
+
+    money = servers.get("cash", set()) | servers.get("transfer", set())
+    for account in servers.get("accounts", ()):
+        branches = {node for node in money & ancestors(account)
+                    if any(gateway in ancestors(node) and servers.get("front", set()) & ancestors(gateway)
+                           for gateway in servers.get("gateway", ()))}
+        jdbc = any("jdbc" in span_kinds(span) and account in ancestors(span["id"]) for span in trace)
+        kafka = any("kafka-consumer" in span_kinds(span) and span.get("parentId") in producers
+                    and branches & ancestors(span["parentId"]) for span in trace)
+        if branches and jdbc and kafka:
+            return True
+    return False
 
 
 def fetch_traces(port, services):
@@ -629,7 +664,8 @@ def check_zipkin(stack, report):
         stack.wait("Zipkin traces", complete)
         report.facts["zipkin"] = latest
         report.passed("zipkin", f"{latest['spans']} spans in {latest['traces']} traces from {latest['services']}; "
-                      f"HTTP, JDBC and Kafka linked by parent ids in {latest['chains']} trace(s); "
+                      "front -> gateway -> cash/transfer -> accounts, Accounts JDBC and Kafka delivery "
+                      f"linked by parent ids in {latest['chains']} trace(s); "
                       "no URL query strings, tokens or secret values in names or tags")
 
 

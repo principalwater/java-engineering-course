@@ -1,14 +1,14 @@
-# Spring Boot picks this file up from /zipkin/config in the official image and merges it over
-# zipkin-server-shared.yml; only the deliberate deviations from the 3.6.1 defaults are listed.
+# Официальный образ Spring Boot читает /zipkin/config поверх zipkin-server-shared.yml;
+# здесь перечислены только намеренные отличия от настроек 3.6.1.
 zipkin:
   storage:
-    # Traces are a diagnostic aid, not a system of record: they live in memory, so a pod restart drops
-    # them. Logs (Elasticsearch) and metrics (Prometheus) are the persistent signals.
+    # Диагностические трассы хранятся в памяти и теряются при перезапуске Pod.
+    # Долговременные сигналы сохраняют Elasticsearch и Prometheus.
     type: mem
     mem:
-      # Oldest traces are evicted first once the cap is reached. 100k spans fit the 128m heap set in the
-      # chart with room for the query path; the 500k image default would not.
+      # Старые span вытесняются при достижении лимита; расход heap зависит и от размера tags.
+      # Лимит уменьшен относительно 500k образа, но не заменяет контроль JVM-метрик и памяти Pod.
       max-spans: 100000
   query:
-    # Match the in-memory retention horizon instead of the 24h default the UI would otherwise promise.
+    # Ограничиваем окно поиска часом: in-memory история не гарантирует стандартные 24 часа UI.
     lookback: 3600000

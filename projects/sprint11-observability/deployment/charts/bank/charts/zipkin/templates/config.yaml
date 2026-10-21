@@ -5,4 +5,4 @@ metadata:
   labels:
     {{- include "bank.labels" . | nindent 4 }}
 data:
-  {{- required "zipkin.assets is missing: run kubernetes/prepare.py and pass its public-values.yaml" .Values.assets | toYaml | nindent 2 }}
+  {{- required "zipkin.assets is missing: run deployment/kubernetes/prepare.py and pass its public-values.yaml" .Values.assets | toYaml | nindent 2 }}

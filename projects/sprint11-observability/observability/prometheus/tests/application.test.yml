@@ -131,35 +131,35 @@ tests:
           end in an OOM kill if the heap keeps growing.
         action: Check the JVM dashboard for a leak-shaped heap curve before the next restart; take a heap histogram
           if the pod is still alive.
-- name: first observations at one are counted across new identities without publishing them
+- name: first observations survive retired pods within the window without exposing identities
   interval: 1m
   input_series:
   - series: bank_cash_withdrawal_failures_total{login="new-0"}
-    values: _x5 1x20
+    values: _x5 1 stale _x20
   - series: bank_cash_withdrawal_failures_total{login="new-1"}
-    values: _x5 1x20
+    values: _x5 1 stale _x20
   - series: bank_cash_withdrawal_failures_total{login="new-2"}
-    values: _x5 1x20
+    values: _x5 1 stale _x20
   - series: bank_cash_withdrawal_failures_total{login="new-3"}
-    values: _x5 1x20
+    values: _x5 1 stale _x20
   - series: bank_cash_withdrawal_failures_total{login="new-4"}
-    values: _x5 1x20
+    values: _x5 1 stale _x20
   - series: bank_transfer_failures_total{sender="new-0",recipient="recipient"}
-    values: _x5 1x20
+    values: _x5 1 stale _x20
   - series: bank_transfer_failures_total{sender="new-1",recipient="recipient"}
-    values: _x5 1x20
+    values: _x5 1 stale _x20
   - series: bank_transfer_failures_total{sender="new-2",recipient="recipient"}
-    values: _x5 1x20
+    values: _x5 1 stale _x20
   - series: bank_transfer_failures_total{sender="new-3",recipient="recipient"}
-    values: _x5 1x20
+    values: _x5 1 stale _x20
   - series: bank_transfer_failures_total{sender="new-4",recipient="recipient"}
-    values: _x5 1x20
+    values: _x5 1 stale _x20
   - series: bank_notification_failures_total{login="new-0"}
-    values: _x5 1x20
+    values: _x5 1 stale _x20
   - series: bank_notification_failures_total{login="new-1"}
-    values: _x5 1x20
+    values: _x5 1 stale _x20
   - series: bank_notification_failures_total{login="new-2"}
-    values: _x5 1x20
+    values: _x5 1 stale _x20
   alert_rule_test:
   - eval_time: 9m
     alertname: BankCashWithdrawalFailuresByLogin
@@ -190,3 +190,12 @@ tests:
         summary: Repeated notification failures
         description: 3 notifications failed in 10 minutes.
         action: Check the notifications worker logs and the *.DLT topic volume on the Kafka topics dashboard.
+  - eval_time: 19m
+    alertname: BankCashWithdrawalFailuresByLogin
+    exp_alerts: []
+  - eval_time: 19m
+    alertname: BankTransferFailuresBySender
+    exp_alerts: []
+  - eval_time: 19m
+    alertname: BankNotificationFailuresByLogin
+    exp_alerts: []

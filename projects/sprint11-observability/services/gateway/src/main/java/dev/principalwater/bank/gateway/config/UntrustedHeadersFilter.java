@@ -2,6 +2,8 @@ package dev.principalwater.bank.gateway.config;
 
 import java.util.Locale;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -10,16 +12,11 @@ import org.springframework.http.server.reactive.ServerHttpRequest;
 
 @Configuration(proxyBeanMethods = false)
 public class UntrustedHeadersFilter {
-    private static final Set<String> REMOVED =
-            Set.of(
-                    "x-owner-id",
-                    "x-actor",
-                    "x-user-token",
-                    "x-account-id",
-                    "forwarded",
-                    "x-forwarded-for",
-                    "x-forwarded-host",
-                    "x-forwarded-proto");
+    private static final Logger LOG = LoggerFactory.getLogger(UntrustedHeadersFilter.class);
+    private static final Set<String> IDENTITY_HEADERS =
+            Set.of("x-owner-id", "x-actor", "x-user-token", "x-account-id");
+    private static final Set<String> FORWARDED_HEADERS =
+            Set.of("forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto");
 
     @Bean
     GlobalFilter stripUntrustedIdentity() {
@@ -32,6 +29,13 @@ public class UntrustedHeadersFilter {
     }
 
     private void removeUntrustedHeaders(HttpHeaders headers) {
-        headers.keySet().removeIf(name -> REMOVED.contains(name.toLowerCase(Locale.ROOT)));
+        boolean identityRemoved =
+                headers.keySet()
+                        .removeIf(name -> IDENTITY_HEADERS.contains(name.toLowerCase(Locale.ROOT)));
+        headers.keySet()
+                .removeIf(name -> FORWARDED_HEADERS.contains(name.toLowerCase(Locale.ROOT)));
+        if (identityRemoved) {
+            LOG.warn("Untrusted identity headers removed");
+        }
     }
 }

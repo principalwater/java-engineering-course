@@ -73,7 +73,7 @@
     {
       "type": "stat",
       "title": "Failed withdrawals (range)",
-      "description": "Counters bank_cash_withdrawal_failures_total, bank_transfer_failures_total and bank_notification_failures_total are registered on the first failure, so 'no failures counted' is the normal empty state, not missing telemetry.",
+      "description": "Instant total for the selected window, including retired pod series. New monotonic counters use the observed value; resets use the Prometheus increase estimate. Exact financial totals belong to the ledger.",
       "datasource": {
         "type": "prometheus",
         "uid": "bank-prometheus"
@@ -85,10 +85,10 @@
             "uid": "bank-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(((increase(bank_cash_withdrawal_failures_total[$__range]) and bank_cash_withdrawal_failures_total offset $__range) or bank_cash_withdrawal_failures_total))",
+          "expr": "sum(((increase(bank_cash_withdrawal_failures_total[$__range]) and ((resets(bank_cash_withdrawal_failures_total[$__range]) > 0) or bank_cash_withdrawal_failures_total offset $__range)) or ((last_over_time(bank_cash_withdrawal_failures_total[$__range]) - bank_cash_withdrawal_failures_total offset $__range >= 0) or last_over_time(bank_cash_withdrawal_failures_total[$__range]))))",
           "legendFormat": "",
-          "range": true,
-          "instant": false,
+          "range": false,
+          "instant": true,
           "refId": "A"
         }
       ],
@@ -152,7 +152,7 @@
             "uid": "bank-prometheus"
           },
           "editorMode": "code",
-          "expr": "topk(10, sum by (login) (((increase(bank_cash_withdrawal_failures_total[$__range]) and bank_cash_withdrawal_failures_total offset $__range) or bank_cash_withdrawal_failures_total)))",
+          "expr": "topk(10, sum by (login) (((increase(bank_cash_withdrawal_failures_total[$__range]) and ((resets(bank_cash_withdrawal_failures_total[$__range]) > 0) or bank_cash_withdrawal_failures_total offset $__range)) or ((last_over_time(bank_cash_withdrawal_failures_total[$__range]) - bank_cash_withdrawal_failures_total offset $__range >= 0) or last_over_time(bank_cash_withdrawal_failures_total[$__range])))))",
           "legendFormat": "{{login}}",
           "range": false,
           "instant": true,
@@ -219,7 +219,7 @@
             "uid": "bank-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (login) (((increase(bank_cash_withdrawal_failures_total[$__rate_interval]) and bank_cash_withdrawal_failures_total offset $__rate_interval) or bank_cash_withdrawal_failures_total))",
+          "expr": "sum by (login) (((increase(bank_cash_withdrawal_failures_total[$__rate_interval]) and ((resets(bank_cash_withdrawal_failures_total[$__rate_interval]) > 0) or bank_cash_withdrawal_failures_total offset $__rate_interval)) or ((last_over_time(bank_cash_withdrawal_failures_total[$__rate_interval]) - bank_cash_withdrawal_failures_total offset $__rate_interval >= 0) or last_over_time(bank_cash_withdrawal_failures_total[$__rate_interval]))))",
           "legendFormat": "{{login}}",
           "range": true,
           "instant": false,
@@ -298,7 +298,7 @@
             "uid": "bank-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (reason) (((increase(bank_cash_withdrawal_failures_total[$__rate_interval]) and bank_cash_withdrawal_failures_total offset $__rate_interval) or bank_cash_withdrawal_failures_total))",
+          "expr": "sum by (reason) (((increase(bank_cash_withdrawal_failures_total[$__rate_interval]) and ((resets(bank_cash_withdrawal_failures_total[$__rate_interval]) > 0) or bank_cash_withdrawal_failures_total offset $__rate_interval)) or ((last_over_time(bank_cash_withdrawal_failures_total[$__rate_interval]) - bank_cash_withdrawal_failures_total offset $__rate_interval >= 0) or last_over_time(bank_cash_withdrawal_failures_total[$__rate_interval]))))",
           "legendFormat": "{{reason}}",
           "range": true,
           "instant": false,
@@ -378,7 +378,7 @@
     {
       "type": "stat",
       "title": "Failed transfers (range)",
-      "description": "Counters bank_cash_withdrawal_failures_total, bank_transfer_failures_total and bank_notification_failures_total are registered on the first failure, so 'no failures counted' is the normal empty state, not missing telemetry.",
+      "description": "Instant total for the selected window, including retired pod series. New monotonic counters use the observed value; resets use the Prometheus increase estimate. Exact financial totals belong to the ledger.",
       "datasource": {
         "type": "prometheus",
         "uid": "bank-prometheus"
@@ -390,10 +390,10 @@
             "uid": "bank-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(((increase(bank_transfer_failures_total[$__range]) and bank_transfer_failures_total offset $__range) or bank_transfer_failures_total))",
+          "expr": "sum(((increase(bank_transfer_failures_total[$__range]) and ((resets(bank_transfer_failures_total[$__range]) > 0) or bank_transfer_failures_total offset $__range)) or ((last_over_time(bank_transfer_failures_total[$__range]) - bank_transfer_failures_total offset $__range >= 0) or last_over_time(bank_transfer_failures_total[$__range]))))",
           "legendFormat": "",
-          "range": true,
-          "instant": false,
+          "range": false,
+          "instant": true,
           "refId": "A"
         }
       ],
@@ -457,7 +457,7 @@
             "uid": "bank-prometheus"
           },
           "editorMode": "code",
-          "expr": "topk(10, sum by (sender) (((increase(bank_transfer_failures_total[$__range]) and bank_transfer_failures_total offset $__range) or bank_transfer_failures_total)))",
+          "expr": "topk(10, sum by (sender) (((increase(bank_transfer_failures_total[$__range]) and ((resets(bank_transfer_failures_total[$__range]) > 0) or bank_transfer_failures_total offset $__range)) or ((last_over_time(bank_transfer_failures_total[$__range]) - bank_transfer_failures_total offset $__range >= 0) or last_over_time(bank_transfer_failures_total[$__range])))))",
           "legendFormat": "{{sender}}",
           "range": false,
           "instant": true,
@@ -524,7 +524,7 @@
             "uid": "bank-prometheus"
           },
           "editorMode": "code",
-          "expr": "topk(10, sum by (recipient) (((increase(bank_transfer_failures_total[$__range]) and bank_transfer_failures_total offset $__range) or bank_transfer_failures_total)))",
+          "expr": "topk(10, sum by (recipient) (((increase(bank_transfer_failures_total[$__range]) and ((resets(bank_transfer_failures_total[$__range]) > 0) or bank_transfer_failures_total offset $__range)) or ((last_over_time(bank_transfer_failures_total[$__range]) - bank_transfer_failures_total offset $__range >= 0) or last_over_time(bank_transfer_failures_total[$__range])))))",
           "legendFormat": "{{recipient}}",
           "range": false,
           "instant": true,
@@ -591,7 +591,7 @@
             "uid": "bank-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (sender) (((increase(bank_transfer_failures_total[$__rate_interval]) and bank_transfer_failures_total offset $__rate_interval) or bank_transfer_failures_total))",
+          "expr": "sum by (sender) (((increase(bank_transfer_failures_total[$__rate_interval]) and ((resets(bank_transfer_failures_total[$__rate_interval]) > 0) or bank_transfer_failures_total offset $__rate_interval)) or ((last_over_time(bank_transfer_failures_total[$__rate_interval]) - bank_transfer_failures_total offset $__rate_interval >= 0) or last_over_time(bank_transfer_failures_total[$__rate_interval]))))",
           "legendFormat": "{{sender}}",
           "range": true,
           "instant": false,
@@ -670,7 +670,7 @@
             "uid": "bank-prometheus"
           },
           "editorMode": "code",
-          "expr": "topk(15, sum by (sender, recipient) (((increase(bank_transfer_failures_total[$__range]) and bank_transfer_failures_total offset $__range) or bank_transfer_failures_total)))",
+          "expr": "topk(15, sum by (sender, recipient) (((increase(bank_transfer_failures_total[$__range]) and ((resets(bank_transfer_failures_total[$__range]) > 0) or bank_transfer_failures_total offset $__range)) or ((last_over_time(bank_transfer_failures_total[$__range]) - bank_transfer_failures_total offset $__range >= 0) or last_over_time(bank_transfer_failures_total[$__range])))))",
           "legendFormat": "",
           "range": false,
           "instant": true,
@@ -742,7 +742,7 @@
             "uid": "bank-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (reason) (((increase(bank_transfer_failures_total[$__rate_interval]) and bank_transfer_failures_total offset $__rate_interval) or bank_transfer_failures_total))",
+          "expr": "sum by (reason) (((increase(bank_transfer_failures_total[$__rate_interval]) and ((resets(bank_transfer_failures_total[$__rate_interval]) > 0) or bank_transfer_failures_total offset $__rate_interval)) or ((last_over_time(bank_transfer_failures_total[$__rate_interval]) - bank_transfer_failures_total offset $__rate_interval >= 0) or last_over_time(bank_transfer_failures_total[$__rate_interval]))))",
           "legendFormat": "{{reason}}",
           "range": true,
           "instant": false,
@@ -822,7 +822,7 @@
     {
       "type": "stat",
       "title": "Failed notifications (range)",
-      "description": "Counters bank_cash_withdrawal_failures_total, bank_transfer_failures_total and bank_notification_failures_total are registered on the first failure, so 'no failures counted' is the normal empty state, not missing telemetry.",
+      "description": "Instant total for the selected window, including retired pod series. New monotonic counters use the observed value; resets use the Prometheus increase estimate. Exact financial totals belong to the ledger.",
       "datasource": {
         "type": "prometheus",
         "uid": "bank-prometheus"
@@ -834,10 +834,10 @@
             "uid": "bank-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(((increase(bank_notification_failures_total[$__range]) and bank_notification_failures_total offset $__range) or bank_notification_failures_total))",
+          "expr": "sum(((increase(bank_notification_failures_total[$__range]) and ((resets(bank_notification_failures_total[$__range]) > 0) or bank_notification_failures_total offset $__range)) or ((last_over_time(bank_notification_failures_total[$__range]) - bank_notification_failures_total offset $__range >= 0) or last_over_time(bank_notification_failures_total[$__range]))))",
           "legendFormat": "",
-          "range": true,
-          "instant": false,
+          "range": false,
+          "instant": true,
           "refId": "A"
         }
       ],
@@ -901,7 +901,7 @@
             "uid": "bank-prometheus"
           },
           "editorMode": "code",
-          "expr": "topk(10, sum by (login) (((increase(bank_notification_failures_total[$__range]) and bank_notification_failures_total offset $__range) or bank_notification_failures_total)))",
+          "expr": "topk(10, sum by (login) (((increase(bank_notification_failures_total[$__range]) and ((resets(bank_notification_failures_total[$__range]) > 0) or bank_notification_failures_total offset $__range)) or ((last_over_time(bank_notification_failures_total[$__range]) - bank_notification_failures_total offset $__range >= 0) or last_over_time(bank_notification_failures_total[$__range])))))",
           "legendFormat": "{{login}}",
           "range": false,
           "instant": true,
@@ -968,7 +968,7 @@
             "uid": "bank-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (login) (((increase(bank_notification_failures_total[$__rate_interval]) and bank_notification_failures_total offset $__rate_interval) or bank_notification_failures_total))",
+          "expr": "sum by (login) (((increase(bank_notification_failures_total[$__rate_interval]) and ((resets(bank_notification_failures_total[$__rate_interval]) > 0) or bank_notification_failures_total offset $__rate_interval)) or ((last_over_time(bank_notification_failures_total[$__rate_interval]) - bank_notification_failures_total offset $__rate_interval >= 0) or last_over_time(bank_notification_failures_total[$__rate_interval]))))",
           "legendFormat": "{{login}}",
           "range": true,
           "instant": false,

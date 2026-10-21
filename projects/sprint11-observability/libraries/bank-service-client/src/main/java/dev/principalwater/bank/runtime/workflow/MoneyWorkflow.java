@@ -17,9 +17,12 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.transaction.support.TransactionTemplate;
 
 public class MoneyWorkflow implements RecoverableDelivery {
+    private static final Logger LOG = LoggerFactory.getLogger(MoneyWorkflow.class);
     private final IntentRepository intents;
     private final ServiceClient accounts;
     private final KafkaOutbox outbox;
@@ -80,6 +83,7 @@ public class MoneyWorkflow implements RecoverableDelivery {
         // Аренда может перейти к другому процессу: продолжаем сохранённую трассу, а не фоновую.
         try (DeferredTrace.Relay ignored =
                 trace.resume(intent.parent(), "bank.money.workflow", "accounts")) {
+            LOG.debug("Financial workflow claimed: {}", intent.operation().type());
             processClaimed(intent);
         }
     }
@@ -111,31 +115,42 @@ public class MoneyWorkflow implements RecoverableDelivery {
                             clock.instant());
         } catch (RemoteUnavailable exception) {
             intents.defer(intent);
+            LOG.warn("Financial workflow deferred: unknown downstream outcome");
             return;
         }
         OperationResult completed = result;
-        transaction.executeWithoutResult(
-                status -> {
-                    if (intents.complete(intent, completed)
-                            && completed.accountId() != null
-                            && completed.balanceMinor() != null) {
-                        Instant occurredAt =
-                                completed.occurredAt() == null
-                                        ? clock.instant()
-                                        : completed.occurredAt();
-                        BankEvent event =
-                                completionEvent(intent.operation(), completed, occurredAt);
-                        NotificationSource source =
-                                intent.operation().type() == OperationType.TRANSFER
-                                        ? NotificationSource.TRANSFER
-                                        : NotificationSource.CASH;
-                        outbox.enqueue(
-                                source.getTopic(),
-                                event.ownerId().toString(),
-                                event.eventId().toString(),
-                                event);
-                    }
-                });
+        Boolean committed =
+                transaction.execute(
+                        status -> {
+                            if (!intents.complete(intent, completed)) {
+                                return false;
+                            }
+                            if (completed.accountId() != null && completed.balanceMinor() != null) {
+                                Instant occurredAt =
+                                        completed.occurredAt() == null
+                                                ? clock.instant()
+                                                : completed.occurredAt();
+                                BankEvent event =
+                                        completionEvent(intent.operation(), completed, occurredAt);
+                                NotificationSource source =
+                                        intent.operation().type() == OperationType.TRANSFER
+                                                ? NotificationSource.TRANSFER
+                                                : NotificationSource.CASH;
+                                outbox.enqueue(
+                                        source.getTopic(),
+                                        event.ownerId().toString(),
+                                        event.eventId().toString(),
+                                        event);
+                            }
+                            return true;
+                        });
+        // Сигнал следует за commit: rollback и утрата аренды не выглядят завершённой операцией.
+        if (Boolean.TRUE.equals(committed)) {
+            LOG.info(
+                    "Financial workflow completed: {} {}",
+                    intent.operation().type(),
+                    completed.status());
+        }
     }
 
     private BankEvent completionEvent(

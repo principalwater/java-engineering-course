@@ -8,6 +8,8 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.Semaphore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.client.ServiceInstance;
 import org.springframework.cloud.client.discovery.DiscoveryClient;
@@ -22,6 +24,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 @Component
 public class GatewayClient {
+    private static final Logger LOG = LoggerFactory.getLogger(GatewayClient.class);
     private static final int MAX_REPLY_BYTES = 131_072;
     private static final int MAX_IN_FLIGHT = 16;
     private final Semaphore permits = new Semaphore(MAX_IN_FLIGHT);
@@ -44,12 +47,12 @@ public class GatewayClient {
     public ResponseEntity<byte[]> exchange(
             HttpMethod method, String path, Object body, String userAccessToken) {
         if (!permits.tryAcquire()) {
-            throw new BankException(BankError.UNAVAILABLE);
+            throw unavailable("capacity");
         }
         try {
             List<ServiceInstance> gateways = discovery.getInstances("gateway");
             if (gateways.size() != 1) {
-                throw new BankException(BankError.UNAVAILABLE);
+                throw unavailable("discovery");
             }
             URI route = URI.create(path);
             if (!route.getRawPath().startsWith("/api/")
@@ -83,9 +86,15 @@ public class GatewayClient {
                     });
         } catch (ResourceAccessException exception) {
             // Неизвестный исход POST не превращается в повтор с новым идентификатором.
-            throw new BankException(BankError.UNAVAILABLE);
+            throw unavailable("transport");
         } finally {
             permits.release();
         }
+    }
+
+    private BankException unavailable(String category) {
+        // Путь, токен и тело ответа не нужны для сигнала доступности и не попадают в журнал.
+        LOG.warn("Gateway unavailable: {}", category);
+        return new BankException(BankError.UNAVAILABLE);
     }
 }

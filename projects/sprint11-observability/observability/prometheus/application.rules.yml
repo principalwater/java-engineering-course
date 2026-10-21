@@ -83,8 +83,16 @@ groups:
           summary: "{{ $labels.service }} has threads waiting for a database connection"
           description: "{{ $labels.service }} has had at least one thread waiting for a pooled connection for 5 minutes."
           action: "Check slow queries and open transactions in PostgreSQL, then the pool size against the service concurrency."
+      # Счётчики могут появиться сразу с 1 и исчезнуть после перезапуска Pod. Range-функции
+      # сохраняют старую series до конца окна; известный одиночный sample сравнивается с baseline.
+      # increase при сбросах остаётся оценкой между scrape, точные денежные итоги берутся из ledger.
       - alert: BankCashWithdrawalFailuresByLogin
-        expr: sum(((increase(bank_cash_withdrawal_failures_total[10m]) and bank_cash_withdrawal_failures_total offset 10m) or bank_cash_withdrawal_failures_total)) >= 5
+        expr: |
+          sum(
+            (increase(bank_cash_withdrawal_failures_total[10m]) and ((resets(bank_cash_withdrawal_failures_total[10m]) > 0) or bank_cash_withdrawal_failures_total offset 10m))
+            or
+            ((last_over_time(bank_cash_withdrawal_failures_total[10m]) - bank_cash_withdrawal_failures_total offset 10m >= 0) or last_over_time(bank_cash_withdrawal_failures_total[10m]))
+          ) >= 5
         for: 1m
         labels:
           severity: warning
@@ -93,7 +101,12 @@ groups:
           description: "{{ $value | printf \"%.0f\" }} cash withdrawals failed in 10 minutes."
           action: "Inspect committed rejection reasons on the protected business dashboard; this counter does not count transport outages."
       - alert: BankTransferFailuresBySender
-        expr: sum(((increase(bank_transfer_failures_total[10m]) and bank_transfer_failures_total offset 10m) or bank_transfer_failures_total)) >= 5
+        expr: |
+          sum(
+            (increase(bank_transfer_failures_total[10m]) and ((resets(bank_transfer_failures_total[10m]) > 0) or bank_transfer_failures_total offset 10m))
+            or
+            ((last_over_time(bank_transfer_failures_total[10m]) - bank_transfer_failures_total offset 10m >= 0) or last_over_time(bank_transfer_failures_total[10m]))
+          ) >= 5
         for: 1m
         labels:
           severity: warning
@@ -102,7 +115,12 @@ groups:
           description: "{{ $value | printf \"%.0f\" }} transfers failed in 10 minutes."
           action: "Inspect rejection reasons on the protected business dashboard; compare sender and recipient breakdown there."
       - alert: BankNotificationFailuresByLogin
-        expr: sum(((increase(bank_notification_failures_total[10m]) and bank_notification_failures_total offset 10m) or bank_notification_failures_total)) >= 3
+        expr: |
+          sum(
+            (increase(bank_notification_failures_total[10m]) and ((resets(bank_notification_failures_total[10m]) > 0) or bank_notification_failures_total offset 10m))
+            or
+            ((last_over_time(bank_notification_failures_total[10m]) - bank_notification_failures_total offset 10m >= 0) or last_over_time(bank_notification_failures_total[10m]))
+          ) >= 3
         for: 1m
         labels:
           severity: warning

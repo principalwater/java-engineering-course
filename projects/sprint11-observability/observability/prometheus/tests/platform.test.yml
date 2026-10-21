@@ -56,3 +56,31 @@ tests:
               summary: "Alertmanager cannot deliver telegram notifications"
               description: "Delivery to Telegram is failing: operators are not being told about firing alerts."
               action: "Read the Alertmanager log; verify the telegram_bot_token and telegram_chat_id Secret files and egress to the Telegram API (or the configured local receiver)."
+  - name: duplicate create conflicts are not dead letter growth
+    interval: 1m
+    input_series:
+      - series: 'logstash_stats_pipeline_plugin_documents_non_retryable_failures{pipeline="main", job="logstash"}'
+        values: '0+10x20'
+      - series: 'logstash_stats_pipeline_dead_letter_queue_size_in_bytes{pipeline="main", job="logstash"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: LogstashDeadLetterQueueGrowing
+        exp_alerts: []
+  - name: actual dead letter growth alerts and stops after the window expires
+    interval: 1m
+    input_series:
+      - series: 'logstash_stats_pipeline_dead_letter_queue_size_in_bytes{pipeline="main", job="logstash"}'
+        values: '0 0 0 256 256x20'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: LogstashDeadLetterQueueGrowing
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "Logstash dead letter queue is growing"
+              description: "Log documents entered the dead letter queue during the last 10 minutes and require investigation."
+              action: "Inspect the protected dead letter queue on the logstash-data PVC and compare rejected fields with the strict index mapping; duplicate create conflicts (409) do not grow this queue."
+      - eval_time: 20m
+        alertname: LogstashDeadLetterQueueGrowing
+        exp_alerts: []

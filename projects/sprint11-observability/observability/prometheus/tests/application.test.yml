@@ -88,7 +88,7 @@ tests:
     values: 0+1x30
   alert_rule_test:
   - eval_time: 15m
-    alertname: BankCashWithdrawalFailuresByLogin
+    alertname: BankCashWithdrawalFailuresHigh
     exp_alerts:
     - exp_labels:
         severity: warning
@@ -98,7 +98,7 @@ tests:
         action: Inspect committed rejection reasons on the protected business dashboard; this counter does not count
           transport outages.
   - eval_time: 15m
-    alertname: BankTransferFailuresBySender
+    alertname: BankTransferFailuresHigh
     exp_alerts:
     - exp_labels:
         severity: warning
@@ -162,7 +162,7 @@ tests:
     values: _x5 1 stale _x20
   alert_rule_test:
   - eval_time: 9m
-    alertname: BankCashWithdrawalFailuresByLogin
+    alertname: BankCashWithdrawalFailuresHigh
     exp_alerts:
     - exp_labels:
         severity: warning
@@ -172,7 +172,7 @@ tests:
         action: Inspect committed rejection reasons on the protected business dashboard; this counter does not count
           transport outages.
   - eval_time: 9m
-    alertname: BankTransferFailuresBySender
+    alertname: BankTransferFailuresHigh
     exp_alerts:
     - exp_labels:
         severity: warning
@@ -182,20 +182,20 @@ tests:
         action: Inspect rejection reasons on the protected business dashboard; compare sender and recipient breakdown
           there.
   - eval_time: 9m
-    alertname: BankNotificationFailuresByLogin
+    alertname: BankNotificationDeliveryAttemptsFailing
     exp_alerts:
     - exp_labels:
         severity: warning
       exp_annotations:
-        summary: Repeated notification failures
-        description: 3 notifications failed in 10 minutes.
+        summary: Repeated notification delivery failures
+        description: 3 notification delivery attempts failed in 10 minutes.
         action: Check the notifications worker logs and the *.DLT topic volume on the Kafka topics dashboard.
   - eval_time: 19m
-    alertname: BankCashWithdrawalFailuresByLogin
+    alertname: BankCashWithdrawalFailuresHigh
     exp_alerts: []
   - eval_time: 19m
-    alertname: BankTransferFailuresBySender
+    alertname: BankTransferFailuresHigh
     exp_alerts: []
   - eval_time: 19m
-    alertname: BankNotificationFailuresByLogin
+    alertname: BankNotificationDeliveryAttemptsFailing
     exp_alerts: []

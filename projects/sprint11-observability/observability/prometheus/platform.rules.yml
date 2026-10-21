@@ -84,14 +84,15 @@ groups:
           summary: "Zipkin dropped spans"
           description: "{{ $value | printf \"%.0f\" }} spans were rejected by the collector in 10 minutes; traces will have gaps."
           action: "Check the Zipkin log for the rejection reason (malformed JSON, oversized message) and the reporter version in the calling service."
-      - alert: LogstashEventsRejectedByElasticsearch
-        expr: sum(increase(logstash_stats_pipeline_plugin_documents_non_retryable_failures{pipeline="main"}[10m])) > 0
+      - alert: LogstashDeadLetterQueueGrowing
+        # Экспортёр v1.9.2 отдаёт размер DLQ как gauge; 409 от action=create сюда не попадают.
+        expr: max(delta(logstash_stats_pipeline_dead_letter_queue_size_in_bytes{pipeline="main"}[10m])) > 0
         labels:
           severity: warning
         annotations:
-          summary: "Elasticsearch rejects log documents from Logstash"
-          description: "{{ $value | printf \"%.0f\" }} documents failed with a non-retryable error in 10 minutes and went to the dead letter queue."
-          action: "Compare the event fields with the index template (dynamic: strict); the dead letter queue lives on the logstash-data PVC."
+          summary: "Logstash dead letter queue is growing"
+          description: "Log documents entered the dead letter queue during the last 10 minutes and require investigation."
+          action: "Inspect the protected dead letter queue on the logstash-data PVC and compare rejected fields with the strict index mapping; duplicate create conflicts (409) do not grow this queue."
       - alert: LogstashQueueBacklog
         expr: max(logstash_stats_pipeline_queue_events_count{pipeline="main"}) > 5000
         for: 10m

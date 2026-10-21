@@ -168,6 +168,20 @@ def trace_fixture():
 
 
 class TraceAndLogTest(unittest.TestCase):
+    def test_only_actual_kafka_spans_count_as_messaging_not_internal_relay_receivers(self):
+        trace = trace_fixture()
+        relay = copy.deepcopy(trace[-1])
+        relay.update(name="bank.outbox.relay", tags={})
+        relay["id"] = "f" * 16
+        trace.append(relay)
+        facts, problems = observability.analyze_traces([trace], {"cash", "notifications"}, ())
+        self.assertEqual([], problems)
+        self.assertEqual(1, facts["kinds"]["kafka-consumer"])
+        trace[-2]["tags"]["messaging.system"] = "other"
+        facts, problems = observability.analyze_traces([trace], {"cash", "notifications"}, ())
+        self.assertEqual(0, facts["chains"])
+        self.assertTrue(problems)
+
     def test_requires_connected_trace_and_matching_identifiers(self):
         good = trace_fixture()
         facts, problems = observability.analyze_traces([good], {"cash", "notifications"}, ())
@@ -219,6 +233,46 @@ class TraceAndLogTest(unittest.TestCase):
 
 
 class RuntimeBoundaryTest(unittest.TestCase):
+    def test_log_delivery_distinguishes_duplicates_quarantine_and_real_nonproduction_debug(self):
+        project = observability.PROJECT
+        services = observability.expected_services(observability.load_yaml(project / "deployment/charts/bank/values.yaml"), False)
+        documents = [{"service": name, "level": "DEBUG", "event": "Safe diagnostic", "logger_name": "dev.principalwater.bank.runtime.workflow.MoneyWorkflow",
+                      "@timestamp": "2026-10-21T10:00:00Z", "traceId": "1" * 32, "spanId": "1" * 16} for name in services]
+        wanted = observability.pipeline_ids(project)
+        cases = ((0, 0, 99, "DEBUG", "dev.principalwater.bank.runtime.workflow.MoneyWorkflow", "test", True, True),
+                 (23, 0, 99, "DEBUG", "dev.principalwater.bank.runtime.workflow.MoneyWorkflow", "test", True, True),
+                 (0, 256, 0, "DEBUG", "dev.principalwater.bank.runtime.workflow.MoneyWorkflow", "test", False, True),
+                 (0, None, 0, "DEBUG", "dev.principalwater.bank.runtime.workflow.MoneyWorkflow", "test", False, True),
+                 (0, -1, 0, "DEBUG", "dev.principalwater.bank.runtime.workflow.MoneyWorkflow", "test", False, True),
+                 (0, 0, 0, "INFO", "dev.principalwater.bank.runtime.workflow.MoneyWorkflow", "dev", True, False),
+                 (0, 0, 0, "DEBUG", "org.springframework.context", "test", True, False),
+                 (0, 0, 0, "INFO", "dev.principalwater.bank.runtime.workflow.MoneyWorkflow", "prod", True, True))
+        for routed, size, duplicates, level, logger, environment, accepted, indexed in cases:
+            with self.subTest(routed=routed, size=size, environment=environment, level=level, logger=logger):
+                current = [{**item, "level": level, "logger_name": logger} for item in documents]
+                pipeline = {"events": {"out": 10}, "dead_letter_queue": {"queue_size_in_bytes": size},
+                            "plugins": {"inputs": [{"id": name} for name in wanted], "filters": [],
+                                        "outputs": [{"id": "bank-logs-elasticsearch", "documents": {"non_retryable_failures": duplicates, "dlq_routed": routed}}]}}
+                def respond(path, body, headers):
+                    if path == "/_node/stats/pipelines":
+                        return 200, {"pipelines": {"main": pipeline}}
+                    if path == "/bank11-logs-*/_search":
+                        return (200, {"hits": {"total": {"value": len(documents)}, "hits": [{"_source": item} for item in current]}}) if headers.get("Authorization") else (401, {})
+                    return 200, [{"traceId": "1" * 32, "id": "1" * 16}]
+                report = observability.Report()
+                with api(respond, with_headers=True) as port, redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                    stack = observability.Stack(project, {"namespace": f"bank11-{environment}"}, Path("."), {"namespace": f"bank11-{environment}"},
+                                                SimpleNamespace(port=lambda _: port), lambda *_: "fixture-password")
+                    stack.deadline = 0
+                    observability.check_logs(stack, report)
+                checks = [check for check in report.checks if check["name"] == "logstash pipeline"]
+                self.assertEqual("PASS" if accepted else "FAIL", checks[0]["status"])
+                if accepted:
+                    self.assertEqual(routed, report.facts["logstash"]["dlq_routed"])
+                    self.assertEqual(duplicates, report.facts["logstash"]["duplicate_create_conflicts"])
+                indexed_checks = [check for check in report.checks if check["name"] == "elasticsearch logs"]
+                self.assertEqual("PASS" if indexed else "FAIL", indexed_checks[0]["status"])
+
     def test_secret_scan_requires_private_regular_files_inside_the_supplied_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

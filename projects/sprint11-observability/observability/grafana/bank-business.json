@@ -821,7 +821,7 @@
     },
     {
       "type": "stat",
-      "title": "Failed notifications (range)",
+      "title": "Failed delivery attempts (range)",
       "description": "Instant total for the selected window, including retired pod series. New monotonic counters use the observed value; resets use the Prometheus increase estimate. Exact financial totals belong to the ledger.",
       "datasource": {
         "type": "prometheus",
@@ -888,7 +888,7 @@
     },
     {
       "type": "bargauge",
-      "title": "Top logins by failed notifications (range)",
+      "title": "Top logins by failed delivery attempts (range)",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -955,7 +955,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Failed notifications by login",
+      "title": "Failed delivery attempts by login",
       "description": "Оценка прироста счётчика в скользящем $__rate_interval. Интервалы перекрываются: точки не суммируются; итог за выбранный диапазон показан отдельно. Prometheus экстраполирует прирост, поэтому возможны дробные значения.",
       "datasource": {
         "type": "prometheus",

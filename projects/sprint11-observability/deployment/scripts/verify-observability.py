@@ -525,7 +525,7 @@ def span_kinds(span):
         kinds.add("http-server" if span["kind"] == "SERVER" else "http-client")
     if span.get("name") in JDBC_SPAN_NAMES or any(key.startswith("jdbc.") for key in tags):
         kinds.add("jdbc")
-    if span.get("kind") in ("PRODUCER", "CONSUMER"):
+    if span.get("kind") in ("PRODUCER", "CONSUMER") and tags.get("messaging.system") == "kafka":
         kinds.add("kafka-" + span["kind"].lower())
     return kinds
 
@@ -673,13 +673,13 @@ def check_zipkin(stack, report):
 # Журналы: Logstash и Elasticsearch
 # ---------------------------------------------------------------------------------------------------------------
 
-def analyze_logs(documents, services, needles):
+def analyze_logs(documents, services, needles, *, require_debug=False):
     """Разбирает проиндексированные события. Возвращает (факты, дефекты, пробелы).
 
     Дефект — искажённое событие или утечка секрета: ожидание его не исправит. Пробел — события, которые ещё
     не дошли до индекса (нет сервиса или трассировочных полей): его закрывает повторный опрос.
     """
-    defects, per_service, traced = {}, {}, 0
+    defects, per_service, traced, debug = {}, {}, 0, 0
 
     def flag(message):
         defects[message] = defects.get(message, 0) + 1
@@ -691,6 +691,9 @@ def analyze_logs(documents, services, needles):
             flag("event without a valid service name")
         if document.get("level") not in LEVELS:
             flag("event with an unknown level")
+        if (service in services and document.get("level") == "DEBUG"
+                and str(document.get("logger_name", "")).startswith("dev.principalwater.bank.")):
+            debug += 1
         for field in ("event", "logger_name", "@timestamp"):
             if not isinstance(document.get(field), str) or not document[field]:
                 flag(f"event without {field}")
@@ -710,7 +713,9 @@ def analyze_logs(documents, services, needles):
         gaps.append(f"no log events from {sorted(services - per_service.keys())}")
     if documents and not traced:
         gaps.append("no event carries traceId and spanId")
-    facts = {"events": len(documents), "traced": traced,
+    if require_debug and not debug:
+        gaps.append("no DEBUG event from a bank logger in the nonproduction environment")
+    facts = {"events": len(documents), "traced": traced, "bank_debug_events": debug,
              "per_service": {str(name): count for name, count in sorted(per_service.items(), key=str)}}
     return facts, [f"{message} (x{count})" for message, count in sorted(defects.items())], gaps
 
@@ -739,6 +744,7 @@ def check_logs(stack, report):
     with report.guarded("logstash pipeline"):
         pipeline = stack.forwards.port("logstash")
         wanted = pipeline_ids(stack.project)
+        delivery = {}
         def running():
             stats = get_json(pipeline, "/_node/stats/pipelines")["pipelines"].get("main")
             if stats is None:
@@ -748,10 +754,23 @@ def check_logs(stack, report):
             problems = lacking(wanted, loaded, "pipeline plugin id")
             if stats["events"]["out"] <= 0:
                 problems.append("pipeline has not emitted an event yet")
-            failed = sum(item.get("documents", {}).get("non_retryable_failures", 0) for item in plugins.get("outputs", []))
-            return problems + ([f"Elasticsearch rejected {failed} documents"] if failed else [])
+            outputs = plugins.get("outputs", [])
+            dlq_bytes = stats.get("dead_letter_queue", {}).get("queue_size_in_bytes")
+            if type(dlq_bytes) is not int or dlq_bytes < 0:
+                return problems + ["Logstash DLQ size is unavailable"]
+            routed = sum(item.get("documents", {}).get("dlq_routed", 0) for item in outputs)
+            # action=create и пустой drop_error_types: non_retryable_failures здесь отражает 409,
+            # а не 400/404, которые попадают в DLQ и требуют вмешательства.
+            duplicates = sum(item.get("documents", {}).get("non_retryable_failures", 0) for item in outputs)
+            delivery.update(duplicate_create_conflicts=duplicates, dlq_routed=routed, dlq_bytes=dlq_bytes)
+            # routed накапливается до перезапуска: после обработки и очистки DLQ история не должна
+            # блокировать здоровье. Новые поступления отдельно отслеживает алерт роста gauge.
+            return problems + ([f"Logstash DLQ retains {dlq_bytes} bytes"] if dlq_bytes else [])
         stack.wait("Logstash pipeline", running)
-        report.passed("logstash pipeline", f"the repository pipeline main runs ({len(wanted)} plugin ids) and delivers events without rejected documents")
+        report.facts["logstash"] = delivery
+        report.passed("logstash pipeline", f"the repository pipeline main runs ({len(wanted)} plugin ids); "
+                      f"DLQ is empty; cumulative routed={delivery['dlq_routed']}, "
+                      f"duplicate create conflicts ignored={delivery['duplicate_create_conflicts']}")
 
     with report.guarded("elasticsearch logs"):
         denied = call(port, "POST", "/bank11-logs-*/_search", body={"size": 0})[0]
@@ -761,7 +780,8 @@ def check_logs(stack, report):
             body = {"size": LOG_SCAN_EVENTS, "track_total_hits": True, "sort": [{"@timestamp": "desc"}]}
             result = get_json(port, "/bank11-logs-*/_search", method="POST", body=body, headers=auth)["hits"]
             documents = [hit["_source"] for hit in result["hits"]]
-            facts, defects, gaps = analyze_logs(documents, services, stack.needles)
+            facts, defects, gaps = analyze_logs(documents, services, stack.needles,
+                                               require_debug=stack.prepared["namespace"] != "bank11-prod")
             found.update(facts, total=result["total"]["value"], documents=documents)
             if defects:
                 raise VerificationError("Elasticsearch events are malformed or leak data: " + summarize(defects))
@@ -771,7 +791,7 @@ def check_logs(stack, report):
         report.facts["logs"] = found
         scanned = f"{found['events']} of {found['total']} newest events"
         report.passed("elasticsearch logs", f"{scanned} carry service, level, event; {found['traced']} with traceId and spanId; "
-                      f"all services logging; no known secret values")
+                      f"{found['bank_debug_events']} bank DEBUG events; all services logging; no known secret values")
 
         zipkin = stack.forwards.port("zipkin")
         hits = []

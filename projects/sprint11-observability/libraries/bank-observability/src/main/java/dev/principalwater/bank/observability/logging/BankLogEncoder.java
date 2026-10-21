@@ -12,8 +12,8 @@ import net.logstash.logback.mask.MaskingJsonGeneratorDecorator;
 
 // Единый безопасный JSON-формат событий для всех сервисов. Выводятся только поля:
 // @timestamp, service, level, logger_name, event (текст сообщения), traceId, spanId и category
-// (класс первопричины ошибки). Аргументы, MDC вне белого списка, stack trace и текст исключений
-// не покидают процесс: в них встречаются SQL с параметрами, заголовки и данные счетов.
+// (тип ошибки). event включает маскированные аргументы: logger нельзя передавать данные счетов.
+// Поля аргументов, чужой MDC, stack trace и текст исключений отдельно не экспортируются.
 public final class BankLogEncoder extends LogstashEncoder {
     private static final String IGNORED = LogstashCommonFieldNames.IGNORE_FIELD_INDICATOR;
     private static final String REDACTED = "[redacted]";

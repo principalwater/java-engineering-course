@@ -86,7 +86,7 @@ groups:
       # Счётчики могут появиться сразу с 1 и исчезнуть после перезапуска Pod. Range-функции
       # сохраняют старую series до конца окна; известный одиночный sample сравнивается с baseline.
       # increase при сбросах остаётся оценкой между scrape, точные денежные итоги берутся из ledger.
-      - alert: BankCashWithdrawalFailuresByLogin
+      - alert: BankCashWithdrawalFailuresHigh
         expr: |
           sum(
             (increase(bank_cash_withdrawal_failures_total[10m]) and ((resets(bank_cash_withdrawal_failures_total[10m]) > 0) or bank_cash_withdrawal_failures_total offset 10m))
@@ -100,7 +100,7 @@ groups:
           summary: "Repeated cash withdrawal failures"
           description: "{{ $value | printf \"%.0f\" }} cash withdrawals failed in 10 minutes."
           action: "Inspect committed rejection reasons on the protected business dashboard; this counter does not count transport outages."
-      - alert: BankTransferFailuresBySender
+      - alert: BankTransferFailuresHigh
         expr: |
           sum(
             (increase(bank_transfer_failures_total[10m]) and ((resets(bank_transfer_failures_total[10m]) > 0) or bank_transfer_failures_total offset 10m))
@@ -114,7 +114,7 @@ groups:
           summary: "Repeated transfer failures"
           description: "{{ $value | printf \"%.0f\" }} transfers failed in 10 minutes."
           action: "Inspect rejection reasons on the protected business dashboard; compare sender and recipient breakdown there."
-      - alert: BankNotificationFailuresByLogin
+      - alert: BankNotificationDeliveryAttemptsFailing
         expr: |
           sum(
             (increase(bank_notification_failures_total[10m]) and ((resets(bank_notification_failures_total[10m]) > 0) or bank_notification_failures_total offset 10m))
@@ -125,6 +125,6 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "Repeated notification failures"
-          description: "{{ $value | printf \"%.0f\" }} notifications failed in 10 minutes."
+          summary: "Repeated notification delivery failures"
+          description: "{{ $value | printf \"%.0f\" }} notification delivery attempts failed in 10 minutes."
           action: "Check the notifications worker logs and the *.DLT topic volume on the Kafka topics dashboard."

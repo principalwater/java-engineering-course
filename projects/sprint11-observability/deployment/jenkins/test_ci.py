@@ -92,13 +92,15 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual(sensitive, log.read_text())
         self.assertEqual(0o600, log.stat().st_mode & 0o777)
 
-    def test_completed_console_is_authoritative_for_build_verification(self):
-        """Пустой progressiveText до конца сборки не должен терять узел; финальные HTTP-ошибки и секреты закрыты."""
+    def test_controller_plugins_and_completed_console_contracts(self):
+        """Готовность плагинов и узел подтверждаются API и полной консолью, без вывода внешних значений."""
         layout = ci.Layout(Path(self.directory.name) / "state", Path(self.directory.name) / "secrets")
         layout.logs.mkdir(parents=True)
         head = ci.git(["rev-parse", "HEAD"], cwd=self.repository).strip()
         sensitive = "fixture-credential-must-stay-private"
         complete = f"[Pipeline] Start of Pipeline\nRunning on {ci.AGENT_NAME} in /workspace\n{sensitive}\n"
+        pins = [line.split(":", 1) for line in (ci.HERE / "controller/plugins.txt").read_text().splitlines()
+                if line.strip() and not line.lstrip().startswith("#")]
         scenario = {}
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -123,6 +125,19 @@ class SnapshotTest(unittest.TestCase):
                     self.send(200, json.dumps({"crumbRequestField": "Jenkins-Crumb", "crumb": "fixture"}).encode())
                 elif self.path.startswith(f"/computer/{ci.AGENT_NAME}/"):
                     self.send(200, b'{"offline":false}')
+                elif self.path.startswith("/pluginManager/api/json?"):
+                    if self.headers.get("Authorization") != "Basic fixture":
+                        self.send(403, sensitive.encode())
+                        return
+                    plugins = [{"shortName": name, "version": version, "active": True, "enabled": True}
+                               for name, version in pins]
+                    target = next(plugin for plugin in plugins if plugin["shortName"] == "plain-credentials")
+                    problem = scenario.get("plugin_problem")
+                    if problem == "missing":
+                        plugins.remove(target)
+                    elif problem:
+                        target[problem] = sensitive if problem == "version" else False
+                    self.send(200, json.dumps({"plugins": plugins}).encode())
                 elif self.path == "/queue/item/1/api/json":
                     self.send(200, b'{"executable":{"number":1}}')
                 elif "/logText/progressiveText?" in self.path:
@@ -147,6 +162,12 @@ class SnapshotTest(unittest.TestCase):
         controller._base = f"http://127.0.0.1:{server.server_port}"
         controller._authorization = "Basic fixture"
         controller._opener = urllib.request.build_opener(ci.NoRedirect)
+        controller.verify_plugins()
+        for problem in ("missing", "active", "enabled", "version"):
+            scenario["plugin_problem"] = problem
+            with self.subTest(plugin_problem=problem), self.assertRaisesRegex(RuntimeError, "plain-credentials") as failure:
+                controller.verify_plugins()
+            self.assertNotIn(sensitive, str(failure.exception))
         cases = [
             ({"console": complete}, None),
             ({"console": ""}, "completed bytes=0; pipeline markers=0"),

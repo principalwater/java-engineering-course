@@ -615,6 +615,20 @@ class Controller:
             raise RuntimeError("Unexpected agent connection descriptor")
         return arguments[0]
 
+    def verify_plugins(self) -> None:
+        """Работающий login не гарантирует загрузку pipeline: проверяются все явно закреплённые плагины."""
+        pins = (HERE / "controller/plugins.txt").read_text(encoding="utf-8").splitlines()
+        expected = dict(line.strip().split(":", 1) for line in pins if line.strip() and not line.lstrip().startswith("#"))
+        actual = {plugin["shortName"]: plugin for plugin in self.json(
+            "/pluginManager/api/json?tree=plugins[shortName,version,active,enabled]")["plugins"]}
+        unavailable = []
+        for name, version in expected.items():
+            plugin = actual.get(name, {})
+            if plugin.get("version") != version or plugin.get("active") is not True or plugin.get("enabled") is not True:
+                unavailable.append(name)
+        if unavailable:
+            raise RuntimeError("Required Jenkins plugins are missing, inactive, disabled or mismatched: " + ", ".join(unavailable))
+
     def agent_online(self) -> bool:
         try:
             return self.json(f"/computer/{AGENT_NAME}/api/json?tree=offline")["offline"] is False
@@ -717,6 +731,7 @@ def command_up(args: argparse.Namespace) -> None:
     wait_until("the controller login page", controller.ready, CONTROLLER_READY_TIMEOUT,
                failure=lambda: container_failure(CONTROLLER))
     controller.verify_security()
+    controller.verify_plugins()
     secret_file = layout.agent_secrets / "agent_secret"
     secret = controller.agent_secret().encode("ascii")
     if not secret_file.is_file() or secret_file.read_bytes() != secret:

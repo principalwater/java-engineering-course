@@ -22,6 +22,7 @@ import java.security.cert.CertificateFactory;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -183,28 +184,40 @@ final class SupersetApi implements AutoCloseable {
     }
 
     void verifyCharts() throws IOException, InterruptedException {
-        JsonNode dashboard =
-                json("GET", "dashboard/" + SupersetAssets.DASHBOARD_SLUG, null).path(RESULT);
-        if (!dashboard.path("published").asBoolean())
-            throw new IOException("Bank dashboard is not published");
-        List<JsonNode> charts = new ArrayList<>();
-        JsonNode related =
-                json("GET", "dashboard/" + SupersetAssets.DASHBOARD_SLUG + "/charts", null)
-                        .path(RESULT);
-        if (!related.isArray()) throw new IOException("Invalid Superset dashboard charts");
-        related.forEach(charts::add);
-        int verified = 0;
-        for (JsonNode chart : charts) {
-            JsonNode result = json("GET", "chart/" + chart.path("id").asInt() + "/data/", null);
+        Map<String, Integer> charts = new LinkedHashMap<>();
+        for (SupersetAssets.Dashboard definition : SupersetAssets.DASHBOARDS) {
+            String path = "dashboard/" + definition.slug();
+            JsonNode dashboard = json("GET", path, null).path(RESULT);
+            if (!dashboard.path("published").asBoolean())
+                throw new IOException("Bank dashboard is not published: " + definition.slug());
+            JsonNode related = json("GET", path + "/charts", null).path(RESULT);
+            if (!related.isArray()) throw new IOException("Invalid Superset dashboard charts");
+            Set<String> expected = new HashSet<>();
+            definition.charts().forEach(chart -> expected.add(chart.title));
+            Set<String> found = new HashSet<>();
+            for (JsonNode chart : related) {
+                String title = chart.path("slice_name").asText();
+                int id = chart.path("id").asInt();
+                if (!expected.contains(title) || !found.add(title) || id <= 0)
+                    throw new IOException("Unexpected Superset dashboard chart association");
+                Integer previous = charts.putIfAbsent(title, id);
+                if (previous != null && previous != id)
+                    throw new IOException("Shared Superset chart identity does not match");
+            }
+            if (!found.equals(expected))
+                throw new IOException("Superset dashboard charts are missing");
+        }
+        if (new HashSet<>(charts.values()).size() != SupersetAssets.Chart.values().length)
+            throw new IOException("Expected exactly six distinct charts");
+        for (int id : charts.values()) {
+            JsonNode result = json("GET", "chart/" + id + "/data/", null);
             if (!result.path(RESULT).isArray() || result.path(RESULT).isEmpty())
                 throw new IOException("Superset chart query is missing");
             for (JsonNode query : result.path(RESULT)) {
                 if (!query.path("error").isMissingNode() && !query.path("error").isNull())
                     throw new IOException("Superset chart query failed");
             }
-            verified++;
         }
-        if (verified != 6) throw new IOException("Expected exactly six verified charts");
     }
 
     private List<JsonNode> list(String path) throws IOException, InterruptedException {

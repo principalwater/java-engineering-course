@@ -27,7 +27,7 @@ public class BiApplication {
                 api.grantDatasets();
                 api.verifyCharts();
                 System.out.println(
-                        "Bank analytics dashboard is ready; stable asset identities were preserved");
+                        "Bank analytics dashboards are ready; stable asset identities were preserved");
             }
         }
     }

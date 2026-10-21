@@ -576,7 +576,11 @@ QUERIES
 
 def verify_bi(base_url, secrets_dir):
     bi_url = base_url.replace("bank.valgrind-home.localhost", "insights.valgrind-home.localhost")
-    dashboard = "/api/v1/dashboard/bank-activity"
+    financial = {"Движение денег по дням", "Завершённые операции"}
+    dashboards = {
+        "bank-activity": financial | {"Действия в кабинете", "Активность по дням", "Доставка и прочтение", "Уведомления по дням"},
+        "bank-financial": financial,
+    }
     for username, permitted in (("alice", False), ("analyst", True)):
         user = User(bi_url, secrets_dir, callback_path="/oauth-authorized/bank")
         status, final, page = user.request("GET", "/login/bank")
@@ -588,20 +592,29 @@ def verify_bi(base_url, secrets_dir):
                 and "/login-actions/authenticate" in urlsplit(action).path, "Unexpected BI login action")
         password = (Path(secrets_dir) / ("demo_" + username + "_password")).read_text().strip()
         user.request("POST", action, form={**form.hidden, "username": username, "password": password}, csrf=False)
-        status, _, payload = user.request("GET", dashboard)
-        require(status == (200 if permitted else 401), "Superset analyst role boundary failed")
+        charts = {}
+        for slug, expected in dashboards.items():
+            dashboard = "/api/v1/dashboard/" + slug
+            status, _, payload = user.request("GET", dashboard)
+            require(status == (200 if permitted else 401), "Superset analyst role boundary failed")
+            if permitted:
+                details = json.loads(payload)["result"]
+                require(details["published"] is True, "Superset bank dashboard is not published: " + slug)
+                related = user.json("GET", dashboard + "/charts")["result"]
+                require(len(related) == len(expected) and {chart["slice_name"] for chart in related} == expected,
+                        "Superset dashboard chart associations mismatch: " + slug)
+                for chart in related:
+                    previous = charts.setdefault(chart["slice_name"], chart)
+                    require(previous["id"] == chart["id"], "Superset shared chart identity mismatch")
         if permitted:
-            details = json.loads(payload)["result"]
-            require(details["published"] is True, "Superset bank dashboard is not published")
             token = user.json("GET", "/api/v1/security/csrf_token/")["result"]
             user.session = {"csrfHeader": "X-CSRFToken", "csrfToken": token}
             denied = user.request("POST", "/api/v1/sqllab/execute/",
                                   {"database_id": 1, "sql": "SELECT 1", "runAsync": False},
                                   headers_extra={"Referer": bi_url + "/"})[0]
             require(denied == 403, "Superset analyst unexpectedly received SQL Lab access")
-            charts = user.json("GET", dashboard + "/charts")["result"]
-            require(len(charts) == 6, "Superset dashboard chart count mismatch")
-            for chart in charts:
+            require(len({chart["id"] for chart in charts.values()}) == 6, "Superset unique chart count mismatch")
+            for chart in charts.values():
                 data = user.json("GET", "/api/v1/chart/" + str(chart["id"]) + "/data/")
                 require(data.get("result") and all(not result.get("error") for result in data["result"]),
                         "Superset analyst chart query failed")
@@ -615,7 +628,7 @@ def verify_bi(base_url, secrets_dir):
                     require(any(row.get("operations", 0) > 0 and row.get("accounts", 0) > 0 for row in rows),
                             "BI is missing actual transactions and daily active accounts")
         user.request("GET", "/logout/")
-    print("PASS Superset real OIDC analyst/customer isolation, aggregate charts and SQL Lab denial")
+    print("PASS Superset real OIDC analyst/customer isolation, both published dashboards, six unique charts and SQL Lab denial")
 
 
 def verify(base_url, secrets_dir, containers, analytics=False, superset=False):

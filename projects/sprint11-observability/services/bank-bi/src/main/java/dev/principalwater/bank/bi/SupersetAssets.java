@@ -9,13 +9,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.IntStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 final class SupersetAssets {
     static final String DATABASE_FILE = "databases/bank.yaml";
     static final String DATABASE_NAME = "Bank aggregate analytics";
-    static final String DASHBOARD_SLUG = "bank-activity";
     static final String VERSION = "1.0.0";
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String DATABASE_ID = identity("database");
@@ -23,6 +23,74 @@ final class SupersetAssets {
     private static final String ROOT = "ROOT_ID";
     private static final String GRID = "GRID_ID";
     private static final String CHILDREN = "children";
+
+    enum Chart {
+        MONEY(
+                "financial_daily",
+                "Движение денег по дням",
+                List.of("cash_in", "cash_out", "transfers"),
+                List.of(),
+                true),
+        OPERATIONS(
+                "financial_daily",
+                "Завершённые операции",
+                List.of("operations", "accounts"),
+                List.of(),
+                true),
+        ACTIONS(
+                "engagement_daily",
+                "Действия в кабинете",
+                List.of("events"),
+                List.of("source", "event_type", "section"),
+                false),
+        ACTIVITY("engagement_daily", "Активность по дням", List.of("events"), List.of(), true),
+        DELIVERY(
+                "notification_daily",
+                "Доставка и прочтение",
+                List.of("available", "read"),
+                List.of(),
+                true),
+        NOTIFICATIONS(
+                "notification_daily",
+                "Уведомления по дням",
+                List.of("available", "read"),
+                List.of("date"),
+                false);
+
+        final String table;
+        final String title;
+        final List<String> metrics;
+        final List<String> groups;
+        final boolean timeSeries;
+
+        Chart(
+                String table,
+                String title,
+                List<String> metrics,
+                List<String> groups,
+                boolean timeSeries) {
+            this.table = table;
+            this.title = title;
+            this.metrics = metrics;
+            this.groups = groups;
+            this.timeSeries = timeSeries;
+        }
+    }
+
+    record Dashboard(String slug, String title, String identityKey, List<Chart> charts) {}
+
+    static final List<Dashboard> DASHBOARDS =
+            List.of(
+                    new Dashboard(
+                            "bank-activity",
+                            "Банк: операции и взаимодействие",
+                            "dashboard",
+                            List.of(Chart.values())),
+                    new Dashboard(
+                            "bank-financial",
+                            "Банк: финансовые операции",
+                            "financial-dashboard",
+                            List.of(Chart.MONEY, Chart.OPERATIONS)));
 
     private SupersetAssets() {}
 
@@ -67,52 +135,30 @@ final class SupersetAssets {
                     "notification_daily",
                     List.of("date", "available_count", "read_count"),
                     Map.of("available", "sum(available_count)", "read", "sum(read_count)"));
-            charts.add(
-                    chart(
-                            "financial_daily",
-                            "Движение денег по дням",
-                            List.of("cash_in", "cash_out", "transfers"),
-                            List.of(),
-                            true));
-            charts.add(
-                    chart(
-                            "financial_daily",
-                            "Завершённые операции",
-                            List.of("operations", "accounts"),
-                            List.of(),
-                            true));
-            charts.add(
-                    chart(
-                            "engagement_daily",
-                            "Действия в кабинете",
-                            List.of("events"),
-                            List.of("source", "event_type", "section"),
-                            false));
-            charts.add(
-                    chart(
-                            "engagement_daily",
-                            "Активность по дням",
-                            List.of("events"),
-                            List.of(),
-                            true));
-            charts.add(
-                    chart(
-                            "notification_daily",
-                            "Доставка и прочтение",
-                            List.of("available", "read"),
-                            List.of(),
-                            true));
-            charts.add(
-                    chart(
-                            "notification_daily",
-                            "Уведомления по дням",
-                            List.of("available", "read"),
-                            List.of("date"),
-                            false));
+            for (Chart definition : Chart.values()) {
+                charts.add(
+                        chart(
+                                definition.table,
+                                definition.title,
+                                definition.metrics,
+                                definition.groups,
+                                definition.timeSeries));
+            }
             for (int i = 0; i < charts.size(); i++) {
                 entry(zip, "charts/chart-" + i + ".yaml", charts.get(i));
             }
-            entry(zip, "dashboards/bank.yaml", dashboard(charts));
+            for (Dashboard definition : DASHBOARDS) {
+                String file =
+                        definition.slug().equals("bank-activity") ? "bank" : definition.slug();
+                entry(
+                        zip,
+                        "dashboards/" + file + ".yaml",
+                        dashboard(
+                                definition,
+                                definition.charts().stream()
+                                        .map(chart -> charts.get(chart.ordinal()))
+                                        .toList()));
+            }
         }
         return bytes.toByteArray();
     }
@@ -266,9 +312,13 @@ final class SupersetAssets {
                                 "full")));
     }
 
-    private static Map<String, Object> dashboard(List<Map<String, Object>> charts) {
+    private static Map<String, Object> dashboard(
+            Dashboard definition, List<Map<String, Object>> charts) {
         Map<String, Object> position = new LinkedHashMap<>();
-        List<String> rows = List.of("ROW-0", "ROW-1", "ROW-2");
+        List<String> rows =
+                IntStream.range(0, Math.ceilDiv(charts.size(), 2))
+                        .mapToObj(row -> "ROW-" + row)
+                        .toList();
         position.put("DASHBOARD_VERSION_KEY", "v2");
         position.put(ROOT, Map.of("id", ROOT, "type", "ROOT", CHILDREN, List.of(GRID)));
         position.put(
@@ -283,12 +333,14 @@ final class SupersetAssets {
                             "type",
                             "ROW",
                             CHILDREN,
-                            List.of("CHART-" + row * 2, "CHART-" + (row * 2 + 1)),
+                            IntStream.range(row * 2, Math.min(row * 2 + 2, charts.size()))
+                                    .mapToObj(index -> "CHART-" + index)
+                                    .toList(),
                             "parents",
                             List.of(ROOT, GRID),
                             "meta",
                             Map.of("background", "BACKGROUND_TRANSPARENT")));
-            for (int column = 0; column < 2; column++) {
+            for (int column = 0; column < Math.min(2, charts.size() - row * 2); column++) {
                 int index = row * 2 + column;
                 Map<String, Object> chart = charts.get(index);
                 String id = "CHART-" + index;
@@ -319,11 +371,11 @@ final class SupersetAssets {
         }
         return Map.of(
                 "dashboard_title",
-                "Банк: операции и взаимодействие",
+                definition.title(),
                 "slug",
-                DASHBOARD_SLUG,
+                definition.slug(),
                 "uuid",
-                identity("dashboard"),
+                identity(definition.identityKey()),
                 VERSION_FIELD,
                 VERSION,
                 "published",

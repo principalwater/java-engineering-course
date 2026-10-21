@@ -160,6 +160,13 @@ class AssetContractTest(unittest.TestCase):
                         self.assertIn(target["datasource"]["uid"], provisioned)
                         # Отсутствие ряда должно давать «нет данных»; vector(0) создал бы ложное благополучие.
                         self.assertNotIn("vector(", target.get("expr", ""))
+                        # Grafana объединяет table-ряды в колонку Value; lastNotNull оставляет лишь последнюю метку.
+                        if panel["type"] == "bargauge" and "{{" in target.get("legendFormat", ""):
+                            with self.subTest(panel=panel["title"]):
+                                self.assertTrue(
+                                    target.get("format", "time_series") != "table"
+                                    or panel.get("options", {}).get("reduceOptions", {}).get("values"),
+                                    "Labelled bar gauge must preserve each series or display every table row")
 
     def test_http_dashboard_charts_error_rates_and_error_latency_quantiles(self):
         expressions = [target["expr"] for panel in panels(dashboards()["bank-http.json"]) if panel["type"] != "row"

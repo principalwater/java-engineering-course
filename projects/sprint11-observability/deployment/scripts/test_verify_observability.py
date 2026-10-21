@@ -62,6 +62,29 @@ def frame(value, field_type="number"):
 
 
 class DashboardApiTest(unittest.TestCase):
+    def test_chart_requests_preserve_the_published_query_format_and_legend(self):
+        # format=table меняет результат во frontend Grafana, даже когда backend вернул те же ряды.
+        document = dashboard('sum by (topic) (metric{topic=~"$topic"})')
+        document["templating"] = {"list": [{"name": "topic", "includeAll": True, "allValue": ".+"}]}
+        document["panels"][0]["targets"][0].update(
+            format="table", legendFormat="{{topic}}", instant=True, range=False, interval="30s", refId="A")
+        requests = []
+        def respond(path, body):
+            requests.append(body["queries"][0])
+            return 200, {"results": {body["queries"][0]["refId"]: {"frames": [frame(0)]}}}
+        with api(respond) as port:
+            outcome = observability.query_dashboard(port, {}, document, False)
+        self.assertEqual(1, outcome["answered"])
+        self.assertEqual(1, len(requests))
+        self.assertEqual("table", requests[0].get("format"))
+        self.assertEqual("{{topic}}", requests[0].get("legendFormat"))
+        self.assertEqual("30s", requests[0].get("interval"))
+        self.assertTrue(requests[0]["instant"])
+        self.assertFalse(requests[0]["range"])
+        self.assertEqual('sum by (topic) (metric{topic=~".+"})', requests[0]["expr"])
+        self.assertEqual("q0", requests[0]["refId"])
+        self.assertEqual(500, requests[0]["maxDataPoints"])
+
     def test_missing_dashboards_cannot_pass_an_empty_chart_run(self):
         sources = observability.load_yaml(observability.PROJECT / "grafana/datasources.yaml")["datasources"]
         def respond(path, body, headers):

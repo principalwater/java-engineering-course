@@ -810,8 +810,7 @@ def chart_queries(dashboard, analytics):
             ref = f"q{len(queries)}"
             if datasource["type"] == "prometheus":
                 expression = expand_variables(target["expr"], values)
-                instant_query = bool(target.get("instant"))
-                query = {"expr": expression, "instant": instant_query, "range": not instant_query, "exemplar": False}
+                query = {**target, "expr": expression}
             else:
                 expression = expand_variables(target.get("query", ""), values)
                 query = {**target, "query": expression}

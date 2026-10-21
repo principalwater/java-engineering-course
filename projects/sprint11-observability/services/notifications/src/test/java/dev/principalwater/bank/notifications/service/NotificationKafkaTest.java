@@ -382,9 +382,12 @@ class NotificationKafkaTest extends NotificationsTestBase {
     }
 
     @Test
-    void poisonOffsetWaitsUntilFailedDltPublicationCanObtainDurableBrokerAck() throws Exception {
+    void poisonOffsetWaitsUntilFailedDltPublicationCanObtainDurableBrokerAck(CapturedOutput output)
+            throws Exception {
         String topic = NotificationSource.CASH.getTopic();
         String dlt = topic + BankTopics.DLT_SUFFIX;
+        String key = UUID.randomUUID().toString();
+        String quarantined = "Kafka record quarantined after confirmed DLT publication";
         long before = KafkaFixture.endOffset(topic);
         try (Admin admin = KafkaFixture.admin()) {
             admin.deleteTopics(List.of(dlt)).all().get(10, TimeUnit.SECONDS);
@@ -398,18 +401,29 @@ class NotificationKafkaTest extends NotificationsTestBase {
             double errors = producerErrors();
             try {
                 startConsumers();
-                kafka.send(topic, UUID.randomUUID().toString(), "{").get(5, TimeUnit.SECONDS);
+                kafka.send(topic, key, "{").get(5, TimeUnit.SECONDS);
                 await().atMost(KafkaFixture.WAIT)
                         .untilAsserted(() -> assertThat(producerErrors()).isGreaterThan(errors));
                 assertThat(KafkaFixture.committed(BankTopics.NOTIFICATIONS_GROUP, topic))
                         .isLessThanOrEqualTo(before);
                 assertThat(count()).isZero();
+                assertThat(output.getAll()).doesNotContain(quarantined);
             } finally {
                 KafkaFixture.topics(dlt);
             }
             awaitCommitted(NotificationSource.CASH);
             assertThat(KafkaFixture.records(dlt, 1)).hasSize(1);
             assertThat(count()).isZero();
+            await().atMost(KafkaFixture.WAIT)
+                    .untilAsserted(
+                            () ->
+                                    assertThat(output.getAll().lines())
+                                            .anySatisfy(
+                                                    line ->
+                                                            assertThat(line)
+                                                                    .contains(
+                                                                            "ERROR", quarantined)));
+            assertThat(output.getAll()).doesNotContain(key);
         }
     }
 

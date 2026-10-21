@@ -7,6 +7,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.validation.Validator;
 import java.time.Duration;
 import java.util.List;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;
@@ -33,6 +34,7 @@ import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.kafka.listener.RetryListener;
 import org.springframework.kafka.support.ProducerListener;
 import org.springframework.util.backoff.FixedBackOff;
 
@@ -127,10 +129,20 @@ public class KafkaMessagingConfiguration {
         errors.addNotRetryableExceptions(MessageRejected.class);
         errors.setSeekAfterError(false);
         errors.setRetryListeners(
-                (record, failure, attempt) ->
+                new RetryListener() {
+                    @Override
+                    public void failedDelivery(
+                            ConsumerRecord<?, ?> record, Exception failure, int attempt) {
                         LOG.warn(
                                 "Kafka consumer unavailable: {}",
-                                failure.getClass().getSimpleName()));
+                                failure.getClass().getSimpleName());
+                    }
+
+                    @Override
+                    public void recovered(ConsumerRecord<?, ?> record, Exception failure) {
+                        LOG.error("Kafka record quarantined after confirmed DLT publication");
+                    }
+                });
         listeners.setCommonErrorHandler(errors);
         return listeners;
     }

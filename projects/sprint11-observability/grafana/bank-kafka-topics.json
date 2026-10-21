@@ -73,7 +73,7 @@
         "sort": 1,
         "multi": true,
         "includeAll": true,
-        "allValue": ".*",
+        "allValue": ".+",
         "regex": "",
         "hide": 0,
         "skipUrlSync": false,

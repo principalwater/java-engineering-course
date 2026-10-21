@@ -305,6 +305,26 @@ class PromtoolTest(unittest.TestCase):
         self.assertTrue(tests)
         self.promtool("test", "rules", *map(str, tests))
 
+    def test_topic_volume_all_excludes_unlabeled_broker_totals(self):
+        """Общий счётчик брокера не является топиком и иначе удваивает отображаемый трафик."""
+        dashboard = dashboards()["bank-kafka-topics.json"]
+        topic = next(item for item in dashboard["templating"]["list"] if item["name"] == "topic")
+        panel = next(item for item in panels(dashboard) if item["title"] == "Messages in per second by topic")
+        expression = panel["targets"][0]["expr"].replace("$topic", topic["allValue"]).replace("$__rate_interval", "1m")
+        metric = "kafka_server_brokertopicmetrics_messagesin_total"
+        fixture = {"evaluation_interval": "15s", "fuzzy_compare": True, "tests": [{"interval": "15s", "input_series": [
+            {"series": metric + '{instance="broker-0"}', "values": "0+300x4"},
+            {"series": metric + '{instance="broker-0",topic="cash.v1"}', "values": "0+30x4"},
+            {"series": metric + '{instance="broker-0",topic="transfer.v1"}', "values": "0+60x4"},
+        ], "promql_expr_test": [{"expr": expression, "eval_time": "1m", "exp_samples": [
+            {"labels": '{topic="cash.v1"}', "value": 2},
+            {"labels": '{topic="transfer.v1"}', "value": 4},
+        ]}]}]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "topic-volume.test.yml"
+            path.write_text(yaml.safe_dump(fixture), encoding="utf-8")
+            self.promtool("test", "rules", str(path))
+
     def test_rendered_scrape_configuration_is_valid(self):
         config_maps = objects(analytics=True, kind="ConfigMap")
         with tempfile.TemporaryDirectory() as directory:

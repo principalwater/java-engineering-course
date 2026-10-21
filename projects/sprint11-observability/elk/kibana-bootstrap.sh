@@ -1,7 +1,7 @@
 #!/bin/bash
-# Idempotent Kibana bootstrap, run as a finite Job: the Data View, the default Data View and the saved
-# searches, visualizations and dashboard. Objects are written with overwrite=true under fixed ids, so a
-# re-run restores the shipped definition instead of duplicating it.
+# Конечный Job настраивает Kibana: Data View, его выбор по умолчанию, сохранённые поиски, визуализации
+# и дашборд. Фиксированные id и overwrite=true позволяют повторным запуском восстановить поставляемые
+# определения без дублирования объектов.
 set -euo pipefail
 umask 077
 
@@ -17,12 +17,12 @@ fail() {
 
 file=/run/secrets/kibana_provisioner_password
 [[ -s "$file" ]] || fail "Secret file kibana_provisioner_password is missing or empty"
-# curl reads the credential from a private file in the in-memory work directory, not from its arguments.
+# curl читает пароль из закрытого файла рабочего каталога в памяти; аргументы его не содержат.
 printf 'user = "bank11_kibana_provisioner:%s"\n' "$(tr -d '\r\n' < "$file")" > "$work/auth.conf"
 
-# call METHOD PATH [BODY_FILE]: 5xx and connection failures are retried (Kibana restarts, saved-object
-# migrations); a 4xx is a permanent answer, typically a missing privilege, and fails the Job at once rather
-# than prompting a wider grant.
+# call METHOD PATH [BODY_FILE] повторяет запросы при 5xx и сбоях соединения: возможны перезапуск Kibana
+# и миграции сохранённых объектов. Ответ 4xx, обычно из-за недостаточных прав, сразу завершает Job
+# ошибкой; повторные запросы не исправят права.
 call() {
     local method=$1 path=$2 body=${3:-} attempt status
     local -a data=()
@@ -57,7 +57,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     kind="$(sed -n 's/^{"type":"\([a-z-]*\)","id":"\([A-Za-z0-9_-]*\)",.*/\1/p' <<< "$line")"
     id="$(sed -n 's/^{"type":"\([a-z-]*\)","id":"\([A-Za-z0-9_-]*\)",.*/\2/p' <<< "$line")"
     [[ -n "$kind" && -n "$id" ]] || fail "kibana-objects.ndjson line does not start with a type/id pair"
-    # Drop the type/id pair: the create API takes only attributes and references in its body.
+    # API создания принимает в теле только attributes и references, поэтому type/id удаляются.
     # shellcheck disable=SC2001
     sed 's/^{"type":"[a-z-]*","id":"[A-Za-z0-9_-]*",/{/' <<< "$line" > "$work/object.json"
     call POST "/api/saved_objects/$kind/$id?overwrite=true" "$work/object.json"

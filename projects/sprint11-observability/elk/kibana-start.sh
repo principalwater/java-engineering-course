@@ -1,6 +1,6 @@
 #!/bin/bash
-# Exports the Kibana service credential and the saved-object encryption keys from mounted Secret files and
-# starts Kibana. kibana.yml carries no secrets.
+# Учётные данные Kibana и ключи шифрования сохранённых объектов читаются из смонтированных Secret
+# перед запуском Kibana. В kibana.yml секретов нет.
 set -euo pipefail
 umask 077
 read_secret() {
@@ -16,7 +16,7 @@ if (( ${#master} < 32 )); then
     echo "Secret file kibana_encryption_key must hold at least 32 characters" >&2
     exit 1
 fi
-# One external key, three independent purpose keys: leaking one derived key does not expose the others.
+# Из одного внешнего ключа выводятся три ключа для разных целей: утечка одного не раскрывает остальные.
 derive() { printf '%s:%s' "$1" "$master" | sha256sum | cut -d' ' -f1; }
 XPACK_SECURITY_ENCRYPTIONKEY="$(derive security)"
 XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY="$(derive savedobjects)"

@@ -1,7 +1,7 @@
 #!/bin/sh
-# Idempotent Elasticsearch bootstrap, run as a finite Job with the elastic bootstrap superuser:
-# lifecycle policy, index template, roles and the four non-superuser identities. Every call is a PUT/POST
-# of the desired state, so re-running after a Secret rotation converges instead of failing.
+# Конечный Job под начальной учётной записью elastic настраивает политику хранения, шаблон индекса,
+# роли и четыре непривилегированные учётные записи. PUT/POST задают желаемое состояние,
+# поэтому повторный запуск после ротации Secret приводит настройки к актуальным значениям.
 set -eu
 umask 077
 
@@ -19,7 +19,7 @@ fail() {
 read_secret() {
     [ -s "$secrets/$1" ] || fail "Secret file $1 is missing or empty"
     value=$(tr -d '\r\n' < "$secrets/$1")
-    # The values are interpolated into JSON documents below, so anything needing escaping is rejected.
+    # Значения подставляются в JSON ниже, поэтому символы, требующие экранирования, запрещены.
     case "$value" in
         *[!A-Za-z0-9._~+=-]*) fail "Secret file $1 contains characters outside A-Za-z0-9._~+=-" ;;
     esac
@@ -28,11 +28,11 @@ read_secret() {
 }
 
 elastic_password=$(read_secret elastic_password)
-# curl reads the credential from a private file in the in-memory work directory, not from its arguments.
+# curl читает пароль из закрытого файла рабочего каталога в памяти; аргументы его не содержат.
 printf 'user = "elastic:%s"\n' "$elastic_password" > "$work/auth.conf"
 unset elastic_password
 
-# call METHOD PATH: sends the request body from stdin and requires a 2xx answer.
+# call METHOD PATH передаёт тело через stdin и требует ответа 2xx.
 call() {
     method=$1
     path=$2
@@ -61,8 +61,8 @@ case "$retention" in
     *) fail "LOGS_RETENTION must be a whole number of days such as 7d" ;;
 esac
 
-# Template and policy come first: the writer identity is created last, so no index can exist before its
-# mapping and lifecycle do.
+# Шаблон и политика создаются раньше учётной записи writer, чтобы ни один индекс не появился
+# до своего mapping и правил хранения.
 sed "s/@@RETENTION@@/$retention/" "$setup/ilm-policy.json" | call PUT /_ilm/policy/bank11-logs-retention
 call PUT /_index_template/bank11-logs < "$setup/index-template.json"
 
@@ -81,7 +81,7 @@ call PUT /_security/role/bank11_kibana_provisioner <<ROLE
 {"indices": [$index_read], "applications": [{"application": "kibana-.kibana", "privileges": ["all"], "resources": ["space:default"]}]}
 ROLE
 
-# kibana_system is a reserved user: only its password can be set.
+# kibana_system — зарезервированный пользователь: изменять можно только его пароль.
 password=$(read_secret kibana_system_password) || exit 1
 printf '{"password": "%s"}' "$password" | call POST /_security/user/kibana_system/_password
 

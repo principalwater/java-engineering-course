@@ -18,7 +18,7 @@ tests:
               summary: "Messages were dead-lettered to bank.notifications.receipts.v1.DLT"
               description: "1 messages reached bank.notifications.receipts.v1.DLT in the last 15 minutes: a consumer gave up on them after its retries."
               action: "Read the dead-lettered records (headers carry the exception) and find the matching consumer errors in Kibana; replay or discard deliberately."
-      # the DLT offset moved once, 20 minutes ago: the 15 minute window is quiet again
+      # Offset DLT изменился один раз 20 минут назад: в последнем 15-минутном окне изменений уже нет.
       - eval_time: 29m
         alertname: KafkaDeadLetterTopicReceivedMessages
         exp_alerts: []

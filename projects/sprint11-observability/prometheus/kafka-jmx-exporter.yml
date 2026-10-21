@@ -1,12 +1,12 @@
-# Prometheus JMX Exporter rules for the Strimzi-managed Kafka brokers and KRaft controllers, referenced from
-# Kafka.spec.kafka.metricsConfig. An allowlist, not the catch-all of the Strimzi example: every rule names
-# the MBeans it exports, so topic and partition labels stay bounded by the topics the chart creates and an
-# unknown MBean never becomes a series. Metric names follow the Strimzi/JMX Exporter convention
-# (lowercased kafka_<domain>_<type>_<name>), so Kafka Grafana dashboards written for that convention apply.
+# Правила Prometheus JMX Exporter для брокеров Kafka и контроллеров KRaft под управлением Strimzi;
+# подключаются через Kafka.spec.kafka.metricsConfig. Каждое правило явно выбирает MBeans:
+# метки topic и partition ограничены топиками чарта, неизвестные MBeans не создают рядов.
+# Имена следуют соглашению Strimzi/JMX Exporter (kafka_<domain>_<type>_<name> в нижнем регистре),
+# сохраняя совместимость с соответствующими Kafka-дашбордами Grafana.
 lowercaseOutputName: true
 lowercaseOutputLabelNames: true
 rules:
-  # Traffic per topic and per broker. One counter series per topic.
+  # Трафик по топикам и брокерам; один ряд счётчика на топик.
   - pattern: 'kafka.server<type=BrokerTopicMetrics, name=(MessagesIn|BytesIn|BytesOut)PerSec, topic=(.+)><>Count'
     name: kafka_server_brokertopicmetrics_$1_total
     type: COUNTER
@@ -15,14 +15,14 @@ rules:
   - pattern: 'kafka.server<type=BrokerTopicMetrics, name=(MessagesIn|BytesIn|BytesOut)PerSec><>Count'
     name: kafka_server_brokertopicmetrics_$1_total
     type: COUNTER
-  # Per-partition log size and offsets: topic volume and dead-letter growth without a consumer.
+  # Размер журнала и offsets партиций: объём топика и рост dead-letter видны без потребителя.
   - pattern: 'kafka.log<type=Log, name=(Size|LogEndOffset|LogStartOffset), topic=(.+), partition=(.+)><>Value'
     name: kafka_log_log_$1
     type: GAUGE
     labels:
       topic: "$2"
       partition: "$3"
-  # Replication health.
+  # Состояние репликации.
   - pattern: 'kafka.server<type=ReplicaManager, name=(LeaderCount|PartitionCount|UnderReplicatedPartitions|UnderMinIsrPartitionCount|OfflineReplicaCount)><>Value'
     name: kafka_server_replicamanager_$1
     type: GAUGE
@@ -40,14 +40,14 @@ rules:
     labels:
       topic: "$2"
       partition: "$3"
-  # KRaft controller state.
+  # Состояние контроллера KRaft.
   - pattern: 'kafka.controller<type=KafkaController, name=(ActiveControllerCount|OfflinePartitionsCount|GlobalTopicCount|GlobalPartitionCount|PreferredReplicaImbalanceCount)><>Value'
     name: kafka_controller_kafkacontroller_$1
     type: GAUGE
   - pattern: 'kafka.server<type=raft-metrics><>(current-leader|current-epoch|high-watermark|log-end-offset):'
     name: kafka_server_raftmetrics_$1
     type: GAUGE
-  # Request path: count and latency quantiles for the three request types that carry the data plane.
+  # Количество запросов и квантили задержки трёх типов запросов передачи данных.
   - pattern: 'kafka.network<type=RequestMetrics, name=TotalTimeMs, request=(Produce|FetchConsumer|FetchFollower)><>Count'
     name: kafka_network_requestmetrics_totaltimems_count
     type: COUNTER
@@ -65,7 +65,7 @@ rules:
     labels:
       request: "$1"
       error: "$2"
-  # Saturation.
+  # Насыщение ресурсов.
   - pattern: 'kafka.network<type=SocketServer, name=NetworkProcessorAvgIdlePercent><>Value'
     name: kafka_network_socketserver_networkprocessoravgidlepercent
     type: GAUGE

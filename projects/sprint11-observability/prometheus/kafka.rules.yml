@@ -3,8 +3,8 @@ groups:
     interval: 30s
     rules:
       - alert: KafkaMetricsMissing
-        # Strimzi publishes one scrape target per Kafka pod through DNS; a crashed pod has no address and
-        # therefore no up series at all, so absence is the signal.
+        # Strimzi публикует через DNS по цели на pod Kafka. Упавший pod не имеет адреса и ряда up,
+        # поэтому сигналом служит само отсутствие здоровой цели.
         expr: absent(up{job="kafka-jmx"} == 1)
         for: 3m
         labels:
@@ -60,7 +60,7 @@ groups:
           description: "The group has been more than 100 messages behind for 10 minutes: the consumer is slow, stuck, or gone."
           action: "Check the consuming service (accounts, notifications or analytics) for errors and rebalances; see the lag panels on the Kafka topics dashboard."
       - alert: KafkaDeadLetterTopicReceivedMessages
-        # Offsets are gauges, so delta (not increase) measures the messages added to the topic.
+        # Offsets — gauges, поэтому число добавленных сообщений измеряет delta, а не increase.
         expr: sum by (topic) (delta(kafka_topic_partition_current_offset{topic=~".+\\.DLT"}[15m])) > 0
         labels:
           severity: warning

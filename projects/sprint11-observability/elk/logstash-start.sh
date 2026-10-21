@@ -1,6 +1,6 @@
 #!/bin/bash
-# Reads the Elasticsearch writer credential from its mounted Secret file into the process environment
-# that bank-logs.conf references as ${LOGSTASH_WRITER_PASSWORD}, then hands over to the image entrypoint.
+# Пароль записи в Elasticsearch читается из смонтированного Secret в ${LOGSTASH_WRITER_PASSWORD},
+# которую использует bank-logs.conf; затем управление передаётся штатному entrypoint образа.
 set -euo pipefail
 umask 077
 file=/run/secrets/logstash_writer_password

@@ -1,22 +1,22 @@
-# Replaces config/elasticsearch.yml from the image (copied next to the other default files by an
-# init container, because the root filesystem is read-only).
+# Заменяет config/elasticsearch.yml образа: init container копирует его рядом с остальными штатными
+# файлами, поскольку корневая файловая система доступна только для чтения.
 cluster.name: bank11-logs
 node.name: bank11-logs-0
 network.host: 0.0.0.0
-# One node: no shard replicas to place, no discovery or bootstrap quorum checks.
+# Один узел: реплики shard не размещаются, поиск узлов и проверка начального кворума не нужны.
 discovery.type: single-node
 xpack.security.enabled: true
-# Plain HTTP stays inside the namespace; every request is authenticated. Transport TLS is not needed in
-# single-node mode. TLS for the HTTP listener is a separate deployment decision.
+# HTTP остаётся внутри namespace; каждый запрос требует аутентификации. В одноузловом режиме
+# transport TLS не нужен. TLS для HTTP-слушателя задаётся отдельно при развёртывании.
 xpack.security.http.ssl.enabled: false
-# Machine learning and Watcher would only consume heap on a 256m node; Kibana alerting uses neither.
+# Machine learning и Watcher лишь заняли бы часть heap в 256m; оповещения Kibana их не используют.
 xpack.ml.enabled: false
 xpack.watcher.enabled: false
-# No internet access is assumed or wanted: skip the GeoIP database download.
+# Интернет не требуется: загрузка базы GeoIP отключена.
 ingest.geoip.downloader.enabled: false
 action.destructive_requires_name: true
-# Absolute free-space watermarks. The percentage defaults would turn indices read-only on a developer
-# disk that is merely 90% full, silently stopping log delivery.
+# Пороги свободного места заданы в байтах. Процентные значения по умолчанию сделали бы индексы
+# read-only уже при заполнении рабочего диска на 90%, незаметно остановив доставку логов.
 cluster.routing.allocation.disk.watermark.low: 2gb
 cluster.routing.allocation.disk.watermark.high: 1gb
 cluster.routing.allocation.disk.watermark.flood_stage: 512mb

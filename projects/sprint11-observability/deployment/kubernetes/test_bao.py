@@ -1,4 +1,4 @@
-"""Exercise the OpenBao bootstrap client through real TLS and HTTP without a cluster or real secret values."""
+"""Проверка клиента настройки OpenBao через настоящие TLS и HTTP без кластера и реальных секретов."""
 
 import argparse
 import base64
@@ -85,7 +85,7 @@ def tearDownModule():
 
 
 class FakeOpenBao:
-    """Evaluates the policies and roles that the client posts, following the documented API shapes."""
+    """Проверяет отправленные клиентом политики и роли по документированным структурам API."""
 
     def __init__(self):
         self.initialized, self.sealed, self.unseal_key, self.root_token = False, True, None, None
@@ -263,7 +263,7 @@ class BoundaryTest(unittest.TestCase):
 
 
 class Scenario(unittest.TestCase):
-    """A state directory, an external secret directory and a TLS fake wired in place of kubectl and the forward."""
+    """Каталоги состояния и внешних секретов с TLS-заглушкой вместо kubectl и port-forward."""
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix="bank11-bao-")

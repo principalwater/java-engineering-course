@@ -1,7 +1,7 @@
 global:
   resolve_timeout: 5m
-  # The chart replaces the placeholder with observability.alerting.telegram.apiUrl: the real Bot API in
-  # production, a local fake receiver that speaks POST /bot<token>/sendMessage in CI. Never a real chat in CI.
+  # Чарт подставляет observability.alerting.telegram.apiUrl: настоящий Bot API в эксплуатации
+  # или локальный приёмник POST /bot<token>/sendMessage в CI. Реальный чат в CI не используется.
   telegram_api_url: "@TELEGRAM_API_URL@"
 route:
   receiver: telegram-warning
@@ -15,7 +15,7 @@ route:
       receiver: telegram-critical
       repeat_interval: 1h
 inhibit_rules:
-  # A service whose metrics endpoint is down will also trip its latency/ratio/JVM warnings; one message is enough.
+  # Недоступный endpoint метрик вызовет и предупреждения latency/ratio/JVM; достаточно одного сообщения.
   - source_matchers:
       - alertname="BankServiceDown"
     target_matchers:
@@ -24,8 +24,8 @@ inhibit_rules:
 receivers:
   - name: telegram-critical
     telegram_configs:
-      # Both values are read from mounted Secret files at notification time; neither is part of this
-      # configuration, the chart values or the Helm state.
+      # Оба значения читаются из смонтированных Secret при отправке; их нет в этой конфигурации,
+      # values чарта и состоянии Helm.
       - bot_token_file: /run/secrets/telegram_bot_token
         chat_id_file: /run/secrets/telegram_chat_id
         send_resolved: true
@@ -42,7 +42,7 @@ receivers:
       - bot_token_file: /run/secrets/telegram_bot_token
         chat_id_file: /run/secrets/telegram_chat_id
         send_resolved: true
-        # Warnings arrive without a notification sound; critical alerts do not.
+        # Предупреждения приходят без звука; критические оповещения — со звуком.
         disable_notifications: true
         parse_mode: HTML
         message: |-

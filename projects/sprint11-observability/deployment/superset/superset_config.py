@@ -16,6 +16,8 @@ def secret(name):
 
 
 SECRET_KEY = secret('superset_secret_key')
+# FAB создаёт права внутри транзакции при старте; банковские роли сохраняют свой лимит простоя 10 с.
+METADATA_IDLE_TRANSACTION_TIMEOUT_MS = 120_000
 SQLALCHEMY_DATABASE_URI = (
     'postgresql+psycopg2://superset:' + quote(secret('db_superset_password'), safe='')
     + '@' + os.environ.get('BANK_BI_DATABASE_HOST', 'database') + ':5432/bank'
@@ -25,7 +27,11 @@ SQLALCHEMY_ENGINE_OPTIONS = {
     'pool_size': 3,
     'max_overflow': 1,
     'pool_timeout': 3,
-    'connect_args': {'options': '-csearch_path=superset -cstatement_timeout=15000', 'connect_timeout': 5},
+    'connect_args': {
+        'options': ('-csearch_path=superset -cstatement_timeout=15000 '
+                    f'-cidle_in_transaction_session_timeout={METADATA_IDLE_TRANSACTION_TIMEOUT_MS}'),
+        'connect_timeout': 5,
+    },
 }
 AUTH_TYPE = AUTH_OAUTH
 AUTH_USER_REGISTRATION = True
@@ -66,7 +72,7 @@ SECRET_KEY_WARNING = False
 PUBLIC_ROLE_LIKE = None
 
 PUBLIC_ISSUER = os.environ.get('BANK_BI_PUBLIC_AUTH_URL', 'https://auth-bank.valgrind-home.localhost:8460/realms/bank')
-INTERNAL_ISSUER = os.environ.get('BANK_BI_AUTH_URL', 'http://authorization:8080/realms/bank')
+INTERNAL_ISSUER = os.environ.get('BANK_BI_AUTH_URL', 'https://authorization:8443/realms/bank')
 OAUTH_PROVIDERS = [{
     'name': 'bank',
     'icon': 'fa-bank',

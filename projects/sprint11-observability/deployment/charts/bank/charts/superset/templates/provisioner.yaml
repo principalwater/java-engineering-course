@@ -1,7 +1,9 @@
+{{- /* Pod template Job неизменяем: оба образа и новая версия чарта требуют отдельного идемпотентного запуска. */ -}}
+{{- $revision := dict "provisioner" .Values.provisionerImage "readiness" .Values.image "chart" .Values.global.chartRevision | toJson | sha256sum | trunc 10 -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: bank-bi-{{ .Values.provisionerImage | sha256sum | trunc 10 }}
+  name: bank-bi-{{ $revision }}
   labels: {app.kubernetes.io/part-of: bank11}
 spec:
   backoffLimit: 2

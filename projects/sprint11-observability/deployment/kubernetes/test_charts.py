@@ -137,6 +137,18 @@ class BankChartTest(unittest.TestCase):
         environment = bi["spec"]["template"]["spec"]["containers"][0]["env"]
         self.assertIn({"name": "BANK_BI_URL", "value": "https://superset:8088"}, environment)
         superset = self.resources(analytics=True, kind="Deployment")["superset"]
+        container = superset["spec"]["template"]["spec"]["containers"][0]
+        backend_port = container["ports"][0]["containerPort"]
+        policies = self.resources(analytics=True, kind="NetworkPolicy")
+        self.assertIn(backend_port, {port["port"] for rule in policies["allow-superset-ingress"]["spec"]["ingress"]
+                                     for port in rule["ports"]})
+        self.assertIn(backend_port, {port["port"] for rule in policies["allow-edge-egress"]["spec"]["egress"]
+                                     if any(peer.get("podSelector", {}).get("matchLabels", {}).get("app") == "superset"
+                                            for peer in rule["to"]) for port in rule["ports"]})
+        self.assertIn({"name": "BANK_BI_AUTH_URL", "value": "https://authorization:8443/realms/bank"}, container["env"])
+        self.assertIn({"name": "REQUESTS_CA_BUNDLE", "value": "/run/secrets/internal_ca.pem"}, container["env"])
+        secret = self.resources(analytics=True, kind="ExternalSecret")["bank11-superset"]
+        self.assertIn("internal_ca.pem", {entry["secretKey"] for entry in secret["spec"]["data"]})
         self.assertIn({"name": "BANK_BI_PUBLIC_AUTH_URL", "value": "https://auth-bank.valgrind-home.localhost:8460/realms/bank"},
                       superset["spec"]["template"]["spec"]["containers"][0]["env"])
         analytics = self.resources(analytics=True, kind="KafkaUser")["analytics-service"]["spec"]["authorization"]["acls"]
@@ -177,6 +189,26 @@ class BankChartTest(unittest.TestCase):
                           for item in yaml.safe_load_all(rendered.stdout)
                           if item and item["kind"] in {"Deployment", "StatefulSet"}}
                 self.assertEqual({key for key in baseline if baseline[key] != actual[key]}, expected)
+
+    def test_bi_initializer_replacement_tracks_both_images_and_chart(self):
+        """Обновление init-образа не должно патчить неизменяемый Pod template существующего Job."""
+        values_path = Path(self.directory.name) / "single-True/public-values.yaml"
+        baseline = yaml.safe_load(values_path.read_text(encoding="utf-8"))
+        previous = next(name for name in self.resources(analytics=True, kind="Job") if name.startswith("bank-bi-"))
+        for scope, key, value in (("superset", "image", "bank11-superset:updated"),
+                                  ("superset", "provisionerImage", "bank11-bank-bi:updated"),
+                                  ("global", "chartRevision", "f" * 64)):
+            with self.subTest(scope=scope, key=key):
+                updated = copy.deepcopy(baseline)
+                updated[scope][key] = value
+                override = Path(self.directory.name) / "updated-bi.yaml"
+                override.write_text(yaml.safe_dump(updated), encoding="utf-8")
+                rendered = subprocess.run(["helm", "template", "bank", str(self.project / "deployment/charts/bank"),
+                                           "--namespace", "bank11-dev", "-f", str(override)],
+                                          capture_output=True, text=True, check=True)
+                current = next(item["metadata"]["name"] for item in yaml.safe_load_all(rendered.stdout)
+                               if item and item["kind"] == "Job" and item["metadata"]["name"].startswith("bank-bi-"))
+                self.assertNotEqual(previous, current)
 
     def test_foreign_namespace_fails_before_any_cluster_contact(self):
         result = subprocess.run(["helm", "template", "bank", str(self.project / "deployment/charts/bank"), "--namespace", "default",

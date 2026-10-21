@@ -42,7 +42,8 @@ spec:
           env:
             - {name: SUPERSET_HOME, value: /tmp/superset}
             - {name: BANK_BI_DATABASE_HOST, value: database}
-            - {name: BANK_BI_AUTH_URL, value: "http://authorization:8080/realms/bank"}
+            - {name: BANK_BI_AUTH_URL, value: "https://authorization:8443/realms/bank"}
+            - {name: REQUESTS_CA_BUNDLE, value: /run/secrets/internal_ca.pem}
             - {name: BANK_BI_PUBLIC_AUTH_URL, value: {{ printf "https://auth-bank.valgrind-home.localhost:%v/realms/bank" .Values.global.externalPort | quote }}}
           securityContext:
             allowPrivilegeEscalation: false

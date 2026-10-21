@@ -233,13 +233,14 @@ class TraceAndLogTest(unittest.TestCase):
 
 
 class RuntimeBoundaryTest(unittest.TestCase):
-    def test_log_delivery_distinguishes_duplicates_quarantine_and_real_nonproduction_debug(self):
+    def test_log_delivery_separates_nonretryable_history_quarantine_and_real_bank_debug(self):
         project = observability.PROJECT
         services = observability.expected_services(observability.load_yaml(project / "deployment/charts/bank/values.yaml"), False)
         documents = [{"service": name, "level": "DEBUG", "event": "Safe diagnostic", "logger_name": "dev.principalwater.bank.runtime.workflow.MoneyWorkflow",
                       "@timestamp": "2026-10-21T10:00:00Z", "traceId": "1" * 32, "spanId": "1" * 16} for name in services]
         wanted = observability.pipeline_ids(project)
         cases = ((0, 0, 99, "DEBUG", "dev.principalwater.bank.runtime.workflow.MoneyWorkflow", "test", True, True),
+                 (0, 1, 99, "DEBUG", "dev.principalwater.bank.runtime.workflow.MoneyWorkflow", "test", True, True),
                  (23, 0, 99, "DEBUG", "dev.principalwater.bank.runtime.workflow.MoneyWorkflow", "test", True, True),
                  (0, 256, 0, "DEBUG", "dev.principalwater.bank.runtime.workflow.MoneyWorkflow", "test", False, True),
                  (0, None, 0, "DEBUG", "dev.principalwater.bank.runtime.workflow.MoneyWorkflow", "test", False, True),
@@ -247,12 +248,12 @@ class RuntimeBoundaryTest(unittest.TestCase):
                  (0, 0, 0, "INFO", "dev.principalwater.bank.runtime.workflow.MoneyWorkflow", "dev", True, False),
                  (0, 0, 0, "DEBUG", "org.springframework.context", "test", True, False),
                  (0, 0, 0, "INFO", "dev.principalwater.bank.runtime.workflow.MoneyWorkflow", "prod", True, True))
-        for routed, size, duplicates, level, logger, environment, accepted, indexed in cases:
+        for routed, size, non_retryable, level, logger, environment, accepted, indexed in cases:
             with self.subTest(routed=routed, size=size, environment=environment, level=level, logger=logger):
                 current = [{**item, "level": level, "logger_name": logger} for item in documents]
                 pipeline = {"events": {"out": 10}, "dead_letter_queue": {"queue_size_in_bytes": size},
                             "plugins": {"inputs": [{"id": name} for name in wanted], "filters": [],
-                                        "outputs": [{"id": "bank-logs-elasticsearch", "documents": {"non_retryable_failures": duplicates, "dlq_routed": routed}}]}}
+                                        "outputs": [{"id": "bank-logs-elasticsearch", "documents": {"non_retryable_failures": non_retryable, "dlq_routed": routed}}]}}
                 def respond(path, body, headers):
                     if path == "/_node/stats/pipelines":
                         return 200, {"pipelines": {"main": pipeline}}
@@ -269,7 +270,7 @@ class RuntimeBoundaryTest(unittest.TestCase):
                 self.assertEqual("PASS" if accepted else "FAIL", checks[0]["status"])
                 if accepted:
                     self.assertEqual(routed, report.facts["logstash"]["dlq_routed"])
-                    self.assertEqual(duplicates, report.facts["logstash"]["duplicate_create_conflicts"])
+                    self.assertEqual(non_retryable, report.facts["logstash"]["non_retryable_failures"])
                 indexed_checks = [check for check in report.checks if check["name"] == "elasticsearch logs"]
                 self.assertEqual("PASS" if indexed else "FAIL", indexed_checks[0]["status"])
 

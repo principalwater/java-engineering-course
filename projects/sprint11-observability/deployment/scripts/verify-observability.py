@@ -58,6 +58,8 @@ ZIPKIN_TRACES_PER_SERVICE = 100
 LOG_SCAN_EVENTS = 5000
 LOG_TRACE_SAMPLE = 30
 DASHBOARD_BATCH = 20
+# Logstash 9.5.5 учитывает байт версии открытого head-сегмента даже в пустой включённой DLQ.
+DLQ_EMPTY_BYTES = 1
 # Короче значения не отличить от случайного текста журнала; секреты bank11 — 64 hex-символа.
 MIN_NEEDLE_LENGTH = 8
 DIAGNOSTIC_LENGTH = 200
@@ -759,18 +761,19 @@ def check_logs(stack, report):
             if type(dlq_bytes) is not int or dlq_bytes < 0:
                 return problems + ["Logstash DLQ size is unavailable"]
             routed = sum(item.get("documents", {}).get("dlq_routed", 0) for item in outputs)
-            # action=create и пустой drop_error_types: non_retryable_failures здесь отражает 409,
-            # а не 400/404, которые попадают в DLQ и требуют вмешательства.
-            duplicates = sum(item.get("documents", {}).get("non_retryable_failures", 0) for item in outputs)
-            delivery.update(duplicate_create_conflicts=duplicates, dlq_routed=routed, dlq_bytes=dlq_bytes)
+            # Общий счётчик включает игнорируемые 409 и ошибки локального mapping, иногда с DLQ:
+            # точный класс сбоя по одной этой метрике восстановить нельзя.
+            non_retryable = sum(item.get("documents", {}).get("non_retryable_failures", 0) for item in outputs)
+            delivery.update(non_retryable_failures=non_retryable, dlq_routed=routed, dlq_bytes=dlq_bytes)
             # routed накапливается до перезапуска: после обработки и очистки DLQ история не должна
             # блокировать здоровье. Новые поступления отдельно отслеживает алерт роста gauge.
-            return problems + ([f"Logstash DLQ retains {dlq_bytes} bytes"] if dlq_bytes else [])
+            return problems + ([f"Logstash DLQ retains {dlq_bytes} bytes"] if dlq_bytes > DLQ_EMPTY_BYTES else [])
         stack.wait("Logstash pipeline", running)
         report.facts["logstash"] = delivery
         report.passed("logstash pipeline", f"the repository pipeline main runs ({len(wanted)} plugin ids); "
                       f"DLQ is empty; cumulative routed={delivery['dlq_routed']}, "
-                      f"duplicate create conflicts ignored={delivery['duplicate_create_conflicts']}")
+                      f"non_retryable_failures={delivery['non_retryable_failures']} "
+                      "(includes ignored 409; precise error classes are not reconstructible)")
 
     with report.guarded("elasticsearch logs"):
         denied = call(port, "POST", "/bank11-logs-*/_search", body={"size": 0})[0]

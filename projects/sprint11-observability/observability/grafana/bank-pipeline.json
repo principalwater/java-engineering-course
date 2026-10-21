@@ -772,7 +772,7 @@
     {
       "type": "timeseries",
       "title": "Elasticsearch output: documents per second",
-      "description": "Fingerprint-based create ignores duplicate documents (409). Mapping errors (400/404) enter the dead letter queue shown below; its growth is alerted separately.",
+      "description": "Non-retryable failures include ignored duplicate creates (409) and local mapping errors, which can also enter the DLQ. Precise error classes cannot be reconstructed from this counter; retained quarantine bytes are shown below and their growth is alerted separately.",
       "datasource": {
         "type": "prometheus",
         "uid": "bank-prometheus"
@@ -797,7 +797,7 @@
           },
           "editorMode": "code",
           "expr": "sum(rate(logstash_stats_pipeline_plugin_documents_non_retryable_failures{job=\"logstash\", pipeline=\"main\"}[$__rate_interval]))",
-          "legendFormat": "duplicate creates (409, ignored)",
+          "legendFormat": "non-retryable failures (includes 409)",
           "range": true,
           "instant": false,
           "refId": "B"

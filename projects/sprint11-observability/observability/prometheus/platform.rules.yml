@@ -85,8 +85,8 @@ groups:
           description: "{{ $value | printf \"%.0f\" }} spans were rejected by the collector in 10 minutes; traces will have gaps."
           action: "Check the Zipkin log for the rejection reason (malformed JSON, oversized message) and the reporter version in the calling service."
       - alert: LogstashDeadLetterQueueGrowing
-        # Экспортёр v1.9.2 отдаёт размер DLQ как gauge; 409 от action=create сюда не попадают.
-        expr: max(delta(logstash_stats_pipeline_dead_letter_queue_size_in_bytes{pipeline="main"}[10m])) > 0
+        # Gauge сравнивается без экстраполяции delta: байт версии нового head-сегмента не документ.
+        expr: max(last_over_time(logstash_stats_pipeline_dead_letter_queue_size_in_bytes{pipeline="main"}[10m]) - first_over_time(logstash_stats_pipeline_dead_letter_queue_size_in_bytes{pipeline="main"}[10m])) > 1
         labels:
           severity: warning
         annotations:

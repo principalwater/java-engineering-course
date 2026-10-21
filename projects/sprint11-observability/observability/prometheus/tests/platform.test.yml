@@ -84,3 +84,21 @@ tests:
       - eval_time: 20m
         alertname: LogstashDeadLetterQueueGrowing
         exp_alerts: []
+  - name: a new head segment version byte is not a quarantined document
+    interval: 1m
+    input_series:
+      - series: 'logstash_stats_pipeline_dead_letter_queue_size_in_bytes{pipeline="main", job="logstash"}'
+        values: '0 0 0 1 1x20'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: LogstashDeadLetterQueueGrowing
+        exp_alerts: []
+  - name: reopening a retained queue adds a header without adding a document
+    interval: 1m
+    input_series:
+      - series: 'logstash_stats_pipeline_dead_letter_queue_size_in_bytes{pipeline="main", job="logstash"}'
+        values: '256 256 256 257 257x20'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: LogstashDeadLetterQueueGrowing
+        exp_alerts: []

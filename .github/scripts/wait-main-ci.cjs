@@ -1,6 +1,6 @@
 module.exports = async function waitForMainCI({github, context, sha}) {
   if (!/^[a-f0-9]{40}$/.test(sha ?? '')) throw new Error('Invalid merged commit SHA');
-  const deadline = Date.now() + 22 * 60 * 1000;
+  const deadline = Date.now() + 195 * 60 * 1000;
   while (Date.now() < deadline) {
     const {data} = await github.rest.actions.listWorkflowRuns({
       ...context.repo, workflow_id: 'java.yml', branch: 'main', head_sha: sha,

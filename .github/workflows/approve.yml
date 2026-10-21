@@ -19,7 +19,7 @@ jobs:
       github.triggering_actor == 'principalwater' &&
       github.repository_owner == 'principalwater'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 210
     steps:
       - name: Check out trusted automation from main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

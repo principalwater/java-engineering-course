@@ -15,7 +15,7 @@ function scenario() {
   const run = {id: 99, head_sha: 'head', event: 'pull_request', pull_requests: [{number: 7}],
     status: 'completed', conclusion: 'success'};
   const pushRun = {...run, id: 100, event: 'push', head_branch: pull.head.ref, pull_requests: []};
-  const jobs = ['projects', 'exercises', 'sprint03', 'sprint04', 'infrastructure', 'sprint05', 'sprint06', 'sprint07', 'sprint08', 'observability-exercises', 'kafka-exercises', 'sprint09', 'sprint10'].map((name, index) => ({
+  const jobs = ['projects', 'exercises', 'sprint03', 'sprint04', 'infrastructure', 'sprint05', 'sprint06', 'sprint07', 'sprint08', 'observability-exercises', 'kafka-exercises', 'sprint09', 'sprint10', 'sprint11', 'sprint11-jenkins'].map((name, index) => ({
     name, status: 'completed', conclusion: 'success', check_run_url: 'https://api.github.com/check-runs/' + index,
   }));
   const checks = jobs.map(job => ({...job, app: {id: 15368}}));
@@ -96,6 +96,9 @@ test('approval accepts only a verified head and preserves merge history', async 
     ['missing Kafka exercises job', fixture => {fixture.jobs.splice(10, 1);}, /Required check kafka-exercises/],
     ['missing bank job', fixture => {fixture.jobs.splice(11, 1);}, /Required check sprint09/],
     ['missing Kafka bank job', fixture => {fixture.jobs.splice(12, 1);}, /Required check sprint10/],
+    ['missing observability bank job', fixture => {fixture.jobs.splice(13, 1);}, /Required check sprint11/],
+    ['missing dedicated Jenkins job', fixture => {fixture.jobs.splice(14, 1);}, /Required check sprint11-jenkins/],
+    ['failed dedicated Jenkins job', fixture => {fixture.jobs[14].conclusion = 'failure';}, /Required check sprint11-jenkins/],
     ['failed job', fixture => {fixture.jobs[1].conclusion = 'failure';}, /Required check/],
     ['existing module skipped', fixture => {
       fixture.jobs[2].conclusion = 'skipped'; fixture.checks[2].conclusion = 'skipped';
@@ -147,6 +150,25 @@ test('approval accepts only a verified head and preserves merge history', async 
     fixture.checks[11].conclusion = 'skipped';
     await approveAndMerge(fixture);
     assert.deepEqual(fixture.effects.map(effect => effect[0]), ['review', 'merge']);
+  });
+  // Both native and Jenkins execution must pass once Sprint 11 exists; infrastructure-only pull requests skip both.
+  await t.test('the Sprint 11 jobs may be skipped only while their project is absent', async () => {
+    for (const name of ['sprint11', 'sprint11-jenkins']) {
+      const present = scenario();
+      present.jobs.find(job => job.name === name).conclusion = 'skipped';
+      present.checks.find(check => check.name === name).conclusion = 'skipped';
+      await assert.rejects(approveAndMerge(present), new RegExp('Required check ' + name));
+      assert.deepEqual(present.effects, []);
+    }
+    const absent = scenario();
+    absent.state.absentMarkers = new Set(['projects/sprint11-observability/build.gradle']);
+    for (const collection of [absent.jobs, absent.checks]) {
+      for (const job of collection.filter(candidate => ['sprint11', 'sprint11-jenkins'].includes(candidate.name))) {
+        job.conclusion = 'skipped';
+      }
+    }
+    await approveAndMerge(absent);
+    assert.deepEqual(absent.effects.map(effect => effect[0]), ['review', 'merge']);
   });
   await t.test('authorized command', async () => {
     const fixture = scenario();

@@ -12,7 +12,7 @@ variables {
   profile            = "single"
   kubeconfig_path    = "/external/encrypted/kubeconfig"
   kube_context       = "kind-bank10-dev-single"
-  project_dir        = abspath("tests/fixtures/project")
+  project_dir        = abspath("tests/fixtures/legacy-project")
   public_values_path = abspath("tests/fixtures/single.yaml")
 }
 
@@ -87,5 +87,25 @@ run "isolated_ha_releases" {
   assert {
     condition     = helm_release.bank.namespace == "bank10-test" && output.kafka_bootstrap == "bank-kafka-kafka-bootstrap.bank10-test.svc.cluster.local:9093"
     error_message = "HA must remain in its own namespace and authenticated listener."
+  }
+}
+
+run "isolated_dual_stack_releases" {
+  command = plan
+  variables {
+    stack_prefix       = "bank11"
+    project_dir        = abspath("tests/fixtures/project")
+    kube_context       = "kind-bank11-dev-single"
+    public_values_path = abspath("tests/fixtures/observability.yaml")
+  }
+  override_data {
+    target = data.kubernetes_namespace_v1.bank
+    values = {
+      metadata = { labels = { "bank11.io/cluster" = "bank11-dev-single" } }
+    }
+  }
+  assert {
+    condition     = length(helm_release.cilium) == 1 && helm_release.cilium[0].version == "1.20.3" && helm_release.bank.namespace == "bank11-dev" && helm_release.strimzi.name == "bank11-strimzi"
+    error_message = "Observability must use its own namespace and enforcing dual-stack CNI."
   }
 }

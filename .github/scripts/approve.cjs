@@ -15,6 +15,8 @@ const REQUIRED_JOBS = new Map([
   ['kafka-exercises', 'exercises/sprint10/kafka-clients/build.gradle'],
   ['sprint09', 'projects/sprint09-bank/build.gradle'],
   ['sprint10', 'projects/sprint10-kafka/build.gradle'],
+  ['sprint11', 'projects/sprint11-observability/build.gradle'],
+  ['sprint11-jenkins', 'projects/sprint11-observability/build.gradle'],
 ]);
 
 function requireCondition(condition, message) {

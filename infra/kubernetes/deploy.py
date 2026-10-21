@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -45,7 +46,9 @@ def secret_variants(directory: Path, names: list[str]) -> list[bytes]:
         if not path.is_file() or path.is_symlink() or path.stat().st_mode & 0o077:
             raise ValueError(f"Secret source is missing or not private: {name}")
         raw = path.read_bytes()
-        if len(raw.strip()) < 16:
+        # Telegram chat IDs are signed identifiers, not generated passwords.
+        identifier = name == "telegram_chat_id" and re.fullmatch(rb"-?[1-9][0-9]{4,18}", raw.strip())
+        if len(raw.strip()) < 16 and not identifier:
             raise ValueError(f"Secret source is unexpectedly short: {name}")
         values.update(encoded_secret_values(raw))
     return sorted(values, key=len, reverse=True)
@@ -89,14 +92,18 @@ def run(arguments: list[str], *, environment: dict, values: list[bytes], log: Pa
     return result.stdout
 
 
-def validate_plan(plan: dict, *, operator_only: bool = False) -> dict:
+def validate_plan(plan: dict, *, operator_only: bool = False, secrets_only: bool = False,
+                  dual_stack: bool = False) -> dict:
     counts = {}
+    allowed = EXPECTED_RESOURCES | ({"helm_release.cilium[0]"} if dual_stack else set())
+    if dual_stack and not operator_only:
+        allowed |= {"helm_release.openbao[0]", "helm_release.external_secrets[0]"}
     for change in plan.get("resource_changes", []):
         address = change["address"]
-        if address not in EXPECTED_RESOURCES:
+        if address not in allowed:
             raise ValueError(f"Plan contains a foreign resource: {address}")
-        if operator_only and address == "helm_release.bank":
-            raise ValueError("Operator bootstrap plan must not include bank workloads")
+        if (operator_only or secrets_only) and address == "helm_release.bank":
+            raise ValueError("Bootstrap plan must not include bank workloads")
         actions = change["change"]["actions"]
         if any(action not in {"create", "update", "read", "no-op"} for action in actions):
             raise ValueError(f"Destructive or replacement action is not allowed: {address}")
@@ -112,7 +119,9 @@ def main() -> None:
     parser.add_argument("--project-dir", required=True, type=Path)
     parser.add_argument("--state-dir", required=True, type=Path)
     parser.add_argument("--secrets-dir", required=True, type=Path)
-    parser.add_argument("--operator-only", action="store_true", help="Bootstrap CRDs/operator before bank images are available")
+    phase = parser.add_mutually_exclusive_group()
+    phase.add_argument("--operator-only", action="store_true", help="Bootstrap CNI/CRDs before bank images are available")
+    phase.add_argument("--secrets-only", action="store_true", help="Bootstrap OpenBao/ESO before bank credentials are available")
     args = parser.parse_args()
     project = args.project_dir.expanduser().resolve()
     if not (project / "deployment/kubernetes/runtime.py").is_file():
@@ -128,7 +137,7 @@ def main() -> None:
     preparation = importlib.import_module("prepare")
     if source["source_sha256"] != preparation.source_digest(project, source["analytics"], source["superset"]):
         raise ValueError("Public source assets changed; prepare fresh values before planning")
-    if not args.operator_only and not source["images"]:
+    if not (args.operator_only or args.secrets_only) and not source["images"]:
         raise ValueError("Load content-addressed Gradle application images before a real deployment plan")
     for name, expected in source["artifacts"].items():
         artifact = project / "build/deployment" / f"{name}.jar"
@@ -136,7 +145,18 @@ def main() -> None:
             raise ValueError(f"Packaged Gradle artifact changed: {name}.jar")
     values_path = state_dir / "public-values.yaml"
     public_values = yaml.safe_load(values_path.read_text(encoding="utf-8"))
-    if public_values["global"]["environment"] != identity["namespace"].removeprefix("bank10-") or source["profile"] != identity["profile"]:
+    prefix = identity["namespace"].rsplit("-", 1)[0]
+    if prefix not in {"bank10", "bank11"}:
+        raise ValueError("Cluster identity does not belong to a supported bank deployment")
+    if args.secrets_only and prefix != "bank11":
+        raise ValueError("OpenBao bootstrap is isolated to the bank11 deployment")
+    if prefix == "bank11" and not (args.operator_only or args.secrets_only):
+        # Recreate must not remove the current instance while its credential source is sealed.
+        bao = importlib.import_module("bao")
+        with bao.connect(identity, secret_dir) as client:
+            bao.require_unsealed(client)
+    environment_name = identity["namespace"].removeprefix(prefix + "-")
+    if public_values["global"]["environment"] != environment_name or source["profile"] != identity["profile"]:
         raise ValueError("Prepared public values do not belong to the owned cluster")
     secret_values = sorted(set(secret_variants(secret_dir, source["secret_files"]) + generated_secret_variants(runtime, identity)), key=len, reverse=True)
     require_no_secrets(values_path.read_bytes(), secret_values, "public Helm values")
@@ -145,7 +165,7 @@ def main() -> None:
     environment.update(TF_DATA_DIR=str(state_dir / "tofu-data"), TF_IN_AUTOMATION="1")
     root = Path(__file__).resolve().parent
     base = ["tofu", f"-chdir={root}"]
-    variables = {"environment": identity["namespace"].removeprefix("bank10-"), "profile": identity["profile"],
+    variables = {"stack_prefix": prefix, "environment": environment_name, "profile": identity["profile"],
                  "kubeconfig_path": identity["kubeconfig"], "kube_context": identity["context"],
                  "project_dir": str(project), "public_values_path": str(values_path),
                  "analytics_enabled": source["analytics"], "superset_enabled": source["superset"]}
@@ -154,7 +174,7 @@ def main() -> None:
     variable_path.chmod(0o600)
     run([*base, "init", "-input=false", "-reconfigure", f"-backend-config=path={state_dir / 'terraform.tfstate'}"],
         environment=environment, values=secret_values, log=state_dir / "tofu-init.log")
-    component = "operator" if args.operator_only else "bank"
+    component = "operator" if args.operator_only else "secrets" if args.secrets_only else "bank"
     plan_path = state_dir / (f"reviewed-{component}.tfplan" if args.operation != "noop" else f"noop-{component}.tfplan")
     receipt_path = state_dir / f"plan-receipt-{component}.json"
     current = {"component": component, "cluster_uid": identity["cluster_uid"], "chart_sha256": preparation.chart_digest(project),
@@ -168,12 +188,16 @@ def main() -> None:
         if receipt["inputs"] != current or receipt["plan_sha256"] != digest(plan_path):
             raise ValueError("Reviewed plan inputs changed; prepare and review a fresh plan")
     else:
+        # Strimzi's dependency bootstraps Cilium first for the bank11 dual-stack cluster.
         targets = ["-target=helm_release.strimzi"] if args.operator_only else []
+        if args.secrets_only:
+            targets = ["-target=helm_release.openbao", "-target=helm_release.external_secrets"]
         run([*base, "plan", "-input=false", "-no-color", *targets, f"-var-file={variable_path}", f"-out={plan_path}"],
             environment=environment, values=secret_values, log=state_dir / "tofu-plan.log")
     plan_json = run([*base, "show", "-json", str(plan_path)], environment=environment,
                     values=secret_values, log=state_dir / "tofu-plan.json")
-    counts = validate_plan(json.loads(plan_json), operator_only=args.operator_only)
+    counts = validate_plan(json.loads(plan_json), operator_only=args.operator_only,
+                           secrets_only=args.secrets_only, dual_stack=prefix == "bank11")
     if args.operation == "noop" and any(key not in {"no-op", "read"} for key in counts):
         raise ValueError(f"Repeated plan is not empty: {counts}")
     if args.operation == "plan":

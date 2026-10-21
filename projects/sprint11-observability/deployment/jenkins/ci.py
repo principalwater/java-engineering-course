@@ -40,6 +40,7 @@ import xml.etree.ElementTree as ElementTree
 
 HERE = Path(__file__).resolve().parent
 REPOSITORY = HERE.parents[3]
+PIPELINE_PATH = (HERE.parents[1] / "Jenkinsfile").relative_to(REPOSITORY).as_posix()
 SECRET_DISK = HERE.parent / "scripts/secret-disk.py"
 
 INSTANCE = "bank11-jenkins"
@@ -88,8 +89,28 @@ HTTP_TIMEOUT = 30
 CONSOLE_MAX_BYTES = 32 * 1024 * 1024
 CERTIFICATE_RENEWAL_SECONDS = 14 * 24 * 3600
 TLS_ADDRESSES = ("127.0.0.1", "::1")
-STAGE_LINE = re.compile(r"^\[Pipeline\] \{ \((.+)\)$")
+STAGE_LINE = re.compile(r"^\[Pipeline\] \{ \((.+)\)$", re.MULTILINE)
 NODE_LINE = re.compile(r"^Running on (\S+) in ", re.MULTILINE)
+CONSOLE_INDICATORS = (
+    ("disk-space", r"\bNo space left on device\b"),
+    ("out-of-memory", r"\b(?:OutOfMemoryError|OOMKilled)\b"),
+    ("timeout", r"\b(?:TimeoutException|timed out|Timeout has been exceeded)\b"),
+    ("permission", r"\bPermission denied\b"),
+    ("tls", r"\b(?:SSLHandshakeException|CERTIFICATE_VERIFY_FAILED|PKIX path building failed)\b"),
+    ("deployment", r"\btofu phase failed\b"),
+    ("gradle", r"^FAILURE: Build failed with an exception\.$"),
+)
+
+
+def console_diagnostics(console: str, stages: set[str]) -> str:
+    """Внешняя консоль даёт лишь фиксированные индикаторы; имена стадий разрешает закоммиченный Jenkinsfile."""
+    skipped = set(re.findall(r'^Stage "([^"\r\n]+)" skipped due to ', console, re.MULTILINE))
+    executed = [name for name in STAGE_LINE.findall(console) if name in stages and name not in skipped]
+    codes = sorted({int(code) for code in re.findall(
+        r"^(?:ERROR: )?script returned exit code (-?\d{1,3})$", console, re.MULTILINE)})[:8]
+    indicators = [name for name, pattern in CONSOLE_INDICATORS if re.search(pattern, console, re.MULTILINE | re.IGNORECASE)]
+    return (f"last executed stage={executed[-1] if executed else 'none'}; shell exit codes={codes}; "
+            f"console indicators=[{', '.join(indicators)}]")
 
 
 class Layout:
@@ -470,7 +491,7 @@ def controller_arguments(layout: Layout, image: str, port: int) -> list[str]:
         "BANK_JENKINS_JOB": JOB_NAME,
         "BANK_JENKINS_SCM_URL": f"file://{SOURCE_MOUNT}",
         "BANK_JENKINS_SCM_BRANCH": f"refs/heads/{SNAPSHOT_BRANCH}",
-        "BANK_JENKINS_SCRIPT_PATH": (HERE.parents[1] / "Jenkinsfile").relative_to(REPOSITORY).as_posix(),
+        "BANK_JENKINS_SCRIPT_PATH": PIPELINE_PATH,
     }
     arguments = ["run", "--detach", "--name", CONTROLLER, "--network", INSTANCE,
                  "--publish", f"127.0.0.1:{port}:{CONTROLLER_INTERNAL_PORT}",
@@ -659,8 +680,8 @@ class Controller:
             time.sleep(2)
         raise RuntimeError(f"The build did not start within {QUEUE_TIMEOUT} s: {queued.get('why')}")
 
-    def follow(self, number: int, log: Path, deadline: float) -> None:
-        """Пишет консоль в приватный файл и печатает только названия стадий."""
+    def follow(self, number: int, log: Path, deadline: float, stages: set[str]) -> None:
+        """Пишет консоль в приватный файл и печатает только разрешённые названия стадий."""
         offset = 0
         descriptor = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(descriptor, "wb") as stream:
@@ -672,7 +693,7 @@ class Controller:
                 stream.flush()
                 for line in body.decode("utf-8", "replace").splitlines():
                     stage = STAGE_LINE.match(line)
-                    if stage:
+                    if stage and stage.group(1) in stages:
                         print(f"stage: {stage.group(1)}", flush=True)
                 offset = int(headers.get("X-Text-Size", offset))
                 if headers.get("X-More-Data") != "true":
@@ -749,6 +770,8 @@ def command_build(args: argparse.Namespace) -> None:
     layout = layout_from_environment()
     require_secret_source(layout)
     head = snapshot(REPOSITORY, layout.source)
+    pipeline = git(["show", f"{head}:{PIPELINE_PATH}"], cwd=REPOSITORY)
+    stages = set(re.findall(r'''^\s*stage\(\s*['"]([^'"\r\n]+)['"]\s*\)\s*\{''', pipeline, re.MULTILINE))
     controller = Controller(layout, controller_port())
     if not controller.ready() or not controller.agent_online():
         raise RuntimeError("The controller or the agent is not online; run up first")
@@ -756,7 +779,7 @@ def command_build(args: argparse.Namespace) -> None:
     number = controller.started_build(controller.queue())
     log = layout.logs / f"build-{number}.log"
     print(f"Build {number} runs commit {head}; console is saved to {log}", flush=True)
-    controller.follow(number, log, deadline)
+    controller.follow(number, log, deadline, stages)
     while True:
         details = controller.json(f"/job/{JOB_NAME}/{number}/api/json?tree=building,result,actions[lastBuiltRevision[SHA1]]")
         if not details["building"]:
@@ -772,9 +795,11 @@ def command_build(args: argparse.Namespace) -> None:
     pipeline_markers = len(re.findall(r"^\[Pipeline\]", console, re.MULTILINE))
     summary = (f"progressive bytes={progressive_bytes}; completed bytes={len(completed)}; "
                f"pipeline markers={pipeline_markers}; "
-               f"expected node seen={AGENT_NAME in nodes}; unexpected nodes={len(nodes - {AGENT_NAME})}")
+               f"expected node seen={AGENT_NAME in nodes}; unexpected nodes={len(nodes - {AGENT_NAME})}; "
+               f"{console_diagnostics(console, stages)}")
     if details["result"] != "SUCCESS":
-        raise RuntimeError(f"Build {number} finished with {details['result']}; {summary}; the full console is in {log}")
+        result = details["result"] if details["result"] in {"FAILURE", "UNSTABLE", "ABORTED", "NOT_BUILT"} else "UNKNOWN"
+        raise RuntimeError(f"Build {number} finished with {result}; {summary}; the full console is in {log}")
     revisions = {action["lastBuiltRevision"]["SHA1"] for action in details["actions"] if action.get("lastBuiltRevision")}
     executors = {item["displayName"]: item["numExecutors"] for item in
                  controller.json("/computer/api/json?tree=computer[displayName,numExecutors]")["computer"]}
@@ -782,7 +807,7 @@ def command_build(args: argparse.Namespace) -> None:
         raise RuntimeError(f"Build {number} did not prove execution only on {AGENT_NAME}; {summary}; "
                            f"the full console is in {log}")
     if revisions != {head}:
-        raise RuntimeError(f"Build {number} used revisions {sorted(revisions)} instead of the snapshot {head}")
+        raise RuntimeError(f"Build {number} used revisions other than the snapshot {head}; revision count={len(revisions)}")
     if any(count for name, count in executors.items() if name != AGENT_NAME):
         raise RuntimeError("The controller has executors; builds must stay on the dedicated agent")
     print(f"Build {number} succeeded only on {AGENT_NAME} at {head}; controller executors 0")

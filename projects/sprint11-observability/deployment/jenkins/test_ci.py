@@ -36,6 +36,17 @@ class SnapshotTest(unittest.TestCase):
         self.bare = Path(self.directory.name) / "snapshot.git"
         self.repository.mkdir()
         ci.git(["init", "--quiet"], cwd=self.repository)
+        pipeline = (ci.HERE.parents[1] / "Jenkinsfile").relative_to(ci.REPOSITORY)
+        (self.repository / pipeline).parent.mkdir(parents=True)
+        (self.repository / pipeline).write_text("""pipeline {
+    stages {
+        stage('Checkout') { steps { echo 'checkout' } }
+        stage('Build and test') { steps { sh 'test-command' } }
+        stage('Deploy') { steps { sh 'deploy-command' } }
+    }
+}
+""")
+        ci.git(["add", str(pipeline)], cwd=self.repository)
         for index in range(3):
             commit(self.repository, f"file{index}.txt", f"content {index}\n")
 
@@ -75,7 +86,7 @@ class SnapshotTest(unittest.TestCase):
         controller = mock.Mock()
         controller.started_build.return_value = 1
         sensitive = "fixture-credential-must-stay-private"
-        controller.follow.side_effect = lambda number, log, deadline: ci.write_private(log, b"")
+        controller.follow.side_effect = lambda number, log, deadline, stages: ci.write_private(log, b"")
         controller.completed_console.side_effect = lambda number, log: ci.write_private(log, sensitive.encode())
         controller.json.return_value = {"building": False, "result": "FAILURE"}
         captured = io.StringIO()
@@ -93,7 +104,7 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual(0o600, log.stat().st_mode & 0o777)
 
     def test_controller_plugins_and_completed_console_contracts(self):
-        """Готовность плагинов и узел подтверждаются API и полной консолью, без вывода внешних значений."""
+        """Полная консоль подтверждает узел и выполненный этап; секреты и пропущенные этапы не попадают в сводку."""
         layout = ci.Layout(Path(self.directory.name) / "state", Path(self.directory.name) / "secrets")
         layout.logs.mkdir(parents=True)
         head = ci.git(["rev-parse", "HEAD"], cwd=self.repository).strip()
@@ -141,7 +152,8 @@ class SnapshotTest(unittest.TestCase):
                 elif self.path == "/queue/item/1/api/json":
                     self.send(200, b'{"executable":{"number":1}}')
                 elif "/logText/progressiveText?" in self.path:
-                    self.send(200, b"", {"X-Text-Size": "0"})
+                    body = scenario.get("progressive", "").encode()
+                    self.send(200, body, {"X-Text-Size": str(len(body))})
                 elif self.path.endswith("/consoleText"):
                     self.send(scenario.get("status", 200), scenario["console"].encode())
                 elif self.path.startswith("/computer/api/json?"):
@@ -149,7 +161,7 @@ class SnapshotTest(unittest.TestCase):
                         {"displayName": "Built-In Node", "numExecutors": scenario.get("executors", 0)},
                         {"displayName": ci.AGENT_NAME, "numExecutors": 1}]}).encode())
                 else:
-                    self.send(200, json.dumps({"building": False, "result": "SUCCESS", "actions": [
+                    self.send(200, json.dumps({"building": False, "result": scenario.get("result", "SUCCESS"), "actions": [
                         {"lastBuiltRevision": {"SHA1": scenario.get("revision", head)}}]}).encode())
 
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -168,14 +180,28 @@ class SnapshotTest(unittest.TestCase):
             with self.subTest(plugin_problem=problem), self.assertRaisesRegex(RuntimeError, "plain-credentials") as failure:
                 controller.verify_plugins()
             self.assertNotIn(sensitive, str(failure.exception))
+        failed = (complete + "[Pipeline] { (Checkout)\n[Pipeline] { (Build and test)\n"
+                  f"No space left on device: {sensitive}\ntofu phase failed (exit 1)\n"
+                  "[Pipeline] { (Deploy)\nStage \"Deploy\" skipped due to earlier failure(s)\n"
+                  f"[Pipeline] {{ ({sensitive})\nERROR: script returned exit code 137\n"
+                  "ERROR: script returned exit code 1\n")
         cases = [
             ({"console": complete}, None),
             ({"console": ""}, "completed bytes=0; pipeline markers=0"),
             ({"console": f"[Pipeline] Start of Pipeline\n{sensitive}\n"}, "pipeline markers=1"),
+            ({"console": "[Pipeline] Start of Pipeline\n[Pipeline] End of Pipeline\n"},
+             r"last executed stage=none; shell exit codes=\[\]; console indicators=\[\]"),
+            ({"console": failed, "result": "FAILURE", "progressive": f"[Pipeline] {{ ({sensitive})\n"},
+             r"last executed stage=Build and test; shell exit codes=\[1, 137\]; console indicators=\[disk-space, deployment\]"),
+            ({"console": complete + '[Pipeline] { (Checkout)\n[Pipeline] { (Build and test)\n'
+                         'Stage "Build and test" skipped due to earlier stage(s) marking the build as unstable\n'
+                         '[Pipeline] { (Deploy)\nStage "Deploy" skipped due to when conditional\n', "result": "FAILURE"},
+             r"last executed stage=Checkout; shell exit codes=\[\]; console indicators=\[\]"),
             ({"console": sensitive, "status": 403}, "completed console.*HTTP 403"),
             ({"console": sensitive, "limit": 8}, "response exceeded.*byte limit"),
             ({"console": complete.replace(ci.AGENT_NAME, sensitive)}, "unexpected nodes=1"),
-            ({"console": complete, "revision": "f" * 40}, "used revisions"),
+            ({"console": complete, "result": sensitive}, "finished with UNKNOWN"),
+            ({"console": complete, "revision": sensitive}, "used revisions"),
             ({"console": complete, "executors": 1}, "controller has executors"),
         ]
         environment = {"BANK_JENKINS_HOME": str(layout.root), ci.SECRETS_ENVIRONMENT: str(layout.secret_source),

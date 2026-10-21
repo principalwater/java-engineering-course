@@ -1,0 +1,154 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-application-egress
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {bank11.io/role: application}
+  policyTypes: [Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: application-shared-egress
+spec:
+  podSelector:
+    matchLabels: {bank11.io/role: application}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to:
+        - podSelector:
+            matchLabels: {app: discovery}
+      ports: [{protocol: TCP, port: 2181}]
+    - to:
+        - podSelector:
+            matchLabels: {app: authorization}
+      ports: [{protocol: TCP, port: 8443}]
+    - to:
+        - podSelector:
+            matchLabels: {app: zipkin}
+      ports: [{protocol: TCP, port: 9411}]
+    - to:
+        - podSelector:
+            matchLabels: {app: logstash}
+      ports: [{protocol: TCP, port: 5044}]
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: bank11-system}
+          podSelector:
+            matchLabels: {app.kubernetes.io/name: openbao}
+      ports: [{protocol: TCP, port: 8200}]
+{{- range $server, $rules := .Values.network.ingress }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "allow-%s-ingress" $server }}
+spec:
+  podSelector:
+    matchLabels: {app: {{ $server }}}
+  policyTypes: [Ingress]
+  ingress:
+    {{- range $rule := $rules }}
+    - from:
+        {{- range $client := $rule.clients }}
+        - podSelector:
+            matchLabels: {app: {{ $client }}}
+        {{- end }}
+        {{- if $rule.initializers }}
+        - podSelector:
+            matchLabels: {bank11.io/role: initializer}
+        {{- end }}
+        {{- if $rule.probes }}
+        - podSelector:
+            matchLabels: {bank11.io/role: probe}
+        {{- end }}
+      ports:
+        {{- range $port := $rule.ports }}
+        - {protocol: TCP, port: {{ $port }}}
+        {{- end }}
+    {{- end }}
+{{- end }}
+{{- range $client, $rules := .Values.network.egress }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "allow-%s-egress" $client }}
+spec:
+  podSelector:
+    matchLabels: {app: {{ $client }}}
+  policyTypes: [Egress]
+  egress:
+    {{- range $rule := $rules }}
+    - to:
+        {{- range $server := $rule.servers }}
+        - podSelector:
+            matchLabels: {app: {{ $server }}}
+        {{- end }}
+        {{- if $rule.kafka }}
+        - podSelector:
+            matchLabels: {strimzi.io/cluster: {{ $.Values.global.kafkaCluster }}}
+        {{- end }}
+      ports:
+        {{- range $port := $rule.ports }}
+        - {protocol: TCP, port: {{ $port }}}
+        {{- end }}
+    {{- end }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka-ingress
+spec:
+  podSelector:
+    matchLabels: {strimzi.io/cluster: {{ .Values.global.kafkaCluster }}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {strimzi.io/cluster: {{ .Values.global.kafkaCluster }}}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: bank11-system}
+      ports: [{protocol: TCP, port: 9090}, {protocol: TCP, port: 9091}, {protocol: TCP, port: 9093}, {protocol: TCP, port: 8080}]
+    - from:
+        - podSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [accounts, cash, transfer, notifications, analytics, kafka-exporter]}
+        - podSelector:
+            matchLabels: {bank11.io/role: probe}
+      ports: [{protocol: TCP, port: 9093}]
+    - from:
+        - podSelector:
+            matchLabels: {app: prometheus}
+      ports: [{protocol: TCP, port: 9404}, {protocol: TCP, port: 9400}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: edge-client-ingress
+spec:
+  podSelector:
+    matchLabels: {app: edge}
+  policyTypes: [Ingress]
+  ingress:
+    - ports: [{protocol: TCP, port: {{ .Values.global.externalPort }}}]

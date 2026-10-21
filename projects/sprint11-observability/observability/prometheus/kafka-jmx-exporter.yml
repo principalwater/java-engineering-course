@@ -1,0 +1,74 @@
+# Правила Prometheus JMX Exporter для брокеров Kafka и контроллеров KRaft под управлением Strimzi;
+# подключаются через Kafka.spec.kafka.metricsConfig. Каждое правило явно выбирает MBeans:
+# метки topic и partition ограничены топиками чарта, неизвестные MBeans не создают рядов.
+# Имена следуют соглашению Strimzi/JMX Exporter (kafka_<domain>_<type>_<name> в нижнем регистре),
+# сохраняя совместимость с соответствующими Kafka-дашбордами Grafana.
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+rules:
+  # Трафик по топикам и брокерам; один ряд счётчика на топик.
+  - pattern: 'kafka.server<type=BrokerTopicMetrics, name=(MessagesIn|BytesIn|BytesOut)PerSec, topic=(.+)><>Count'
+    name: kafka_server_brokertopicmetrics_$1_total
+    type: COUNTER
+    labels:
+      topic: "$2"
+  - pattern: 'kafka.server<type=BrokerTopicMetrics, name=(MessagesIn|BytesIn|BytesOut)PerSec><>Count'
+    name: kafka_server_brokertopicmetrics_$1_total
+    type: COUNTER
+  # Размер журнала и offsets партиций: объём топика и рост dead-letter видны без потребителя.
+  - pattern: 'kafka.log<type=Log, name=(Size|LogEndOffset|LogStartOffset), topic=(.+), partition=(.+)><>Value'
+    name: kafka_log_log_$1
+    type: GAUGE
+    labels:
+      topic: "$2"
+      partition: "$3"
+  # Состояние репликации.
+  - pattern: 'kafka.server<type=ReplicaManager, name=(LeaderCount|PartitionCount|UnderReplicatedPartitions|UnderMinIsrPartitionCount|OfflineReplicaCount)><>Value'
+    name: kafka_server_replicamanager_$1
+    type: GAUGE
+  - pattern: 'kafka.server<type=ReplicaManager, name=(IsrShrinks|IsrExpands)PerSec><>Count'
+    name: kafka_server_replicamanager_$1_total
+    type: COUNTER
+  - pattern: 'kafka.server<type=ReplicaFetcherManager, name=MaxLag, clientId=(.+)><>Value'
+    name: kafka_server_replicafetchermanager_maxlag
+    type: GAUGE
+    labels:
+      clientid: "$1"
+  - pattern: 'kafka.cluster<type=Partition, name=(UnderReplicated|UnderMinIsr), topic=(.+), partition=(.+)><>Value'
+    name: kafka_cluster_partition_$1
+    type: GAUGE
+    labels:
+      topic: "$2"
+      partition: "$3"
+  # Состояние контроллера KRaft.
+  - pattern: 'kafka.controller<type=KafkaController, name=(ActiveControllerCount|OfflinePartitionsCount|GlobalTopicCount|GlobalPartitionCount|PreferredReplicaImbalanceCount)><>Value'
+    name: kafka_controller_kafkacontroller_$1
+    type: GAUGE
+  - pattern: 'kafka.server<type=raft-metrics><>(current-leader|current-epoch|high-watermark|log-end-offset):'
+    name: kafka_server_raftmetrics_$1
+    type: GAUGE
+  # Количество запросов и квантили задержки трёх типов запросов передачи данных.
+  - pattern: 'kafka.network<type=RequestMetrics, name=TotalTimeMs, request=(Produce|FetchConsumer|FetchFollower)><>Count'
+    name: kafka_network_requestmetrics_totaltimems_count
+    type: COUNTER
+    labels:
+      request: "$1"
+  - pattern: 'kafka.network<type=RequestMetrics, name=TotalTimeMs, request=(Produce|FetchConsumer|FetchFollower)><>(50|95|99)thPercentile'
+    name: kafka_network_requestmetrics_totaltimems
+    type: GAUGE
+    labels:
+      request: "$1"
+      quantile: "0.$2"
+  - pattern: 'kafka.network<type=RequestMetrics, name=ErrorsPerSec, request=(.+), error=(.+)><>Count'
+    name: kafka_network_requestmetrics_errors_total
+    type: COUNTER
+    labels:
+      request: "$1"
+      error: "$2"
+  # Насыщение ресурсов.
+  - pattern: 'kafka.network<type=SocketServer, name=NetworkProcessorAvgIdlePercent><>Value'
+    name: kafka_network_socketserver_networkprocessoravgidlepercent
+    type: GAUGE
+  - pattern: 'kafka.server<type=KafkaRequestHandlerPool, name=RequestHandlerAvgIdlePercent><>OneMinuteRate'
+    name: kafka_server_kafkarequesthandlerpool_requesthandleravgidlepercent
+    type: GAUGE

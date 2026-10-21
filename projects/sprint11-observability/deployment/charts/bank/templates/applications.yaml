@@ -1,0 +1,120 @@
+{{- range $name, $app := .Values.apps }}
+{{- if or (not $app.optional) $.Values.global.analyticsEnabled }}
+{{- $web := ne (toString $app.web) "false" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-client
+  labels:
+    {{- include "bank.labels" $ | nindent 4 }}
+data:
+  {{- include "bank.applicationEnv" (dict "root" $ "name" $name "app" $app "web" $web) | nindent 2 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "bank.labels" $ | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: {{ $name }}, bank11.io/instance: {{ $.Release.Name }}}
+  template:
+    metadata:
+      labels: {app: {{ $name }}, bank11.io/instance: {{ $.Release.Name }}, bank11.io/role: application}
+      annotations:
+        checksum/shared-config: {{ index $.Values.assets "bank11-setup" "init-config.sh" | sha256sum }}
+        checksum/client: {{ include "bank.applicationEnv" (dict "root" $ "name" $name "app" $app "web" $web) | sha256sum }}
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      nodeSelector:
+        {{- toYaml $.Values.global.nodeSelector | nindent 8 }}
+      securityContext:
+        {{- include "bank.podSecurity" $ | nindent 8 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ $app.image | quote }}
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef: {name: {{ $name }}-client}
+          {{- if $web }}
+          ports: [{name: http, containerPort: 8080}, {name: https, containerPort: 8443}]
+          startupProbe:
+            httpGet: {path: /actuator/health/liveness, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 120
+          readinessProbe:
+            httpGet: {path: /actuator/health/readiness, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet: {path: /actuator/health/liveness, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
+          {{- else }}
+          startupProbe:
+            exec: {command: [test, -f, /tmp/bank-probes/live]}
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 120
+          readinessProbe:
+            exec: {command: [test, -f, /tmp/bank-probes/ready]}
+            periodSeconds: 5
+            timeoutSeconds: 2
+          livenessProbe:
+            exec: {command: [test, -f, /tmp/bank-probes/live]}
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
+          {{- end }}
+          securityContext:
+            {{- include "bank.containerSecurity" $ | nindent 12 }}
+          resources:
+            {{- toYaml $.Values.javaResources | nindent 12 }}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            - {name: openbao-token, mountPath: /var/run/secrets/openbao, readOnly: true}
+            - {name: trust, mountPath: /run/trust, readOnly: true}
+            {{- if $app.kafka }}
+            - {name: kafka-ca, mountPath: /run/kafka, readOnly: true}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {medium: Memory, sizeLimit: 64Mi}
+        - name: trust
+          configMap: {name: bank11-trust}
+        - name: openbao-token
+          projected:
+            defaultMode: 0440
+            sources:
+              - serviceAccountToken: {path: token, audience: openbao, expirationSeconds: 600}
+        {{- if $app.kafka }}
+        - name: kafka-ca
+          secret:
+            secretName: {{ printf "%s-cluster-ca-cert" $.Values.global.kafkaCluster }}
+            items: [{key: ca.crt, path: ca.crt}]
+            defaultMode: 0444
+        {{- end }}
+{{- if $web }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "bank.labels" $ | nindent 4 }}
+spec:
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  selector: {app: {{ $name }}, bank11.io/instance: {{ $.Release.Name }}}
+  ports: [{name: http, port: 8080, targetPort: http}, {name: https, port: 8443, targetPort: https}]
+{{- end }}
+{{- end }}
+{{- end }}

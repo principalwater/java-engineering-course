@@ -1,0 +1,201 @@
+rule_files:
+- ../application.rules.yml
+evaluation_interval: 30s
+tests:
+- name: scrape failure of one service pages after two minutes
+  interval: 1m
+  input_series:
+  - series: up{job="bank-web", service="accounts", instance="accounts:8080"}
+    values: 1 1 0 0 0 0 0 0
+  - series: up{job="bank-web", service="cash", instance="cash:8080"}
+    values: 1 1 1 1 1 1 1 1
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: BankServiceDown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: BankServiceDown
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        job: bank-web
+        service: accounts
+        instance: accounts:8080
+      exp_annotations:
+        summary: accounts cannot be scraped
+        description: 'Prometheus has failed to scrape accounts (accounts:8080) for 2 minutes: the pod is down, not
+          ready, or its metrics endpoint is broken.'
+        action: Run kubectl get pod -l app=accounts and read its logs; then open the Targets page in Prometheus
+          for the scrape error.
+- name: 5xx ratio needs both a high share and a minimum request volume
+  interval: 1m
+  input_series:
+  - series: http_server_requests_seconds_count{job="bank-web", service="gateway", status="200", uri="/api/accounts"}
+    values: 0+54x30
+  - series: http_server_requests_seconds_count{job="bank-web", service="gateway", status="500", uri="/api/accounts"}
+    values: 0+6x30
+  - series: http_server_requests_seconds_count{job="bank-web", service="front", status="500", uri="/cabinet"}
+    values: 0+1x30
+  - series: http_server_requests_seconds_count{job="bank-web", service="front", status="200", uri="/actuator/health/readiness"}
+    values: 0+600x30
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: BankHttpServerErrorRatioHigh
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        service: gateway
+      exp_annotations:
+        summary: gateway answers more than 5% of requests with 5xx
+        description: gateway returned 5xx for 10% of its requests over 5 minutes (at least 10 requests in the window).
+        action: Filter Kibana by service and level:ERROR for the same window; follow a traceId into Zipkin to find
+          the failing hop.
+- name: latency alert uses the histogram quantile and ignores actuator probes
+  interval: 1m
+  input_series:
+  - series: http_server_requests_seconds_bucket{job="bank-web", service="transfer", uri="/transfers", le="0.5"}
+    values: 0+0x30
+  - series: http_server_requests_seconds_bucket{job="bank-web", service="transfer", uri="/transfers", le="2.0"}
+    values: 0+60x30
+  - series: http_server_requests_seconds_bucket{job="bank-web", service="transfer", uri="/transfers", le="+Inf"}
+    values: 0+60x30
+  - series: http_server_requests_seconds_bucket{job="bank-web", service="transfer", uri="/actuator/health", le="0.5"}
+    values: 0+600x30
+  - series: http_server_requests_seconds_bucket{job="bank-web", service="transfer", uri="/actuator/health", le="+Inf"}
+    values: 0+600x30
+  alert_rule_test:
+  - eval_time: 20m
+    alertname: BankHttpLatencyP95High
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        service: transfer
+      exp_annotations:
+        summary: transfer p95 latency is above 1 second
+        description: The 95th percentile request duration of transfer has been 1.925s for 10 minutes.
+        action: Compare with the JVM dashboard (GC pauses, heap, pool wait) and with the dependency the service
+          calls; sample slow traces in Zipkin.
+- name: business alerts aggregate users without exposing identities to notification channels
+  interval: 1m
+  input_series:
+  - series: bank_cash_withdrawal_failures_total{login="alice"}
+    values: 0+1x30
+  - series: bank_cash_withdrawal_failures_total{login="bob"}
+    values: 3+0x30
+  - series: bank_transfer_failures_total{sender="alice", recipient="bob"}
+    values: 0+1x30
+  - series: bank_transfer_failures_total{sender="alice", recipient="carol"}
+    values: 0+1x30
+  alert_rule_test:
+  - eval_time: 15m
+    alertname: BankCashWithdrawalFailuresHigh
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: Repeated cash withdrawal failures
+        description: 10 cash withdrawals failed in 10 minutes.
+        action: Inspect committed rejection reasons on the protected business dashboard; this counter does not count
+          transport outages.
+  - eval_time: 15m
+    alertname: BankTransferFailuresHigh
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: Repeated transfer failures
+        description: 20 transfers failed in 10 minutes.
+        action: Inspect rejection reasons on the protected business dashboard; compare sender and recipient breakdown
+          there.
+- name: heap alert looks only at the old generation and ignores unbounded pools
+  interval: 1m
+  input_series:
+  - series: jvm_memory_used_bytes{job="bank-web", service="analytics", area="heap", id="G1 Old Gen"}
+    values: 480000000x30
+  - series: jvm_memory_max_bytes{job="bank-web", service="analytics", area="heap", id="G1 Old Gen"}
+    values: 500000000x30
+  - series: jvm_memory_used_bytes{job="bank-web", service="analytics", area="heap", id="G1 Eden Space"}
+    values: 90000000x30
+  - series: jvm_memory_max_bytes{job="bank-web", service="analytics", area="heap", id="G1 Eden Space"}
+    values: -1x30
+  alert_rule_test:
+  - eval_time: 15m
+    alertname: BankJvmOldGenerationFull
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        service: analytics
+      exp_annotations:
+        summary: analytics old generation is above 90% of its maximum
+        description: The old generation of analytics has stayed at 96% for 10 minutes; the container limit will
+          end in an OOM kill if the heap keeps growing.
+        action: Check the JVM dashboard for a leak-shaped heap curve before the next restart; take a heap histogram
+          if the pod is still alive.
+- name: first observations survive retired pods within the window without exposing identities
+  interval: 1m
+  input_series:
+  - series: bank_cash_withdrawal_failures_total{login="new-0"}
+    values: _x5 1 stale _x20
+  - series: bank_cash_withdrawal_failures_total{login="new-1"}
+    values: _x5 1 stale _x20
+  - series: bank_cash_withdrawal_failures_total{login="new-2"}
+    values: _x5 1 stale _x20
+  - series: bank_cash_withdrawal_failures_total{login="new-3"}
+    values: _x5 1 stale _x20
+  - series: bank_cash_withdrawal_failures_total{login="new-4"}
+    values: _x5 1 stale _x20
+  - series: bank_transfer_failures_total{sender="new-0",recipient="recipient"}
+    values: _x5 1 stale _x20
+  - series: bank_transfer_failures_total{sender="new-1",recipient="recipient"}
+    values: _x5 1 stale _x20
+  - series: bank_transfer_failures_total{sender="new-2",recipient="recipient"}
+    values: _x5 1 stale _x20
+  - series: bank_transfer_failures_total{sender="new-3",recipient="recipient"}
+    values: _x5 1 stale _x20
+  - series: bank_transfer_failures_total{sender="new-4",recipient="recipient"}
+    values: _x5 1 stale _x20
+  - series: bank_notification_failures_total{login="new-0"}
+    values: _x5 1 stale _x20
+  - series: bank_notification_failures_total{login="new-1"}
+    values: _x5 1 stale _x20
+  - series: bank_notification_failures_total{login="new-2"}
+    values: _x5 1 stale _x20
+  alert_rule_test:
+  - eval_time: 9m
+    alertname: BankCashWithdrawalFailuresHigh
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: Repeated cash withdrawal failures
+        description: 5 cash withdrawals failed in 10 minutes.
+        action: Inspect committed rejection reasons on the protected business dashboard; this counter does not count
+          transport outages.
+  - eval_time: 9m
+    alertname: BankTransferFailuresHigh
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: Repeated transfer failures
+        description: 5 transfers failed in 10 minutes.
+        action: Inspect rejection reasons on the protected business dashboard; compare sender and recipient breakdown
+          there.
+  - eval_time: 9m
+    alertname: BankNotificationDeliveryAttemptsFailing
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: Repeated notification delivery failures
+        description: 3 notification delivery attempts failed in 10 minutes.
+        action: Check the notifications worker logs and the *.DLT topic volume on the Kafka topics dashboard.
+  - eval_time: 19m
+    alertname: BankCashWithdrawalFailuresHigh
+    exp_alerts: []
+  - eval_time: 19m
+    alertname: BankTransferFailuresHigh
+    exp_alerts: []
+  - eval_time: 19m
+    alertname: BankNotificationDeliveryAttemptsFailing
+    exp_alerts: []

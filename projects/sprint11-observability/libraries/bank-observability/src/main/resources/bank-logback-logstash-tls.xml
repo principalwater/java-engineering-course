@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- transport=tls: доверие задаёт внешнее хранилище сертификатов (секрет), а не образ. Если
+     хранилище или пароль не заданы либо не читаются, Logback сообщает об ошибке конфигурации и
+     Boot прекращает запуск: незашифрованный канал молча не включается. Параметры очереди и
+     тайм-аутов те же, что в bank-logback-logstash-tcp.xml. -->
+<included>
+    <appender name="BANK_LOGSTASH" class="net.logstash.logback.appender.LogstashTcpSocketAppender">
+        <destination>${BANK_LOGSTASH_DESTINATION}</destination>
+        <ringBufferSize>${BANK_LOGSTASH_QUEUE_SIZE}</ringBufferSize>
+        <appendTimeout>0 milliseconds</appendTimeout>
+        <connectionTimeout>2 seconds</connectionTimeout>
+        <writeTimeout>5 seconds</writeTimeout>
+        <reconnectionDelay>5 seconds</reconnectionDelay>
+        <shutdownGracePeriod>3 seconds</shutdownGracePeriod>
+        <daemon>true</daemon>
+        <ssl>
+            <parameters>
+                <hostnameVerification>true</hostnameVerification>
+            </parameters>
+            <trustStore>
+                <location>${BANK_LOGSTASH_TRUST_STORE}</location>
+                <password>${BANK_LOGSTASH_TRUST_STORE_PASSWORD}</password>
+                <type>${BANK_LOGSTASH_TRUST_STORE_TYPE}</type>
+            </trustStore>
+        </ssl>
+        <encoder class="dev.principalwater.bank.observability.logging.BankLogEncoder">
+            <service>${BANK_SERVICE}</service>
+        </encoder>
+    </appender>
+    <root>
+        <appender-ref ref="BANK_LOGSTASH"/>
+    </root>
+</included>

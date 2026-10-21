@@ -1,0 +1,20 @@
+{{- if not (has .Values.global.environment (list "dev" "test" "prod")) }}
+{{- fail "global.environment must be dev, test or prod" }}
+{{- end }}
+{{- if ne .Release.Namespace (printf "bank11-%s" .Values.global.environment) }}
+{{- fail "release namespace must equal bank11-<environment>" }}
+{{- end }}
+{{- range $name, $data := .Values.assets }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "bank.labels" $ | nindent 4 }}
+data:
+  {{- toYaml $data | nindent 2 }}
+{{- end }}
+{{- if not (hasKey .Values.assets "bank11-setup") }}
+{{- fail "public assets missing: run deployment/kubernetes/prepare.py and pass its public-values.yaml" }}
+{{- end }}

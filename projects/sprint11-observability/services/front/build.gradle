@@ -1,0 +1,31 @@
+plugins { id 'org.springframework.boot' }
+dependencies {
+    implementation project(':bank-runtime')
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
+    testImplementation project(':bank-test-support')
+}
+
+tasks.register('installUi', Exec) {
+    workingDir 'ui'
+    commandLine 'npm', 'ci', '--no-fund'
+    inputs.files 'ui/package.json', 'ui/package-lock.json'
+    outputs.dir 'ui/node_modules'
+}
+tasks.register('buildUi', Exec) {
+    dependsOn 'installUi'
+    workingDir 'ui'
+    commandLine 'npm', 'run', 'build'
+    inputs.dir 'ui/src'
+    inputs.files 'ui/astro.config.mjs', 'ui/package.json', 'ui/package-lock.json'
+    outputs.dir 'ui/build/site'
+}
+tasks.register('checkUi', Exec) {
+    dependsOn 'installUi'
+    workingDir 'ui'
+    commandLine 'npm', 'run', 'check'
+    inputs.dir 'ui/src'
+    inputs.dir 'ui/test'
+    inputs.files 'ui/package.json', 'ui/package-lock.json'
+}
+tasks.named('processResources') { dependsOn 'buildUi'; from('ui/build/site') { into 'static' } }
+tasks.named('check') { dependsOn 'checkUi' }

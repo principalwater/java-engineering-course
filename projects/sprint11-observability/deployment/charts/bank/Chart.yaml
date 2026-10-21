@@ -1,0 +1,26 @@
+apiVersion: v2
+name: bank
+description: Банк Sprint 11 с Kafka и наблюдаемостью и изолированными хранилищами
+type: application
+version: 0.1.0
+appVersion: "11"
+dependencies:
+  - name: kafka
+    version: 0.1.0
+    repository: file://charts/kafka
+  - name: superset
+    version: 0.1.0
+    repository: file://charts/superset
+    condition: superset.enabled
+  - name: zipkin
+    version: 0.1.0
+    repository: file://charts/zipkin
+  - name: prometheus
+    version: 0.1.0
+    repository: file://charts/prometheus
+  - name: grafana
+    version: 0.1.0
+    repository: file://charts/grafana
+  - name: elk
+    version: 0.1.0
+    repository: file://charts/elk

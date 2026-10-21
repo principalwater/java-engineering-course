@@ -1,0 +1,89 @@
+global:
+  scrape_interval: 15s
+  # Не больше scrape_interval; 10s оставляют запас для самой медленной цели — Actuator холодной JVM.
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+rule_files:
+  - /etc/prometheus/rules/*.rules.yml
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: [alertmanager:9093]
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: [localhost:9090]
+  - job_name: alertmanager
+    static_configs:
+      - targets: [alertmanager:9093]
+  - job_name: grafana
+    # Grafana защищает /metrics через basic auth (GF_METRICS_BASIC_AUTH_*); обе стороны читают один Secret.
+    basic_auth:
+      username: prometheus
+      password_file: /run/secrets/grafana_metrics_password
+    static_configs:
+      - targets: [grafana:3000]
+  - job_name: zipkin
+    metrics_path: /prometheus
+    fallback_scrape_protocol: PrometheusText0.0.4
+    static_configs:
+      - targets: [zipkin:9411]
+  - job_name: logstash
+    # У Logstash нет Prometheus endpoint; sidecar logstash-exporter преобразует его stats API.
+    fallback_scrape_protocol: PrometheusText0.0.4
+    static_configs:
+      - targets: [logstash:9198]
+  # Чарт формирует цели Spring Boot из apps.* в ConfigMap bank11-prometheus-targets: имена сервисов,
+  # порты и пути метрик. Не развёрнутый опциональный сервис не опрашивается и не считается упавшим.
+  - job_name: bank-web
+    metrics_path: /actuator/prometheus
+    fallback_scrape_protocol: PrometheusText0.0.4
+    # Метка login бизнес-счётчиков растёт вместе с числом клиентов. При превышении лимита отклоняется
+    # весь scrape (up == 0), срабатывает PrometheusScrapeSampleLimitHit: переполнение TSDB не останется
+    # незаметным.
+    sample_limit: 20000
+    label_limit: 30
+    label_value_length_limit: 200
+    body_size_limit: 8MB
+    file_sd_configs:
+      - files: [/etc/prometheus/targets/bank-web.json]
+        refresh_interval: 1m
+  - job_name: bank-worker
+    # Non-web сервисы (notifications) предоставляют минимальный служебный endpoint вместо Actuator.
+    metrics_path: /actuator/prometheus
+    fallback_scrape_protocol: PrometheusText0.0.4
+    sample_limit: 20000
+    label_limit: 30
+    label_value_length_limit: 200
+    body_size_limit: 8MB
+    file_sd_configs:
+      - files: [/etc/prometheus/targets/bank-worker.json]
+        refresh_interval: 1m
+  - job_name: clickhouse
+    fallback_scrape_protocol: PrometheusText0.0.4
+    sample_limit: 5000
+    file_sd_configs:
+      - files: [/etc/prometheus/targets/clickhouse.json]
+        refresh_interval: 1m
+    # Штатный endpoint отдаёт более тысячи рядов; оставлены только нужные дашбордам и оповещениям.
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        action: keep
+        regex: >-
+          ClickHouseMetrics_(MemoryTracking|TCPConnection|HTTPConnection|Query|PartsActive|DelayedInserts|BackgroundMergesAndMutationsPoolTask)|ClickHouseProfileEvents_(Query|SelectQuery|InsertQuery|FailedQuery|FailedSelectQuery|FailedInsertQuery|InsertedRows|InsertedBytes|DelayedInserts|RejectedInserts|QueryTimeMicroseconds|SelectQueryTimeMicroseconds|InsertQueryTimeMicroseconds|Merge|MergedRows)|ClickHouseAsyncMetrics_(Uptime|MemoryResident|MaxPartCountForPartition|TotalBytesOfMergeTreeTables|TotalRowsOfMergeTreeTables|NumberOfTables|DiskAvailable|DiskTotal)|ClickHouseErrorMetric_ALL
+  - job_name: kafka-jmx
+    # Strimzi запускает Prometheus JMX exporter в каждом pod Kafka на порту 9404. Headless Service
+    # kafka-jmx-metrics публикует и неготовые pod: работающий, но неготовый брокер виден как up == 0.
+    fallback_scrape_protocol: PrometheusText0.0.4
+    sample_limit: 8000
+    dns_sd_configs:
+      - names: [kafka-jmx-metrics]
+        type: A
+        port: 9404
+        refresh_interval: 30s
+  - job_name: kafka-exporter
+    # Kafka Exporter от Strimzi: lag групп и offsets топиков, включая *.DLT.
+    fallback_scrape_protocol: PrometheusText0.0.4
+    sample_limit: 8000
+    static_configs:
+      - targets: [kafka-exporter-metrics:9404]

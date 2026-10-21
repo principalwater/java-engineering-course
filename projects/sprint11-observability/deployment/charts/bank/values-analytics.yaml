@@ -1,0 +1,4 @@
+global:
+  analyticsEnabled: true
+kafka:
+  analyticsEnabled: true

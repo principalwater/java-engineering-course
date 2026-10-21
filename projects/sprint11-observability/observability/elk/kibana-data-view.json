@@ -1,0 +1,1 @@
+{"override": true, "data_view": {"id": "bank11-logs", "name": "Bank logs", "title": "bank11-logs-*", "timeFieldName": "@timestamp"}}

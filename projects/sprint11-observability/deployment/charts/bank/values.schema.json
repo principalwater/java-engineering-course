@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "global",
+    "apps",
+    "assets",
+    "kafka"
+  ],
+  "properties": {
+    "global": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "environment": {
+          "enum": [
+            "dev",
+            "test",
+            "prod"
+          ]
+        },
+        "externalPort": {
+          "type": "integer",
+          "minimum": 1025,
+          "maximum": 65535
+        },
+        "storageClass": {
+          "type": "string",
+          "minLength": 1
+        },
+        "secretPrefix": {
+          "const": "bank11"
+        },
+        "kafkaCluster": {
+          "const": "bank-kafka"
+        },
+        "analyticsEnabled": {
+          "type": "boolean"
+        },
+        "chartRevision": {
+          "type": "string",
+          "pattern": "^([a-f0-9]{64})?$"
+        },
+        "nodeSelector": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "observability": {
+          "type": "object"
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "type": "string",
+          "minLength": 1
+        },
+        "serviceType": {
+          "enum": [
+            "NodePort",
+            "ClusterIP"
+          ]
+        },
+        "nodePort": {
+          "type": "integer",
+          "minimum": 30000,
+          "maximum": 32767
+        }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "apps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accounts",
+        "cash",
+        "transfer",
+        "notifications",
+        "gateway",
+        "front",
+        "analytics"
+      ],
+      "properties": {
+        "accounts": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/app"
+            },
+            {
+              "properties": {
+                "oauthScope": {
+                  "maxLength": 0
+                }
+              }
+            }
+          ]
+        },
+        "cash": {
+          "$ref": "#/definitions/app"
+        },
+        "transfer": {
+          "$ref": "#/definitions/app"
+        },
+        "notifications": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/app"
+            },
+            {
+              "properties": {
+                "web": {
+                  "const": false
+                }
+              }
+            }
+          ]
+        },
+        "gateway": {
+          "$ref": "#/definitions/app"
+        },
+        "front": {
+          "$ref": "#/definitions/app"
+        },
+        "analytics": {
+          "$ref": "#/definitions/app"
+        }
+      }
+    },
+    "javaResources": {
+      "type": "object"
+    },
+    "platform": {
+      "type": "object"
+    },
+    "assets": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        }
+      }
+    },
+    "kafka": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "enum": [
+            "single",
+            "ha"
+          ]
+        }
+      }
+    },
+    "superset": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "network": {
+      "type": "object"
+    },
+    "openbao": {
+      "type": "object"
+    },
+    "zipkin": {
+      "type": "object"
+    },
+    "prometheus": {
+      "type": "object"
+    },
+    "grafana": {
+      "type": "object"
+    },
+    "elk": {
+      "type": "object"
+    }
+  },
+  "definitions": {
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "type": "string",
+          "minLength": 1
+        },
+        "jdbc": {
+          "type": "boolean"
+        },
+        "kafka": {
+          "type": "boolean"
+        },
+        "web": {
+          "type": "boolean"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "audience": {
+          "type": "string"
+        },
+        "oauthScope": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

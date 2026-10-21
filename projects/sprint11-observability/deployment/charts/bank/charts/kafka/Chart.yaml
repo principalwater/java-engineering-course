@@ -1,0 +1,6 @@
+apiVersion: v2
+name: kafka
+description: Kafka Strimzi с TLS, SCRAM и явными ACL банка
+type: application
+version: 0.1.0
+appVersion: "4.2.2"

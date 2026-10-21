@@ -1,0 +1,20 @@
+plugins { id 'org.springframework.boot' }
+springBoot { mainClass = 'dev.principalwater.bank.analytics.AnalyticsApplication' }
+dependencies {
+    implementation project(':bank-service-client')
+    implementation 'org.springframework.boot:spring-boot-starter-data-cassandra'
+    implementation 'org.springframework.kafka:spring-kafka'
+    implementation 'com.clickhouse:client-v2:0.9.8'
+    testImplementation project(':bank-test-support')
+    testImplementation 'org.testcontainers:kafka'
+}
+tasks.named('test') { exclude '**/*IntegrationTest.class' }
+tasks.register('integrationTest', Test) {
+    group = 'verification'
+    description = 'Verify analytics inbox and JWT contracts against PostgreSQL'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    include '**/*IntegrationTest.class'
+    shouldRunAfter tasks.named('test')
+}
+tasks.named('check') { dependsOn tasks.named('integrationTest') }

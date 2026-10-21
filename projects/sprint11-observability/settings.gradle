@@ -1,0 +1,11 @@
+rootProject.name = 'bank'
+
+[
+    services: ['accounts', 'cash', 'transfer', 'notifications', 'front', 'gateway', 'analytics', 'bank-bi'],
+    libraries: ['bank-contracts', 'bank-observability', 'bank-secrets', 'bank-runtime', 'bank-messaging', 'bank-service-client', 'bank-test-support']
+].each { directory, modules ->
+    modules.each { module ->
+        include module
+        project(":${module}").projectDir = file("${directory}/${module}")
+    }
+}

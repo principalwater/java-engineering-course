@@ -1,0 +1,14 @@
+dependencies {
+    api project(':bank-messaging')
+    api 'org.springframework.boot:spring-boot-starter-web'
+    api 'org.springframework.boot:spring-boot-starter-actuator'
+    api 'org.springframework.boot:spring-boot-starter-validation'
+    api 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    api 'org.springframework.boot:spring-boot-starter-jdbc'
+    api 'org.springframework.cloud:spring-cloud-starter-zookeeper-discovery'
+    api 'org.springframework.cloud:spring-cloud-starter-zookeeper-config'
+    runtimeOnly 'org.postgresql:postgresql'
+    api 'org.flywaydb:flyway-core'
+    runtimeOnly 'org.flywaydb:flyway-database-postgresql'
+    testImplementation project(':bank-test-support')
+}

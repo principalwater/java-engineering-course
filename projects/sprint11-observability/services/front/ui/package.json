@@ -1,0 +1,18 @@
+{
+  "name": "sprint10-bank-ui",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.22.0" },
+  "scripts": {
+    "build": "astro build",
+    "check": "astro check && node --experimental-strip-types --test test/*.test.ts"
+  },
+  "dependencies": { "astro": "7.4.0", "d3": "7.9.0" },
+  "devDependencies": {
+    "@astrojs/check": "0.9.6",
+    "@types/d3": "7.4.3",
+    "@types/node": "24.0.15",
+    "typescript": "5.9.3"
+  }
+}

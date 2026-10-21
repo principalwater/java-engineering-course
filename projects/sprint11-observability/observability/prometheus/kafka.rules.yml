@@ -1,0 +1,70 @@
+groups:
+  - name: bank-kafka
+    interval: 30s
+    rules:
+      - alert: KafkaMetricsMissing
+        # Strimzi публикует через DNS по цели на pod Kafka. Упавший pod не имеет адреса и ряда up,
+        # поэтому сигналом служит само отсутствие здоровой цели.
+        expr: absent(up{job="kafka-jmx"} == 1)
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No Kafka broker is being scraped"
+          description: "Not a single Kafka JMX exporter target has been up for 3 minutes."
+          action: "Run kubectl get kafka,pods -l strimzi.io/cluster=bank-kafka; check the broker pod events and that the kafka-jmx-metrics Service has endpoints."
+      - alert: KafkaExporterDown
+        expr: up{job="kafka-exporter"} == 0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka Exporter is down"
+          description: "Consumer lag and topic offset metrics are unavailable because the Kafka Exporter cannot be scraped."
+          action: "Check the bank-kafka-kafka-exporter pod; it authenticates to the brokers with its Strimzi-issued certificate."
+      - alert: KafkaNoActiveController
+        expr: sum(kafka_controller_kafkacontroller_activecontrollercount) != 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka has {{ $value }} active controllers instead of exactly one"
+          description: "The KRaft quorum reports {{ $value }} active controllers for 2 minutes."
+          action: "Check the controller pod logs for quorum loss; in the ha profile verify that at least two of the three controllers are running."
+      - alert: KafkaOfflinePartitions
+        expr: sum(kafka_controller_kafkacontroller_offlinepartitionscount) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value }} Kafka partitions are offline"
+          description: "Partitions without an available leader cannot be produced to or consumed from."
+          action: "Find the topics on the Kafka health dashboard; restore the broker that holds their leader replicas."
+      - alert: KafkaUnderReplicatedPartitions
+        expr: sum(kafka_server_replicamanager_underreplicatedpartitions) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} Kafka partitions are under-replicated"
+          description: "Followers have been behind the leaders for 5 minutes; a further broker loss would lose acknowledged data."
+          action: "Check broker disk, network and the ISR shrink rate on the Kafka health dashboard."
+      - alert: KafkaConsumerGroupLagHigh
+        # -1 — неизвестный committed offset; он не должен уменьшать сумму настоящего лага.
+        expr: sum by (consumergroup, topic) (kafka_consumergroup_lag >= 0) > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Consumer group {{ $labels.consumergroup }} lags {{ $value }} messages on {{ $labels.topic }}"
+          description: "The group has been more than 100 messages behind for 10 minutes: the consumer is slow, stuck, or gone."
+          action: "Check the consuming service (accounts, notifications or analytics) for errors and rebalances; see the lag panels on the Kafka topics dashboard."
+      - alert: KafkaDeadLetterTopicReceivedMessages
+        # Offsets — gauges, поэтому число добавленных сообщений измеряет delta, а не increase.
+        expr: sum by (topic) (delta(kafka_topic_partition_current_offset{topic=~".+\\.DLT"}[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Messages were dead-lettered to {{ $labels.topic }}"
+          description: "{{ $value | printf \"%.0f\" }} messages reached {{ $labels.topic }} in the last 15 minutes: a consumer gave up on them after its retries."
+          action: "DLT headers retain the original topic, partition and offset; exception headers are intentionally omitted. Correlate the confirmed quarantine ERROR in Kibana, inspect the protected record and replay or discard deliberately."

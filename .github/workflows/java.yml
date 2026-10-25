@@ -273,6 +273,7 @@ jobs:
       - name: Validate formatting and deployment safety
         run: |
           tofu fmt -check -recursive infra
+          python3 -m unittest discover -s .github/scripts/tests -v
           python3 -m unittest discover -s infra/tests -v
       - name: Validate the independent Kubernetes deployment root
         env:

@@ -329,7 +329,7 @@ def change_state(containers, service, action):
 def discovery(containers, analytics):
     names = (*(name for name in CORE_APPS if name != "notifications"), *(("analytics",) if analytics else ()))
     commands = ["ls /services", *("ls /services/" + name for name in names), "get /config/application/bank.config.revision", "quit"]
-    output = kube(containers, "exec", "-i", "statefulset/discovery", "--", "zkCli.sh", "-server", "127.0.0.1:2181", "-timeout", "3000",
+    output = kube(containers, "exec", "-i", "statefulset/discovery", "--", "zkCli.sh", "-server", "127.0.0.1:2181", "-waitforconnection", "-timeout", "5000",
                   input_text="\n".join(commands) + "\n", timeout=20)
     rows = [line.strip()[1:-1].split(", ") for line in output.splitlines() if re.fullmatch(r"\[[A-Za-z0-9_, .:-]*\]", line.strip())]
     if len(rows) < len(names) + 1 or not set(names).issubset(set(rows[0])):

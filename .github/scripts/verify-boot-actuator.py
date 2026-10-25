@@ -1,13 +1,36 @@
 """Run the existing HTTP contract checks against both packaged distributions."""
 
 from pathlib import Path
+import json
 import socket
 import subprocess
 import time
 from zipfile import ZipFile
+from urllib.error import HTTPError, URLError
+from urllib.request import urlopen
 
 MODULE = Path(__file__).resolve().parents[2] / "exercises/sprint04/boot-actuator"
 PORT = 18082
+
+
+def application_ready(profile: str) -> bool:
+    endpoint = "health/readiness" if profile == "probes" else "health"
+    try:
+        try:
+            response = urlopen(f"http://127.0.0.1:{PORT}/actuator/{endpoint}", timeout=1)
+        except HTTPError as error:
+            response = error
+        with response:
+            health = json.load(response)
+            if not isinstance(health, dict):
+                return False
+            if profile == "probes":
+                # cycleCheck intentionally alternates UP/DOWN; ApplicationReadyEvent is the startup boundary.
+                readiness = health.get("components", {}).get("readinessState", {})
+                return response.status in (200, 503) and readiness.get("status") == "UP"
+            return response.status == 200 and health.get("status") == "UP"
+    except (URLError, TimeoutError, ConnectionError, json.JSONDecodeError):
+        return False
 
 
 def main() -> None:
@@ -34,13 +57,11 @@ def main() -> None:
                     while True:
                         if process.poll() is not None:
                             raise RuntimeError(f"Server exited; see {log}")
-                        try:
-                            with socket.create_connection(("127.0.0.1", PORT), timeout=0.2):
-                                break
-                        except (ConnectionRefusedError, TimeoutError):
-                            if time.monotonic() >= deadline:
-                                raise TimeoutError(f"Server did not start; see {log}")
-                            time.sleep(0.1)
+                        if application_ready(profile):
+                            break
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError(f"Application did not become ready; see {log}")
+                        time.sleep(0.1)
                     subprocess.run(["python3", "verify.py", profile, builder], cwd=MODULE, check=True)
                 finally:
                     process.terminate()

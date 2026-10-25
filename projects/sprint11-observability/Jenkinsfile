@@ -195,6 +195,16 @@ pipeline {
     }
     post {
         always {
+            script {
+                // Снимаем состояние до архивации: за время загрузки JAR неготовый Pod может восстановиться.
+                if (currentBuild.currentResult != 'SUCCESS') {
+                    sh returnStatus: true, script: '''
+                        if test -n "${BANK_STATE:-}" && test -f "$BANK_STATE/cluster.json"; then
+                            "$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/runtime.py" --state-dir "$BANK_STATE" diagnostics
+                        fi
+                    '''
+                }
+            }
             junit testResults: 'projects/sprint11-observability/**/build/test-results/**/*.xml', allowEmptyResults: true
             archiveArtifacts artifacts: 'projects/sprint11-observability/build/deployment/*.jar,projects/sprint11-observability/**/build/libs/*-stubs.jar', allowEmptyArchive: true
         }

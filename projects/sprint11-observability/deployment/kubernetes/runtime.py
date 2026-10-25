@@ -26,6 +26,8 @@ NODE_IMAGE = "kindest/node:v1.34.11@sha256:44e222ee2132dab25ff87301682f89eb82c78
 OWNER_LABEL = "bank11.io/cluster"
 # Docker exports/unpacked layers need temporary headroom; this floor is not a capacity estimate.
 MIN_HOST_DISK_FREE_GIB = 5
+# Хвост ошибки провайдера ограничен: диагностика не загружает весь журнал в память.
+MAX_DIAGNOSTIC_LOG_BYTES = 128 * 1024
 
 
 def command(arguments: list[str], *, data: bytes | None = None, timeout: int = 120,
@@ -95,7 +97,7 @@ def kubectl(identity: dict, *arguments: str, data: bytes | None = None, timeout:
                     "--namespace", identity["namespace"], *arguments], data=data, timeout=timeout)
 
 
-def owned_identity(state_dir: Path, *, api: bool = True) -> dict:
+def owned_identity(state_dir: Path, *, api: bool = True, api_timeout: int = 120) -> dict:
     identity_path = state_dir / "cluster.json"
     if not identity_path.is_file() or identity_path.is_symlink():
         raise ValueError("Owned cluster identity is missing; adoption is not supported")
@@ -119,7 +121,7 @@ def owned_identity(state_dir: Path, *, api: bool = True) -> dict:
         if not any(network.get("NetworkID") == identity["network_id"] for network in networks.values()):
             raise ValueError("Kind node is outside the exact owned network")
     if api:
-        uid = kubectl(identity, "get", "namespace", "kube-system", "-o", "jsonpath={.metadata.uid}").strip()
+        uid = kubectl(identity, "get", "namespace", "kube-system", "-o", "jsonpath={.metadata.uid}", timeout=api_timeout).strip()
         if uid != identity["cluster_uid"]:
             raise ValueError("Kubernetes cluster UID changed")
     return identity
@@ -444,6 +446,54 @@ def lifecycle(args: argparse.Namespace, *, stop: bool) -> None:
             print("Resumed retained bootstrap nodes; OpenBao has not been installed yet")
 
 
+def diagnostics(args: argparse.Namespace) -> None:
+    """Только состояние собственных компонентов: без событий Kubernetes, логов и Secret bodies."""
+    identity = owned_identity(args.state_dir, api_timeout=15)
+    apply_log = args.state_dir / "tofu-apply.log"
+    if apply_log.is_file() and not apply_log.is_symlink():
+        # Только фиксированные категории из ограниченного хвоста; содержимое журнала остаётся приватным.
+        with apply_log.open("rb") as stream:
+            stream.seek(max(apply_log.stat().st_size - MAX_DIAGNOSTIC_LOG_BYTES, 0))
+            tail = stream.read(MAX_DIAGNOSTIC_LOG_BYTES).decode("utf-8", "replace")
+        for category, pattern in (("deadline", r"context deadline exceeded|timed out waiting"),
+                                  ("connection", r"connection refused"),
+                                  ("disk", r"no space left on device"),
+                                  ("tls", r"x509:|TLS handshake"),
+                                  ("operation-in-progress", r"another operation.*in progress")):
+            if re.search(pattern, tail, re.IGNORECASE):
+                print(f"BANK_CI_TOFU {category}")
+    applications = {*APPS, "authorization", "edge", "database", "discovery", "zipkin", "prometheus",
+                    "alertmanager", "grafana", "elasticsearch", "kibana", "logstash", "cassandra", "clickhouse",
+                    "config-seed", "cassandra-init", "clickhouse-init", "elasticsearch-bootstrap",
+                    "kibana-bootstrap", "grafana-bootstrap"}
+    reasons = {"Running", "Completed", "Error", "OOMKilled", "CrashLoopBackOff", "ImagePullBackOff",
+               "ErrImagePull", "ContainerCreating", "PodInitializing", "CreateContainerConfigError", "RunContainerError"}
+    pods = json.loads(kubectl(identity, "get", "pods", "-o", "json", timeout=15))["items"]
+    for pod in pods:
+        labels = pod["metadata"].get("labels", {})
+        application = labels.get("app")
+        if application not in applications:
+            if labels.get("strimzi.io/cluster") != "bank-kafka" or labels.get("strimzi.io/kind") != "Kafka":
+                continue
+            application = "kafka"
+        for container in pod.get("status", {}).get("containerStatuses", []):
+            state = container.get("state", {})
+            detail = state.get("waiting") or state.get("terminated") or {}
+            reason = detail.get("reason", "Running" if "running" in state else "Other")
+            reason = reason if reason in reasons else "Other"
+            ready = int(container.get("ready") is True)
+            restarts = min(max(int(container.get("restartCount", 0)), 0), 999999)
+            print(f"BANK_CI_POD {application} ready={ready} restarts={restarts} reason={reason}")
+        if not pod.get("status", {}).get("containerStatuses"):
+            unscheduled = any(condition.get("type") == "PodScheduled" and condition.get("reason") == "Unschedulable"
+                              for condition in pod.get("status", {}).get("conditions", []))
+            print(f"BANK_CI_POD {application} ready=0 restarts=0 reason={'Unschedulable' if unscheduled else 'Pending'}")
+    for node in json.loads(kubectl(identity, "get", "nodes", "-o", "json", timeout=15))["items"]:
+        for condition in node.get("status", {}).get("conditions", []):
+            if condition["type"] in {"Ready", "MemoryPressure", "DiskPressure", "PIDPressure"} and condition["status"] in {"True", "False", "Unknown"}:
+                print(f"BANK_CI_NODE {condition['type']} {condition['status']}")
+
+
 def main() -> None:
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
@@ -460,6 +510,7 @@ def main() -> None:
     readiness = subparsers.add_parser("ready")
     readiness.add_argument("--timeout", type=int, default=900)
     subparsers.add_parser("test")
+    subparsers.add_parser("diagnostics")
     subparsers.add_parser("stop")
     subparsers.add_parser("resume")
     args = parser.parse_args()
@@ -471,6 +522,8 @@ def main() -> None:
         load_images(args)
     elif args.operation == "ready":
         ready(args)
+    elif args.operation == "diagnostics":
+        diagnostics(args)
     elif args.operation == "test":
         identity = owned_identity(args.state_dir)
         try:

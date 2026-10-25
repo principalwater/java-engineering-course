@@ -12,6 +12,7 @@ CA) ещё до появления кластера, поэтому их коп�
 """
 
 import argparse
+import ast
 import base64
 import contextlib
 import datetime
@@ -100,17 +101,53 @@ CONSOLE_INDICATORS = (
     ("deployment", r"\btofu phase failed\b"),
     ("gradle", r"^FAILURE: Build failed with an exception\.$"),
 )
+POD_DIAGNOSTIC = re.compile(
+    r"^BANK_CI_POD (?:accounts|cash|transfer|front|gateway|notifications|analytics|authorization|edge|database|"
+    r"discovery|zipkin|prometheus|alertmanager|grafana|elasticsearch|kibana|logstash|cassandra|clickhouse|kafka|"
+    r"config-seed|cassandra-init|clickhouse-init|elasticsearch-bootstrap|kibana-bootstrap|grafana-bootstrap) "
+    r"ready=[01] restarts=\d{1,6} reason=(?:Running|Completed|Error|OOMKilled|CrashLoopBackOff|ImagePullBackOff|"
+    r"ErrImagePull|ContainerCreating|PodInitializing|CreateContainerConfigError|RunContainerError|Pending|Unschedulable|Other)$")
+NODE_DIAGNOSTIC = re.compile(r"^BANK_CI_NODE (?:Ready|MemoryPressure|DiskPressure|PIDPressure) (?:True|False|Unknown)$")
+TOFU_DIAGNOSTIC = re.compile(r"^BANK_CI_TOFU (?:deadline|connection|disk|tls|operation-in-progress)$")
 
 
-def console_diagnostics(console: str, stages: set[str]) -> str:
+def verification_failures(project: Path) -> set[str]:
+    """Разрешает только статические сообщения из проверяемого исходного кода, без внешних данных."""
+    messages = set()
+    for relative in ("deployment/scripts/verify-runtime.py", "deployment/scripts/verify-observability.py",
+                     "services/analytics/src/test/python/projection_recovery.py"):
+        path = project / relative
+        if not path.is_file() or path.is_symlink():
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "id", getattr(node.func, "attr", ""))
+            position = 1 if name == "require" else 0
+            if name not in {"require", "VerificationError", "wait_for", "ready"} or len(node.args) <= position:
+                continue
+            message = node.args[position]
+            if isinstance(message, ast.Constant) and isinstance(message.value, str) and "\n" not in message.value:
+                prefix = "Timed out: " if name in {"wait_for", "ready"} else ""
+                messages.add("FAIL " + prefix + message.value)
+    return messages
+
+
+def console_diagnostics(console: str, stages: set[str], allowed_failures: set[str] | frozenset[str] = frozenset()) -> str:
     """Внешняя консоль даёт лишь фиксированные индикаторы; имена стадий разрешает закоммиченный Jenkinsfile."""
     skipped = set(re.findall(r'^Stage "([^"\r\n]+)" skipped due to ', console, re.MULTILINE))
     executed = [name for name in STAGE_LINE.findall(console) if name in stages and name not in skipped]
     codes = sorted({int(code) for code in re.findall(
         r"^(?:ERROR: )?script returned exit code (-?\d{1,3})$", console, re.MULTILINE)})[:8]
     indicators = [name for name, pattern in CONSOLE_INDICATORS if re.search(pattern, console, re.MULTILINE | re.IGNORECASE)]
+    diagnostics = list(dict.fromkeys(line for line in console.splitlines()
+                                   if POD_DIAGNOSTIC.fullmatch(line) or NODE_DIAGNOSTIC.fullmatch(line)
+                                   or TOFU_DIAGNOSTIC.fullmatch(line)))[:40]
+    failures = sorted(set(console.splitlines()) & allowed_failures)
     return (f"last executed stage={executed[-1] if executed else 'none'}; shell exit codes={codes}; "
-            f"console indicators=[{', '.join(indicators)}]")
+            f"console indicators=[{', '.join(indicators)}]; verification failures=[{'; '.join(failures)}]; "
+            f"workload diagnostics=[{'; '.join(diagnostics)}]")
 
 
 class Layout:
@@ -796,7 +833,7 @@ def command_build(args: argparse.Namespace) -> None:
     summary = (f"progressive bytes={progressive_bytes}; completed bytes={len(completed)}; "
                f"pipeline markers={pipeline_markers}; "
                f"expected node seen={AGENT_NAME in nodes}; unexpected nodes={len(nodes - {AGENT_NAME})}; "
-               f"{console_diagnostics(console, stages)}")
+               f"{console_diagnostics(console, stages, verification_failures(REPOSITORY / 'projects/sprint11-observability'))}")
     if details["result"] != "SUCCESS":
         result = details["result"] if details["result"] in {"FAILURE", "UNSTABLE", "ABORTED", "NOT_BUILT"} else "UNKNOWN"
         raise RuntimeError(f"Build {number} finished with {result}; {summary}; the full console is in {log}")

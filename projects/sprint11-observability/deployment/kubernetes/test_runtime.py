@@ -2,7 +2,7 @@
 
 import argparse
 import base64
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
 import os
@@ -21,6 +21,40 @@ import runtime
 
 
 class ClusterCreationTest(unittest.TestCase):
+    def test_apply_failure_classification_does_not_publish_private_log_contents(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            (state / "tofu-apply.log").write_text("private-value\nError: context deadline exceeded\n", encoding="utf-8")
+            output = io.StringIO()
+            with patch.object(runtime, "owned_identity", return_value={}), \
+                    patch.object(runtime, "kubectl", return_value='{"items":[]}'), redirect_stdout(output):
+                runtime.diagnostics(argparse.Namespace(state_dir=state))
+            self.assertEqual(output.getvalue(), "BANK_CI_TOFU deadline\n")
+
+    def test_failure_diagnostics_expose_only_owned_component_states(self):
+        pods = {"items": [
+            {"metadata": {"labels": {"app": "accounts"}, "annotations": {"secret": "private-value"}},
+             "status": {"containerStatuses": [{"ready": False, "restartCount": 3,
+                         "state": {"waiting": {"reason": "CrashLoopBackOff", "message": "private-value"}}}]}},
+            {"metadata": {"labels": {"app": "cash"}}, "status": {"containerStatuses": [
+                {"state": {"waiting": {"reason": "private-value"}}}]}},
+            {"metadata": {"labels": {"app": "private-value"}}, "status": {}},
+        ]}
+        nodes = {"items": [{"status": {"conditions": [
+            {"type": "MemoryPressure", "status": "True", "message": "private-value"},
+            {"type": "private-value", "status": "True"}]}}]}
+        output = io.StringIO()
+        with patch.object(runtime, "owned_identity", return_value={}) as owned, \
+                patch.object(runtime, "kubectl", side_effect=[json.dumps(pods), json.dumps(nodes)]) as kubectl, \
+                redirect_stdout(output):
+            runtime.diagnostics(argparse.Namespace(state_dir=Path("/owned/state")))
+        owned.assert_called_once_with(Path("/owned/state"), api_timeout=15)
+        self.assertEqual([call.args[1:] for call in kubectl.call_args_list],
+                         [("get", "pods", "-o", "json"), ("get", "nodes", "-o", "json")])
+        self.assertTrue(all(call.kwargs["timeout"] == 15 for call in kubectl.call_args_list))
+        self.assertEqual(output.getvalue(), "BANK_CI_POD accounts ready=0 restarts=3 reason=CrashLoopBackOff\n"
+                         "BANK_CI_POD cash ready=0 restarts=0 reason=Other\nBANK_CI_NODE MemoryPressure True\n")
+
     def test_helm_test_uses_only_the_verified_release_identity(self):
         identity = {"kubeconfig": "/private/kubeconfig", "context": "kind-bank11-test-single", "namespace": "bank11-test"}
         with patch("sys.argv", ["runtime.py", "--state-dir", "/private/state", "test"]), \

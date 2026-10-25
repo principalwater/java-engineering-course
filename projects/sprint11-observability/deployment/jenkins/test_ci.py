@@ -21,6 +21,33 @@ from unittest import mock
 import ci
 
 
+class DiagnosticsTest(unittest.TestCase):
+    def test_static_failure_messages_come_from_source_without_dynamic_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            path = project / "deployment/scripts/verify-runtime.py"
+            path.parent.mkdir(parents=True)
+            path.write_text('require(ok, "fixed failure")\nwait_for("notification delivery", probe)\n'
+                            'require(ok, f"{private_value}")\n', encoding="utf-8")
+            self.assertEqual(ci.verification_failures(project),
+                             {"FAIL fixed failure", "FAIL Timed out: notification delivery"})
+
+    def test_reports_only_fixed_failure_categories_and_typed_workload_states(self):
+        console = ("FAIL Timed out: recovered cabinet notification\n"
+                   "BANK_CI_POD accounts ready=0 restarts=2 reason=OOMKilled\n"
+                   "BANK_CI_NODE DiskPressure True\n"
+                   "BANK_CI_TOFU deadline\n"
+                   "BANK_CI_POD private-value ready=0 restarts=0 reason=Error\n"
+                   "BANK_CI_POD cash ready=0 restarts=0 reason=private-value\n"
+                   "BANK_CI_NODE Ready private-value\nprivate-value\n")
+        summary = ci.console_diagnostics(console, set(), {"FAIL Timed out: recovered cabinet notification"})
+        self.assertIn("verification failures=[FAIL Timed out: recovered cabinet notification]", summary)
+        self.assertIn("BANK_CI_POD accounts ready=0 restarts=2 reason=OOMKilled", summary)
+        self.assertIn("BANK_CI_NODE DiskPressure True", summary)
+        self.assertIn("BANK_CI_TOFU deadline", summary)
+        self.assertNotIn("private-value", summary)
+
+
 def commit(repository: Path, name: str, content: str, *, amend: bool = False) -> None:
     (repository / name).write_text(content)
     ci.git(["add", name], cwd=repository)

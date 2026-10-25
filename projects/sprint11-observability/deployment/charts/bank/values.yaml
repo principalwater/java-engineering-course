@@ -1,0 +1,207 @@
+global:
+  environment: dev
+  externalPort: 8460
+  storageClass: standard
+  secretPrefix: bank11
+  kafkaCluster: bank-kafka
+  analyticsEnabled: false
+  chartRevision: ""
+  observability:
+    enabled: true
+    logging:
+      enabled: true
+    retention:
+      metricsTime: 7d
+      metricsSize: 1GB
+      logsTime: 7d
+      alertmanagerTime: 120h
+    storage:
+      prometheus: 2Gi
+      alertmanager: 128Mi
+      grafana: 256Mi
+      elasticsearch: 4Gi
+      logstash: 1Gi
+    publicHosts:
+      grafana: grafana-bank.valgrind-home.localhost
+      kibana: kibana-bank.valgrind-home.localhost
+    alerting:
+      telegram:
+        enabled: false
+        apiUrl: https://api.telegram.org
+    scrape:
+      webPort: 8080
+      workerPort: 9400
+      webPath: /actuator/prometheus
+      workerPath: /actuator/prometheus
+    images:
+      zipkin: openzipkin/zipkin:3.6.1@sha256:d17e856dcbba7ffeefbbfc252f89ab78a4ab6faed47e646d46daad78f91b5ee2
+      prometheus: prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
+      alertmanager: prom/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
+      grafana: grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
+      elasticsearch: docker.elastic.co/elasticsearch/elasticsearch:9.5.5@sha256:13b4a40bb095774f5fda635e45fd5677cc6a26565e42b24997b0c72b88e75984
+      kibana: docker.elastic.co/kibana/kibana:9.5.5@sha256:13b72ce7222c36e4213229004ae62a87aeb32fd372ebfa6fb38f7a3285fdbb78
+      logstash: docker.elastic.co/logstash/logstash:9.5.5@sha256:d170c92166492ff82433395734121dcd2c73140038a03e252299384a01c9aae5
+      logstashExporter: kuskoman/logstash-exporter:v1.9.2@sha256:1fa5ef435073d83525d54809cb4e5e4b5375a774e368c92677c854c6e6524902
+    resources:
+      zipkin: {requests: {cpu: 50m, memory: 192Mi}, limits: {cpu: 500m, memory: 320Mi}}
+      prometheus: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: "1", memory: 384Mi}}
+      alertmanager: {requests: {cpu: 10m, memory: 32Mi}, limits: {cpu: 200m, memory: 64Mi}}
+      grafana: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: "1", memory: 512Mi}}
+      elasticsearch: {requests: {cpu: 200m, memory: 640Mi}, limits: {cpu: "1.5", memory: 768Mi}}
+      kibana: {requests: {cpu: 100m, memory: 768Mi}, limits: {cpu: "1", memory: 1536Mi}}
+      logstash: {requests: {cpu: 100m, memory: 512Mi}, limits: {cpu: "1", memory: 640Mi}}
+      logstashExporter: {requests: {cpu: 10m, memory: 16Mi}, limits: {cpu: 100m, memory: 48Mi}}
+      job: {requests: {cpu: 10m, memory: 32Mi}, limits: {cpu: 200m, memory: 128Mi}}
+  nodeSelector:
+    bank11.io/worker: "true"
+edge:
+  serviceType: NodePort
+  nodePort: 30460
+  image: bank11-edge:local
+authorization:
+  image: bank11-authorization:local
+apps:
+  accounts:
+    image: bank11-accounts:local
+    jdbc: true
+    kafka: true
+    audience: accounts-api
+  cash:
+    image: bank11-cash:local
+    jdbc: true
+    kafka: true
+    audience: cash-api
+    oauthScope: accounts.cash
+  transfer:
+    image: bank11-transfer:local
+    jdbc: true
+    kafka: true
+    audience: transfer-api
+    oauthScope: accounts.transfer
+  notifications:
+    image: bank11-notifications:local
+    jdbc: true
+    kafka: true
+    web: false
+  gateway:
+    image: bank11-gateway:local
+    audience: bank-api
+  front:
+    image: bank11-front:local
+  analytics:
+    image: bank11-analytics:local
+    jdbc: true
+    kafka: true
+    audience: analytics-api
+    oauthScope: accounts.resolve
+    optional: true
+javaResources:
+  requests: {cpu: 100m, memory: 256Mi}
+  limits: {cpu: "1", memory: 512Mi}
+platform:
+  postgresImage: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+  zookeeperImage: zookeeper:3.9.4@sha256:dfa9ba46d14bd52bcb3c1dac3ba91f179cf4cebf7ee576e1c2df09c68fc1d30d
+  cassandraImage: cassandra:5.0.9@sha256:8870ec4d9608abe9160a7d09b51a0f0c13c6a95ea0610266ea58eb7d30a144de
+  clickhouseImage: clickhouse/clickhouse-server:26.8-alpine@sha256:2ad322429c7965bde31e3a6389daa2df62db7e1898b1b91d50eb3a7bad716f1f
+  postgresStorage: 2Gi
+  discoveryStorage: 1Gi
+  cassandraStorage: 2Gi
+  clickhouseHotStorage: 2Gi
+  clickhouseColdStorage: 2Gi
+# Публичные файлы предоставляет deployment/kubernetes/prepare.py; значения секретов сюда не попадают.
+assets: {}
+openbao:
+  bindings: {}
+network:
+  ingress:
+    front:
+      - {clients: [edge], ports: [8443]}
+      - {clients: [prometheus, helm-test], ports: [8080]}
+    gateway:
+      - {clients: [front], ports: [8443]}
+      - {clients: [prometheus, helm-test], ports: [8080]}
+    accounts:
+      - {clients: [gateway, cash, transfer, analytics], ports: [8443]}
+      - {clients: [prometheus, helm-test], ports: [8080]}
+    cash:
+      - {clients: [gateway], ports: [8443]}
+      - {clients: [prometheus, helm-test], ports: [8080]}
+    transfer:
+      - {clients: [gateway], ports: [8443]}
+      - {clients: [prometheus, helm-test], ports: [8080]}
+    analytics:
+      - {clients: [gateway], ports: [8443]}
+      - {clients: [prometheus, helm-test], ports: [8080]}
+    notifications:
+      - {clients: [prometheus], ports: [9400]}
+    database:
+      - {clients: [accounts, cash, transfer, notifications, analytics, authorization, superset, elasticsearch-bootstrap], initializers: true, probes: true, ports: [5432]}
+    discovery:
+      - {clients: [accounts, cash, transfer, notifications, analytics, front, gateway], initializers: true, ports: [2181]}
+    authorization:
+      - {clients: [accounts, cash, transfer, analytics, front, gateway, edge, superset], initializers: true, ports: [8443]}
+    cassandra:
+      - {clients: [analytics], initializers: true, ports: [9042]}
+    clickhouse:
+      - {clients: [analytics, superset, bank-bi], initializers: true, probes: true, ports: [8123, 8443]}
+      - {clients: [], initializers: true, ports: [9000]}
+      - {clients: [prometheus], ports: [9363]}
+    zipkin:
+      - {clients: [accounts, cash, transfer, notifications, front, gateway, analytics, edge, prometheus, grafana], probes: true, ports: [9411]}
+    logstash:
+      - {clients: [accounts, cash, transfer, notifications, front, gateway, analytics], probes: true, ports: [5044]}
+      - {clients: [prometheus], ports: [9198]}
+    elasticsearch:
+      - {clients: [logstash, kibana, grafana], initializers: true, probes: true, ports: [9200]}
+    kibana:
+      - {clients: [edge], initializers: true, probes: true, ports: [5601]}
+    grafana:
+      - {clients: [edge, prometheus], initializers: true, probes: true, ports: [3000]}
+    prometheus:
+      - {clients: [grafana, edge], probes: true, ports: [9090]}
+    alertmanager:
+      - {clients: [prometheus, grafana, edge], probes: true, ports: [9093]}
+    superset:
+      - {clients: [edge, bank-bi], initializers: true, ports: [8088]}
+  egress:
+    authorization:
+      - {servers: [database], ports: [5432]}
+    superset:
+      - {servers: [database], ports: [5432]}
+      - {servers: [clickhouse], ports: [8123, 8443]}
+    front:
+      - {servers: [gateway], ports: [8443]}
+    gateway:
+      - {servers: [accounts, cash, transfer, analytics], ports: [8443]}
+    accounts:
+      - {servers: [database], ports: [5432]}
+      - {kafka: true, ports: [9093]}
+    cash:
+      - {servers: [accounts], ports: [8443]}
+      - {servers: [database], ports: [5432]}
+      - {kafka: true, ports: [9093]}
+    transfer:
+      - {servers: [accounts], ports: [8443]}
+      - {servers: [database], ports: [5432]}
+      - {kafka: true, ports: [9093]}
+    notifications:
+      - {servers: [database], ports: [5432]}
+      - {kafka: true, ports: [9093]}
+    analytics:
+      - {servers: [accounts], ports: [8443]}
+      - {servers: [database], ports: [5432]}
+      - {servers: [cassandra], ports: [9042]}
+      - {servers: [clickhouse], ports: [8123, 8443]}
+      - {kafka: true, ports: [9093]}
+    edge:
+      - {servers: [front, authorization], ports: [8443]}
+      - {servers: [zipkin], ports: [9411]}
+      - {servers: [prometheus], ports: [9090]}
+      - {servers: [grafana], ports: [3000]}
+      - {servers: [kibana], ports: [5601]}
+      - {servers: [alertmanager], ports: [9093]}
+      - {servers: [superset], ports: [8088]}
+kafka:
+  profile: single
+superset:
+  enabled: false

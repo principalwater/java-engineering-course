@@ -1,0 +1,15 @@
+server.host: "::"
+server.port: 5601
+server.name: bank11-kibana
+elasticsearch.hosts: ["http://elasticsearch:9200"]
+# kibana_system — встроенная служебная учётная запись. Её пароль и ключи шифрования читает
+# kibana-start.sh из смонтированных Secret; здесь они не хранятся.
+elasticsearch.username: kibana_system
+# Анонимным запросам доступен только общий статус; этого достаточно для readiness.
+status.allowAnonymous: true
+telemetry.optIn: false
+telemetry.allowChangingOptInStatus: false
+newsfeed.enabled: false
+xpack.security.secureCookies: true
+path.data: /usr/share/kibana/data
+logging.root.level: warn

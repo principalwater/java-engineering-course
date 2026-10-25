@@ -1,0 +1,73 @@
+{{- if not .Values.global.analyticsEnabled }}
+{{- fail "Superset requires global.analyticsEnabled=true" }}
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: superset
+  labels: {app.kubernetes.io/part-of: bank11}
+spec:
+  ipFamilyPolicy: RequireDualStack
+  ipFamilies: [IPv4, IPv6]
+  selector: {app: superset, bank11.io/instance: {{ .Release.Name }}}
+  ports: [{name: http, port: 8088, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: superset
+  labels: {app.kubernetes.io/part-of: bank11}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: superset, bank11.io/instance: {{ .Release.Name }}}
+  template:
+    metadata:
+      labels: {app: superset, bank11.io/instance: {{ .Release.Name }}, bank11.io/role: application}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: superset
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          ports: [{name: http, containerPort: 8088}]
+          env:
+            - {name: SUPERSET_HOME, value: /tmp/superset}
+            - {name: BANK_BI_DATABASE_HOST, value: database}
+            - {name: BANK_BI_AUTH_URL, value: "https://authorization:8443/realms/bank"}
+            - {name: REQUESTS_CA_BUNDLE, value: /run/secrets/internal_ca.pem}
+            - {name: BANK_BI_PUBLIC_AUTH_URL, value: {{ printf "https://auth-bank.valgrind-home.localhost:%v/realms/bank" .Values.global.externalPort | quote }}}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          startupProbe:
+            httpGet: {path: /health, port: http, scheme: HTTPS}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 120
+          readinessProbe:
+            httpGet: {path: /health, port: http, scheme: HTTPS}
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: {path: /health, port: http, scheme: HTTPS}
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: secrets, secret: {secretName: {{ .Values.existingSecret }}, defaultMode: 0440}}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 128Mi}}

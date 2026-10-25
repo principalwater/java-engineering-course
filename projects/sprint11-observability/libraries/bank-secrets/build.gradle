@@ -1,0 +1,6 @@
+dependencies {
+    // Версия управляется общей линией Spring Cloud, совместимой с Boot 3.5.
+    api 'org.springframework.cloud:spring-cloud-starter-vault-config'
+    // Native PEM trust-store Spring Vault требует поддерживаемый HTTP-клиент.
+    runtimeOnly 'org.apache.httpcomponents.client5:httpclient5'
+}

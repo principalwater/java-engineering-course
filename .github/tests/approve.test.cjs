@@ -15,7 +15,7 @@ function scenario() {
   const run = {id: 99, head_sha: 'head', event: 'pull_request', pull_requests: [{number: 7}],
     status: 'completed', conclusion: 'success'};
   const pushRun = {...run, id: 100, event: 'push', head_branch: pull.head.ref, pull_requests: []};
-  const jobs = ['projects', 'exercises', 'sprint03', 'sprint04', 'infrastructure', 'sprint05', 'sprint06', 'sprint07', 'sprint08', 'observability-exercises', 'kafka-exercises', 'sprint09', 'sprint10', 'sprint11', 'sprint11-jenkins'].map((name, index) => ({
+  const jobs = ['projects', 'exercises', 'sprint03', 'sprint04', 'infrastructure', 'sprint05', 'sprint06', 'sprint07', 'sprint08', 'observability-exercises', 'kafka-exercises', 'sprint09', 'sprint10', 'sprint11', 'sprint11-jenkins', 'sprint11-macos', 'sprint11-windows'].map((name, index) => ({
     name, status: 'completed', conclusion: 'success', check_run_url: 'https://api.github.com/check-runs/' + index,
   }));
   const checks = jobs.map(job => ({...job, app: {id: 15368}}));
@@ -97,6 +97,8 @@ test('approval accepts only a verified head and preserves merge history', async 
     ['missing bank job', fixture => {fixture.jobs.splice(11, 1);}, /Required check sprint09/],
     ['missing Kafka bank job', fixture => {fixture.jobs.splice(12, 1);}, /Required check sprint10/],
     ['missing observability bank job', fixture => {fixture.jobs.splice(13, 1);}, /Required check sprint11/],
+    ['missing native macOS job', fixture => {fixture.jobs.splice(15, 1);}, /Required check sprint11-macos/],
+    ['failed native Windows job', fixture => {fixture.jobs[16].conclusion = 'failure';}, /Required check sprint11-windows/],
     ['missing dedicated Jenkins job', fixture => {fixture.jobs.splice(14, 1);}, /Required check sprint11-jenkins/],
     ['failed dedicated Jenkins job', fixture => {fixture.jobs[14].conclusion = 'failure';}, /Required check sprint11-jenkins/],
     ['failed job', fixture => {fixture.jobs[1].conclusion = 'failure';}, /Required check/],
@@ -153,7 +155,7 @@ test('approval accepts only a verified head and preserves merge history', async 
   });
   // Both native and Jenkins execution must pass once Sprint 11 exists; infrastructure-only pull requests skip both.
   await t.test('the Sprint 11 jobs may be skipped only while their project is absent', async () => {
-    for (const name of ['sprint11', 'sprint11-jenkins']) {
+    for (const name of ['sprint11', 'sprint11-jenkins', 'sprint11-macos', 'sprint11-windows']) {
       const present = scenario();
       present.jobs.find(job => job.name === name).conclusion = 'skipped';
       present.checks.find(check => check.name === name).conclusion = 'skipped';
@@ -163,7 +165,7 @@ test('approval accepts only a verified head and preserves merge history', async 
     const absent = scenario();
     absent.state.absentMarkers = new Set(['projects/sprint11-observability/build.gradle']);
     for (const collection of [absent.jobs, absent.checks]) {
-      for (const job of collection.filter(candidate => ['sprint11', 'sprint11-jenkins'].includes(candidate.name))) {
+      for (const job of collection.filter(candidate => ['sprint11', 'sprint11-jenkins', 'sprint11-macos', 'sprint11-windows'].includes(candidate.name))) {
         job.conclusion = 'skipped';
       }
     }

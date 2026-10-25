@@ -1,0 +1,3 @@
+# После recreate сохраняем ограниченное окно устаревшего адреса Docker DNS.
+networkaddress.cache.ttl=5
+networkaddress.cache.negative.ttl=1

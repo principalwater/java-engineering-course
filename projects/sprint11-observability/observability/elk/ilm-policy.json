@@ -1,0 +1,8 @@
+{
+  "policy": {
+    "phases": {
+      "hot": {"actions": {}},
+      "delete": {"min_age": "@@RETENTION@@", "actions": {"delete": {}}}
+    }
+  }
+}

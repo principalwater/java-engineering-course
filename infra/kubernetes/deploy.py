@@ -87,6 +87,18 @@ def run(arguments: list[str], *, environment: dict, values: list[bytes], log: Pa
     log.write_bytes(redact(result.stdout, values))
     log.chmod(0o600)
     if result.returncode not in accepted:
+        # Classify this command's output, never an older phase log or its untrusted contents.
+        phase = next((value for value in arguments[1:3] if value in {"init", "plan", "show", "apply"}), "other")
+        output = result.stdout.decode("utf-8", "replace")
+        categories = [name for name, pattern in (
+            ("deadline", r"context deadline exceeded|timed out waiting"),
+            ("connection", r"connection refused"), ("disk", r"no space left on device"),
+            ("tls", r"x509:|TLS handshake"), ("operation-in-progress", r"another operation.*in progress"),
+            ("job-failed", r"BackoffLimitExceeded|\bjob \S+ failed\b"),
+            ("chart-fetch", r"failed to (?:download|fetch|pull)|could not download|error pulling"),
+        ) if re.search(pattern, output, re.IGNORECASE)]
+        for category in categories or ["other"]:
+            print(f"BANK_CI_TOFU {category} {phase}")
         raise RuntimeError(f"{arguments[0]} phase failed (exit {result.returncode}); inspect the redacted private log")
     require_no_secrets(result.stdout, values, log.name)
     return result.stdout

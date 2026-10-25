@@ -1,0 +1,4 @@
+workflow-aggregator:608.v67378e9d3db_1
+plain-credentials:199.v9f8e1f741799
+git:5.11.0
+junit:1442.vb_b_a_467df2767

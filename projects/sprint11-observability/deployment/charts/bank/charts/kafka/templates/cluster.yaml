@@ -1,0 +1,146 @@
+{{- if not (has .Values.profile (list "single" "ha")) }}
+{{- fail "kafka.profile must be single or ha" }}
+{{- end }}
+{{- $ha := eq .Values.profile "ha" }}
+{{- $pools := list (dict "name" "combined" "roles" (list "controller" "broker") "replicas" 1 "memory" "768Mi" "heap" "256m") }}
+{{- if $ha }}
+{{- $pools = list (dict "name" "controllers" "roles" (list "controller") "replicas" 3 "memory" "384Mi" "heap" "128m") (dict "name" "brokers" "roles" (list "broker") "replicas" 3 "memory" "768Mi" "heap" "256m") }}
+{{- end }}
+{{- range $pool := $pools }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: {{ $pool.name }}
+  labels:
+    strimzi.io/cluster: {{ $.Values.global.kafkaCluster }}
+    app.kubernetes.io/part-of: bank11
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  replicas: {{ $pool.replicas }}
+  roles:
+    {{- toYaml $pool.roles | nindent 4 }}
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: {{ $.Values.storage }}
+        class: {{ $.Values.global.storageClass }}
+        deleteClaim: false
+        kraftMetadata: shared
+  resources:
+    requests: {cpu: 100m, memory: {{ $pool.memory }}}
+    limits: {cpu: "1", memory: {{ $pool.memory }}}
+  jvmOptions:
+    -Xms: {{ $pool.heap }}
+    -Xmx: {{ $pool.heap }}
+  template:
+    pod:
+      metadata:
+        labels: {bank11.io/role: kafka}
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 0
+        seccompProfile: {type: RuntimeDefault}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - {key: bank11.io/worker, operator: In, values: ["true"]}
+        {{- if $ha }}
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  strimzi.io/cluster: {{ $.Values.global.kafkaCluster }}
+                  strimzi.io/pool-name: {{ $pool.name }}
+              topologyKey: kubernetes.io/hostname
+        {{- end }}
+{{- end }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: {{ .Values.global.kafkaCluster }}
+  labels: {app.kubernetes.io/part-of: bank11}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  kafka:
+    version: 4.2.2
+    metadataVersion: 4.2-IV1
+    image: {{ .Values.image | quote }}
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef: {name: bank11-prometheus, key: kafka-jmx-exporter.yml}
+    listeners:
+      - name: tls
+        port: 9093
+        type: internal
+        tls: true
+        authentication: {type: scram-sha-512}
+    template:
+      bootstrapService:
+        ipFamilyPolicy: RequireDualStack
+        ipFamilies: [IPv4, IPv6]
+      brokersService:
+        ipFamilyPolicy: RequireDualStack
+        ipFamilies: [IPv4, IPv6]
+    authorization:
+      type: simple
+    config:
+      auto.create.topics.enable: false
+      default.replication.factor: {{ ternary 3 1 $ha }}
+      min.insync.replicas: {{ ternary 2 1 $ha }}
+      offsets.topic.replication.factor: {{ ternary 3 1 $ha }}
+      transaction.state.log.replication.factor: {{ ternary 3 1 $ha }}
+      transaction.state.log.min.isr: {{ ternary 2 1 $ha }}
+      log.retention.hours: 168
+      # Офсеты переживают семидневные события: мониторинг видит утрату непрочитанного диапазона.
+      offsets.retention.minutes: 43200
+      log.segment.bytes: 16777216
+      num.partitions: 6
+  entityOperator:
+    template:
+      pod:
+        metadata:
+          labels: {bank11.io/role: kafka-operator}
+        securityContext:
+          runAsNonRoot: true
+          seccompProfile: {type: RuntimeDefault}
+    topicOperator:
+      image: {{ .Values.operatorImage | quote }}
+      resources:
+        requests: {cpu: 50m, memory: 128Mi}
+        limits: {cpu: 500m, memory: 256Mi}
+      jvmOptions: {-Xms: 64m, -Xmx: 128m}
+    userOperator:
+      image: {{ .Values.operatorImage | quote }}
+      resources:
+        requests: {cpu: 50m, memory: 128Mi}
+        limits: {cpu: 500m, memory: 256Mi}
+      jvmOptions: {-Xms: 64m, -Xmx: 128m}
+
+  kafkaExporter:
+    topicRegex: "bank\\..*"
+    groupRegex: "bank\\..*"
+    resources:
+      requests: {cpu: 20m, memory: 64Mi}
+      limits: {cpu: 200m, memory: 128Mi}
+    template:
+      pod:
+        metadata:
+          labels: {bank11.io/role: kafka}
+        securityContext:
+          runAsNonRoot: true
+          seccompProfile: {type: RuntimeDefault}
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - {key: bank11.io/worker, operator: In, values: ["true"]}

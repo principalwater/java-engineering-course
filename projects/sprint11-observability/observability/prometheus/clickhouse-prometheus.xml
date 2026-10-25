@@ -1,0 +1,20 @@
+<clickhouse>
+    <!--
+        Native Prometheus endpoint (no exporter sidecar). Mounted into config.d of the ClickHouse container;
+        reachable only inside the namespace through the clickhouse-metrics Service on port 9363.
+        Histograms, dimensional metrics and the info series are switched off: nothing in the dashboards or alert
+        rules uses them and they multiply the series count. Prometheus additionally keeps only an allowlist
+        (metric_relabel_configs of the clickhouse job).
+    -->
+    <prometheus>
+        <endpoint>/metrics</endpoint>
+        <port>9363</port>
+        <metrics>true</metrics>
+        <events>true</events>
+        <asynchronous_metrics>true</asynchronous_metrics>
+        <errors>true</errors>
+        <histograms>false</histograms>
+        <dimensional_metrics>false</dimensional_metrics>
+        <info>false</info>
+    </prometheus>
+</clickhouse>

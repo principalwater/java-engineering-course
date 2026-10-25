@@ -12,7 +12,7 @@ resource "helm_release" "openbao" {
   wait            = false
   atomic          = false
   cleanup_on_fail = false
-  values          = var.stack_prefix == "bank11" ? [file("${var.project_dir}/openbao/values.yaml")] : []
+  values          = var.stack_prefix == "bank11" ? [file("${var.project_dir}/deployment/openbao/values.yaml")] : []
   depends_on      = [helm_release.strimzi]
 
   lifecycle {

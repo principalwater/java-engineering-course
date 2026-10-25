@@ -1,0 +1,113 @@
+groups:
+  - name: bank-observability-platform
+    interval: 30s
+    rules:
+      - alert: ObservabilityComponentDown
+        expr: up{job=~"prometheus|alertmanager|grafana|zipkin|logstash"} == 0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} is down"
+          description: "Prometheus has failed to scrape {{ $labels.job }} for 3 minutes."
+          action: "Check the {{ $labels.job }} pod and its logs; the observability stack deliberately has no HA, a restart restores it."
+      - alert: PrometheusConfigReloadFailed
+        expr: prometheus_config_last_reload_successful == 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus rejected its configuration"
+          description: "The last configuration reload failed; Prometheus keeps running the previous configuration."
+          action: "Read the Prometheus log for the failing rule or scrape section and fix the ConfigMap source."
+      - alert: PrometheusRuleEvaluationFailing
+        expr: increase(prometheus_rule_evaluation_failures_total[10m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus rule group {{ $labels.rule_group }} fails to evaluate"
+          description: "Alert rules that fail to evaluate cannot fire; the affected alerts are blind."
+          action: "Open Status > Rule health in Prometheus; usually duplicate series on a binary operator or an expensive query."
+      - alert: PrometheusNotificationsFailing
+        expr: increase(prometheus_notifications_errors_total[10m]) > 0 or increase(prometheus_notifications_dropped_total[10m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus cannot deliver alerts to Alertmanager"
+          description: "Notifications to {{ $labels.alertmanager }} are failing or being dropped; alerts fire silently."
+          action: "Check that the alertmanager Service has endpoints and read the Prometheus log for the delivery error."
+      - alert: PrometheusScrapeSampleLimitHit
+        expr: increase(prometheus_target_scrapes_exceeded_sample_limit_total[10m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "A scrape target exceeded its sample limit"
+          description: "A target produced more series than its sample_limit and was dropped for that scrape: a label with unbounded values is growing."
+          action: "Find the target with scrape_samples_scraped near the limit and the metric with the fastest growing label set (login, uri) on the Prometheus dashboard."
+      - alert: PrometheusHeadSeriesHigh
+        expr: prometheus_tsdb_head_series > 100000
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus tracks {{ $value }} active series"
+          description: "The 384Mi memory limit is sized for far fewer series; growth this large ends in an OOM kill."
+          action: "Use topk(10, count by (__name__) ({__name__=~\".+\"})) in Prometheus to find the metric that explodes."
+      - alert: PrometheusTsdbCompactionsFailing
+        expr: increase(prometheus_tsdb_compactions_failed_total[1h]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus TSDB compactions fail"
+          description: "Head compaction is failing; the WAL grows until the volume fills."
+          action: "Check free space on the prometheus-data PVC and the Prometheus log."
+      - alert: AlertmanagerNotificationsFailing
+        expr: increase(alertmanager_notifications_failed_total[10m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Alertmanager cannot deliver {{ $labels.integration }} notifications"
+          description: "Delivery to Telegram is failing: operators are not being told about firing alerts."
+          action: "Read the Alertmanager log; verify the telegram_bot_token and telegram_chat_id Secret files and egress to the Telegram API (or the configured local receiver)."
+      - alert: GrafanaServerErrors
+        expr: sum(increase(grafana_api_response_status_total{code="5xx"}[10m])) > 5
+        labels:
+          severity: warning
+        annotations:
+          summary: "Grafana answers API requests with 5xx"
+          description: "{{ $value | printf \"%.0f\" }} Grafana API responses were 5xx in 10 minutes."
+          action: "Read the Grafana log; datasource timeouts to Prometheus, Zipkin or Elasticsearch are the usual cause."
+      - alert: ZipkinSpansDropped
+        expr: sum(increase(zipkin_collector_spans_dropped_total[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Zipkin dropped spans"
+          description: "{{ $value | printf \"%.0f\" }} spans were rejected by the collector in 10 minutes; traces will have gaps."
+          action: "Check the Zipkin log for the rejection reason (malformed JSON, oversized message) and the reporter version in the calling service."
+      - alert: LogstashDeadLetterQueueGrowing
+        # Gauge сравнивается без экстраполяции delta: байт версии нового head-сегмента не документ.
+        expr: max(last_over_time(logstash_stats_pipeline_dead_letter_queue_size_in_bytes{pipeline="main"}[10m]) - first_over_time(logstash_stats_pipeline_dead_letter_queue_size_in_bytes{pipeline="main"}[10m])) > 1
+        labels:
+          severity: warning
+        annotations:
+          summary: "Logstash dead letter queue is growing"
+          description: "Log documents entered the dead letter queue during the last 10 minutes and require investigation."
+          action: "Inspect the protected dead letter queue on the logstash-data PVC and compare rejected fields with the strict index mapping; duplicate create conflicts (409) do not grow this queue."
+      - alert: LogstashQueueBacklog
+        expr: max(logstash_stats_pipeline_queue_events_count{pipeline="main"}) > 5000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Logstash has {{ $value }} events waiting in its persisted queue"
+          description: "Events accumulate faster than Elasticsearch accepts them; the queue is capped at 512 MiB and applies backpressure to the services' log connections when full."
+          action: "Check Elasticsearch health (disk watermarks, red indices) and the bulk response codes on the pipeline dashboard."
+      - alert: LogstashHeapHigh
+        expr: max(logstash_stats_jvm_mem_heap_used_percent) > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Logstash heap is above 90%"
+          description: "The 256m heap is nearly exhausted; garbage collection will stall the pipeline."
+          action: "Check the filter workload and event sizes; raise the heap together with the container memory limit if the load is legitimate."

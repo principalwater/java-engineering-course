@@ -1,0 +1,48 @@
+rule_files:
+  - ../clickhouse.rules.yml
+evaluation_interval: 30s
+tests:
+  - name: disk alert compares available with total capacity per disk
+    interval: 1m
+    input_series:
+      - series: 'ClickHouseAsyncMetrics_DiskAvailable{disk="default"}'
+        values: '5000000000x30'
+      - series: 'ClickHouseAsyncMetrics_DiskTotal{disk="default"}'
+        values: '100000000000x30'
+      - series: 'ClickHouseAsyncMetrics_DiskAvailable{disk="cold"}'
+        values: '50000000000x30'
+      - series: 'ClickHouseAsyncMetrics_DiskTotal{disk="cold"}'
+        values: '100000000000x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ClickHouseDiskSpaceLow
+        exp_alerts:
+          - exp_labels: {severity: warning, disk: default}
+            exp_annotations:
+              summary: "ClickHouse disk default has less than 10% free space"
+              description: "Disk default has 5% of its capacity available."
+              action: "Check table sizes (system.parts) and the tiered-storage move policy; the cold volume is the PVC analytics-cold."
+  - name: failed queries are a rate over the cumulative profile event
+    interval: 1m
+    input_series:
+      - series: 'ClickHouseProfileEvents_FailedQuery{job="clickhouse", instance="clickhouse-metrics:9363"}'
+        values: '0+12x30'
+      - series: 'up{job="clickhouse", instance="clickhouse-metrics:9363"}'
+        values: '1x4 0x26'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ClickHouseQueriesFailing
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "ClickHouse queries are failing"
+              description: "0.20 queries per second have failed for 10 minutes."
+              action: "Query system.query_log for exception_code != 0, or read the server log; the analytics service logs the same failures with a traceId."
+      - eval_time: 10m
+        alertname: ClickHouseDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: clickhouse, instance: "clickhouse-metrics:9363"}
+            exp_annotations:
+              summary: "ClickHouse cannot be scraped"
+              description: "The native Prometheus endpoint (port 9363) of ClickHouse has been unreachable for 2 minutes."
+              action: "Check the clickhouse pod status and its logs; the analytics service cannot write or read marts while it is down."

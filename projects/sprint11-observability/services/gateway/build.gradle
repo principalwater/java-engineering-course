@@ -1,0 +1,14 @@
+plugins { id 'org.springframework.boot' }
+dependencies {
+    implementation project(':bank-secrets')
+    implementation project(':bank-contracts')
+    implementation project(':bank-observability')
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.cloud:spring-cloud-starter-gateway-server-webflux'
+    implementation 'org.springframework.cloud:spring-cloud-starter-loadbalancer'
+    implementation 'org.springframework.cloud:spring-cloud-starter-zookeeper-discovery'
+    implementation 'org.springframework.cloud:spring-cloud-starter-zookeeper-config'
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    testImplementation project(':bank-test-support')
+    testImplementation 'io.projectreactor:reactor-test'
+}

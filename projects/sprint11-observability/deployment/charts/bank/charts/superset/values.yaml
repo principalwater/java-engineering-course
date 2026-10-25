@@ -1,0 +1,11 @@
+enabled: false
+image: bank11-superset:local
+provisionerImage: bank11-bank-bi:local
+existingSecret: bank11-superset
+port: 8088
+resources:
+  requests: {cpu: 100m, memory: 384Mi}
+  limits: {cpu: "1", memory: 768Mi}
+global:
+  analyticsEnabled: false
+  externalPort: 8460

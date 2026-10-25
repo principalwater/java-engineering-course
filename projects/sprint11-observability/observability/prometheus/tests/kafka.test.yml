@@ -1,0 +1,146 @@
+rule_files:
+  - ../kafka.rules.yml
+evaluation_interval: 30s
+tests:
+  - name: dead-letter growth alerts only for DLT topics and only while messages arrive
+    interval: 1m
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{topic="bank.notifications.receipts.v1.DLT", partition="0"}'
+        values: '5 5 5 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6 6'
+      - series: 'kafka_topic_partition_current_offset{topic="bank.accounts.notifications.v1", partition="0"}'
+        values: '0+10x30'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: KafkaDeadLetterTopicReceivedMessages
+        exp_alerts:
+          - exp_labels: {severity: warning, topic: "bank.notifications.receipts.v1.DLT"}
+            exp_annotations:
+              summary: "Messages were dead-lettered to bank.notifications.receipts.v1.DLT"
+              description: "1 messages reached bank.notifications.receipts.v1.DLT in the last 15 minutes: a consumer gave up on them after its retries."
+              action: "DLT headers retain the original topic, partition and offset; exception headers are intentionally omitted. Correlate the confirmed quarantine ERROR in Kibana, inspect the protected record and replay or discard deliberately."
+      # Offset DLT изменился один раз 20 минут назад: в последнем 15-минутном окне изменений уже нет.
+      - eval_time: 29m
+        alertname: KafkaDeadLetterTopicReceivedMessages
+        exp_alerts: []
+  - name: consumer lag groups by group and topic and unknown offsets cannot mask high lag
+    interval: 1m
+    input_series:
+      - series: 'kafka_consumergroup_lag{consumergroup="bank.notifications.v1", topic="bank.cash.notifications.v1", partition="0"}'
+        values: '60x30'
+      - series: 'kafka_consumergroup_lag{consumergroup="bank.notifications.v1", topic="bank.cash.notifications.v1", partition="1"}'
+        values: '60x30'
+      - series: 'kafka_consumergroup_lag{consumergroup="bank.analytics.v1", topic="bank.analytics.v1", partition="0"}'
+        values: '5x30'
+      - series: 'kafka_consumergroup_lag{consumergroup="bank.accounts.notifications.v1", topic="bank.accounts.notifications.v1", partition="0"}'
+        values: '101x30'
+      # -1 означает отсутствие committed offset: две неизвестные партиции не должны скрывать лаг 101.
+      - series: 'kafka_consumergroup_lag{consumergroup="bank.accounts.notifications.v1", topic="bank.accounts.notifications.v1", partition="1"}'
+        values: '-1x30'
+      - series: 'kafka_consumergroup_lag{consumergroup="bank.accounts.notifications.v1", topic="bank.accounts.notifications.v1", partition="2"}'
+        values: '-1x30'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: KafkaConsumerGroupLagHigh
+        exp_alerts:
+          - exp_labels: {severity: warning, consumergroup: "bank.notifications.v1", topic: "bank.cash.notifications.v1"}
+            exp_annotations:
+              summary: "Consumer group bank.notifications.v1 lags 120 messages on bank.cash.notifications.v1"
+              description: "The group has been more than 100 messages behind for 10 minutes: the consumer is slow, stuck, or gone."
+              action: "Check the consuming service (accounts, notifications or analytics) for errors and rebalances; see the lag panels on the Kafka topics dashboard."
+          - exp_labels: {severity: warning, consumergroup: "bank.accounts.notifications.v1", topic: "bank.accounts.notifications.v1"}
+            exp_annotations:
+              summary: "Consumer group bank.accounts.notifications.v1 lags 101 messages on bank.accounts.notifications.v1"
+              description: "The group has been more than 100 messages behind for 10 minutes: the consumer is slow, stuck, or gone."
+              action: "Check the consuming service (accounts, notifications or analytics) for errors and rebalances; see the lag panels on the Kafka topics dashboard."
+  - name: a crashed broker has no up series, so absence of a healthy target is the signal
+    interval: 1m
+    input_series:
+      - series: 'up{job="kafka-jmx", instance="10.244.1.7:9404"}'
+        values: '1 1 1 0 0 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: KafkaMetricsMissing
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: KafkaMetricsMissing
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "No Kafka broker is being scraped"
+              description: "Not a single Kafka JMX exporter target has been up for 3 minutes."
+              action: "Run kubectl get kafka,pods -l strimzi.io/cluster=bank-kafka; check the broker pod events and that the kafka-jmx-metrics Service has endpoints."
+  - name: offline partitions and a missing controller are critical
+    interval: 1m
+    input_series:
+      - series: 'kafka_controller_kafkacontroller_offlinepartitionscount{instance="10.244.1.7:9404"}'
+        values: '0 0 2 2 2 2 2 2'
+      - series: 'kafka_controller_kafkacontroller_activecontrollercount{instance="10.244.1.7:9404"}'
+        values: '1 1 1 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: KafkaOfflinePartitions
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "2 Kafka partitions are offline"
+              description: "Partitions without an available leader cannot be produced to or consumed from."
+              action: "Find the topics on the Kafka health dashboard; restore the broker that holds their leader replicas."
+      - eval_time: 7m
+        alertname: KafkaNoActiveController
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "Kafka has 0 active controllers instead of exactly one"
+              description: "The KRaft quorum reports 0 active controllers for 2 minutes."
+              action: "Check the controller pod logs for quorum loss; in the ha profile verify that at least two of the three controllers are running."
+  - name: stalled low-traffic consumer alerts before retention and resolves on progress
+    interval: 1m
+    input_series:
+    - series: kafka_consumergroup_lag{consumergroup="bank.notifications.v1",topic="bank.cash.notifications.v1",partition="0"}
+      values: 1x75
+    - series: kafka_consumergroup_current_offset{consumergroup="bank.notifications.v1",topic="bank.cash.notifications.v1",partition="0"}
+      values: 2x60 3+1x15
+    alert_rule_test:
+    - eval_time: 31m
+      alertname: KafkaConsumerGroupStalled
+      exp_alerts:
+      - exp_labels:
+          consumergroup: bank.notifications.v1
+          topic: bank.cash.notifications.v1
+          partition: '0'
+          severity: warning
+        exp_annotations:
+          summary: Consumer group bank.notifications.v1 is stalled on bank.cash.notifications.v1
+          description: Outstanding records have not advanced for 30 minutes, even at low traffic.
+          action: Restore the consumer before topic retention expires; inspect retry failures and the oldest retained offset.
+            After a long outage, follow the PostgreSQL outbox replay runbook.
+    - eval_time: 63m
+      alertname: KafkaConsumerGroupStalled
+      exp_alerts: []
+  - name: deleted unread offsets alert while unknown offsets do not, reset is not recovery
+    interval: 1m
+    input_series:
+    - series: kafka_consumergroup_current_offset{consumergroup="bank.notifications.v1",topic="bank.cash.notifications.v1",partition="0"}
+      values: 3x5 6x5
+    - series: kafka_consumergroup_current_offset{consumergroup="unknown",topic="bank.cash.notifications.v1",partition="0"}
+      values: -1x10
+    - series: kafka_topic_partition_oldest_offset{topic="bank.cash.notifications.v1",partition="0"}
+      values: 5x10
+    alert_rule_test:
+    - eval_time: 2m
+      alertname: KafkaRecordsDeletedBeforeConsumption
+      exp_alerts:
+      - exp_labels:
+          consumergroup: bank.notifications.v1
+          topic: bank.cash.notifications.v1
+          partition: '0'
+          severity: critical
+        exp_annotations:
+          summary: Unread Kafka records were deleted on bank.cash.notifications.v1
+          description: The committed offset is behind the oldest retained record. earliest cannot recover the deleted range.
+          action: 'Replay source outboxes from PostgreSQL: notifications group -> accounts/cash/transfer; Accounts receipt group
+            -> notifications; analytics ingress -> accounts; analytics failures -> accounts/notifications. A resolved alert
+            after offset reset does not prove recovery; verify destination records.'
+    - eval_time: 7m
+      alertname: KafkaRecordsDeletedBeforeConsumption
+      exp_alerts: []

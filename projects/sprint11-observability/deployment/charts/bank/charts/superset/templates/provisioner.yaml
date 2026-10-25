@@ -1,0 +1,75 @@
+{{- /* Pod template Job неизменяем: оба образа и новая версия чарта требуют отдельного идемпотентного запуска. */ -}}
+{{- $revision := dict "provisioner" .Values.provisionerImage "readiness" .Values.image "chart" .Values.global.chartRevision | toJson | sha256sum | trunc 10 -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bank-bi-{{ $revision }}
+  labels: {app.kubernetes.io/part-of: bank11}
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels: {app: bank-bi, bank11.io/instance: {{ .Release.Name }}, bank11.io/role: initializer}
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      initContainers:
+        - name: superset-ready
+          image: {{ .Values.image | quote }}
+          command:
+            - /app/.venv/bin/python
+            - -c
+            - |
+              import ssl, time, urllib.request
+              context = ssl.create_default_context(cafile='/run/secrets/tls_ca.pem')
+              deadline = time.monotonic() + 480
+              while time.monotonic() < deadline:
+                  try:
+                      with urllib.request.urlopen('https://superset:8088/health', context=context, timeout=3) as response:
+                          if response.status == 200:
+                              break
+                  except OSError:
+                      pass
+                  time.sleep(2)
+              else:
+                  raise SystemExit('Superset HTTPS readiness timed out')
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+          volumeMounts: [{name: authority, mountPath: /run/secrets, readOnly: true}]
+      containers:
+        - name: bank-bi
+          image: {{ .Values.provisionerImage | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: BANK_BI_URL, value: "https://superset:8088"}
+            - {name: BANK_BI_CLICKHOUSE_HOST, value: clickhouse}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 384Mi}
+          volumeMounts:
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: secrets, secret: {secretName: bank11-bank-bi, defaultMode: 0440}}
+        - name: authority
+          secret:
+            secretName: bank11-bank-bi
+            defaultMode: 0444
+            items: [{key: tls_ca.pem, path: tls_ca.pem}]
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 32Mi}}

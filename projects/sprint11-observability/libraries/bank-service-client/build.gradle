@@ -1,0 +1,6 @@
+dependencies {
+    api project(':bank-runtime')
+    api 'org.springframework.boot:spring-boot-starter-oauth2-client'
+    api 'org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j'
+    testImplementation project(':bank-test-support')
+}

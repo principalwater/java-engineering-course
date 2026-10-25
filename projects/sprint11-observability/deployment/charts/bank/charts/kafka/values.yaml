@@ -1,0 +1,35 @@
+profile: single
+analyticsEnabled: false
+image: quay.io/strimzi/kafka:1.3.0-kafka-4.2.2@sha256:b9b9e37491ce17c1b2722b3668661de91430d9437acf18c5f5bafaef38138652
+operatorImage: quay.io/strimzi/operator:1.3.0@sha256:4deb564fa329afa4046c550a6f8f1a6d00be3b9297e556969acabe6647b6676f
+storage: 2Gi
+global:
+  kafkaCluster: bank-kafka
+  storageClass: standard
+  nodeSelector: {bank11.io/worker: "true"}
+topics:
+  bank.accounts.notifications.v1: {}
+  bank.cash.notifications.v1: {}
+  bank.transfer.notifications.v1: {}
+  bank.notifications.receipts.v1: {}
+  bank.accounts.analytics.v1: {deadLetter: false}
+  bank.analytics.v1: {optional: true, deadLetter: false}
+  bank.business.failures.v1: {optional: true, deadLetter: false}
+users:
+  accounts:
+    writes: [bank.business.failures.v1, bank.accounts.notifications.v1, bank.accounts.analytics.v1, bank.notifications.receipts.v1.DLT]
+    reads: [bank.notifications.receipts.v1]
+    groups: [bank.accounts.notifications.v1]
+  cash:
+    writes: [bank.cash.notifications.v1]
+  transfer:
+    writes: [bank.transfer.notifications.v1]
+  notifications:
+    reads: [bank.accounts.notifications.v1, bank.cash.notifications.v1, bank.transfer.notifications.v1]
+    writes: [bank.business.failures.v1, bank.notifications.receipts.v1, bank.accounts.notifications.v1.DLT, bank.cash.notifications.v1.DLT, bank.transfer.notifications.v1.DLT]
+    groups: [bank.notifications.v1]
+  analytics:
+    optional: true
+    reads: [bank.accounts.analytics.v1, bank.analytics.v1, bank.business.failures.v1]
+    writes: [bank.analytics.v1]
+    groups: [bank.analytics.accounts.ingress.v1, bank.analytics.personal.v1, bank.analytics.business.v1, bank.analytics.failures.v1]

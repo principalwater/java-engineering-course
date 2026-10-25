@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- transport=tcp: открытый TCP (локальный стенд и сети, где защиту канала обеспечивает
+     инфраструктура). Безопасный JSON-формат задаёт BankLogEncoder. -->
+<included>
+    <appender name="BANK_LOGSTASH" class="net.logstash.logback.appender.LogstashTcpSocketAppender">
+        <destination>${BANK_LOGSTASH_DESTINATION}</destination>
+        <!-- Ограниченная очередь: поток приложения никогда не ждёт Logstash. При переполнении
+             событие отбрасывается (appendTimeout=0), предупреждение пишет сам appender. -->
+        <ringBufferSize>${BANK_LOGSTASH_QUEUE_SIZE}</ringBufferSize>
+        <appendTimeout>0 milliseconds</appendTimeout>
+        <!-- Подключение и запись ограничены, иначе зависший сокет остановил бы отправку навсегда. -->
+        <connectionTimeout>2 seconds</connectionTimeout>
+        <writeTimeout>5 seconds</writeTimeout>
+        <reconnectionDelay>5 seconds</reconnectionDelay>
+        <!-- Остановка контекста ждёт очередь не дольше трёх секунд при окне остановки pod в 30 с. -->
+        <shutdownGracePeriod>3 seconds</shutdownGracePeriod>
+        <daemon>true</daemon>
+        <encoder class="dev.principalwater.bank.observability.logging.BankLogEncoder">
+            <service>${BANK_SERVICE}</service>
+        </encoder>
+    </appender>
+    <root>
+        <appender-ref ref="BANK_LOGSTASH"/>
+    </root>
+</included>

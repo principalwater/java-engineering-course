@@ -1202,6 +1202,8 @@ jobs:
           python3 infra/kubernetes/deploy.py plan --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
           python3 infra/kubernetes/deploy.py apply --project-dir "$BANK_PROJECT" --state-dir "$BANK_STATE" --secrets-dir "$BANK_SECRETS_DIR"
           python3 "$BANK_PROJECT/deployment/kubernetes/runtime.py" --state-dir "$BANK_STATE" ready
+      - name: Run the installed release Helm test hook
+        run: python3 "$BANK_PROJECT/deployment/kubernetes/runtime.py" --state-dir "$BANK_STATE" test
       - name: Verify OpenBao seal recovery
         run: python3 "$BANK_PROJECT/deployment/kubernetes/bao.py" --state-dir "$BANK_STATE" verify --secrets-dir "$BANK_SECRETS_DIR" --exercise-seal
       - name: Verify Kafka TLS ACLs and persistent data across broker restart
@@ -1281,3 +1283,73 @@ jobs:
           if test -n "${BANK_JENKINS_SECRETS_DIR:-}" && test -f "$BANK_JENKINS_SCRIPT"; then
             python3 "$BANK_JENKINS_SCRIPT" stop --force
           fi
+
+  sprint11-native:
+    needs: projects
+    if: needs.projects.outputs.sprint11 == 'true'
+    name: sprint11-${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: macos-15, platform: macos}
+          - {os: windows-2025, platform: windows}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: projects/sprint11-observability/**/*.gradle
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24.4.0'
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v4.3.1
+      - name: Install the chart parser in a job-local environment
+        run: |
+          python -m venv "$env:RUNNER_TEMP/bank-native-python"
+          $python = if ($IsWindows) { "$env:RUNNER_TEMP/bank-native-python/Scripts/python.exe" } else { "$env:RUNNER_TEMP/bank-native-python/bin/python" }
+          & $python -m pip install -r projects/sprint11-observability/deployment/kubernetes/requirements.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "BANK_NATIVE_PYTHON=$python" >> $env:GITHUB_ENV
+      - name: Start the preinstalled disposable PostgreSQL for the Windows regression
+        if: runner.os == 'Windows'
+        run: |
+          Set-Service postgresql-x64-17 -StartupType Manual
+          Start-Service postgresql-x64-17
+          "BANK_TEST_POSTGRES_SERVER=jdbc:postgresql://127.0.0.1:5432/postgres" >> $env:GITHUB_ENV
+          "BANK_TEST_POSTGRES_USER=postgres" >> $env:GITHUB_ENV
+          "BANK_TEST_POSTGRES_PASSWORD=root" >> $env:GITHUB_ENV
+      - name: Compile all modules and tests, package executable services and verify UI
+        working-directory: projects/sprint11-observability
+        run: |
+          $gradle = if ($IsWindows) { './gradlew.bat' } else { './gradlew' }
+          & $gradle --no-daemon --max-workers=2 testClasses contractTestClasses messagingConsumerTestClasses spotlessCheck pmdMain pmdTest :front:checkUi packageDeployment
+          exit $LASTEXITCODE
+      - name: Run all Cash regressions and packaged replay on native Windows
+        if: runner.os == 'Windows'
+        working-directory: projects/sprint11-observability
+        # Full Kafka consumer/producer contract execution stays in the Linux Docker gate.
+        # Only this native regression excludes the producer contract task requiring Kafka.
+        run: |
+          $gradle = if ($IsWindows) { './gradlew.bat' } else { './gradlew' }
+          & $gradle --no-daemon --max-workers=2 :cash:test -x :accounts:contractTest
+          exit $LASTEXITCODE
+      - name: Render Helm contracts with the platform default locale
+        working-directory: projects/sprint11-observability
+        env:
+          PYTHONUTF8: '0'
+        run: |
+          & $env:BANK_NATIVE_PYTHON -m unittest discover -s deployment/kubernetes -p test_charts.py
+          exit $LASTEXITCODE
+      - name: Stop the disposable native Windows database
+        if: always() && runner.os == 'Windows'
+        run: Stop-Service postgresql-x64-17 -ErrorAction SilentlyContinue

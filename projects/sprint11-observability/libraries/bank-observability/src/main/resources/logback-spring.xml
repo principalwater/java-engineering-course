@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Единая конфигурация журнала всех сервисов bank: консольный вывод Boot и, по включению
+    развёртыванием, JSON в Logstash по TCP. Копий в сервисах нет.
+
+    Параметры (Environment: application.properties, переменные окружения, configtree секретов):
+      bank.logging.logstash.transport        none (по умолчанию) | tcp | tls; любое другое значение
+                                             не находит фрагмент и оставляет только консоль
+      bank.logging.logstash.destination      host:port, по умолчанию logstash:5044
+      bank.logging.logstash.queue-size       размер очереди событий, степень двойки, по умолчанию 4096
+      bank.logging.logstash.trust-store      URL хранилища доверенных сертификатов (transport=tls)
+      bank.logging.logstash.trust-store-password  пароль хранилища; берётся из внешнего секрета
+      bank.logging.logstash.trust-store-type PKCS12 (по умолчанию) | JKS
+-->
+<configuration>
+    <!-- Консоль, шаблоны и уровни шумных библиотек остаются штатными для Boot. -->
+    <include resource="org/springframework/boot/logging/logback/base.xml"/>
+
+    <springProperty scope="context" name="BANK_SERVICE" source="spring.application.name" defaultValue="bank"/>
+    <springProperty scope="context" name="BANK_LOGSTASH_TRANSPORT" source="bank.logging.logstash.transport" defaultValue="none"/>
+    <springProperty scope="context" name="BANK_LOGSTASH_DESTINATION" source="bank.logging.logstash.destination" defaultValue="logstash:5044"/>
+    <!-- 4096 событий по ~1 КиБ ограничивают очередь четырьмя МиБ; следующие события отбрасываются. -->
+    <springProperty scope="context" name="BANK_LOGSTASH_QUEUE_SIZE" source="bank.logging.logstash.queue-size" defaultValue="4096"/>
+    <springProperty scope="context" name="BANK_LOGSTASH_TRUST_STORE" source="bank.logging.logstash.trust-store"/>
+    <springProperty scope="context" name="BANK_LOGSTASH_TRUST_STORE_PASSWORD" source="bank.logging.logstash.trust-store-password"/>
+    <springProperty scope="context" name="BANK_LOGSTASH_TRUST_STORE_TYPE" source="bank.logging.logstash.trust-store-type" defaultValue="PKCS12"/>
+
+    <!-- Фрагмент выбирается значением transport: отсутствие файла для none не создаёт appender. -->
+    <include optional="true" resource="bank-logback-logstash-${BANK_LOGSTASH_TRANSPORT}.xml"/>
+</configuration>

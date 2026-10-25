@@ -227,6 +227,10 @@ class BankChartTest(unittest.TestCase):
             self.assertIn("/actuator/health/readiness", script)
             self.assertIn("kafka-get-offsets.sh", script)
             self.assertIn("--topic bank.cash.notifications.v1", script)
+            # AdminClient отклоняет общий таймаут меньше таймаута одного запроса.
+            request_timeout = int(re.search(r"request\.timeout\.ms=(\d+)", script)[1])
+            api_timeout = int(re.search(r"default\.api\.timeout\.ms=(\d+)", script)[1])
+            self.assertGreaterEqual(api_timeout, request_timeout)
             self.assertNotIn("--create", script)
             self.assertTrue(container["securityContext"]["readOnlyRootFilesystem"])
 

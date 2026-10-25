@@ -2,6 +2,8 @@
 
 import argparse
 import base64
+from contextlib import redirect_stderr
+import io
 import json
 import os
 from pathlib import Path
@@ -28,6 +30,19 @@ class ClusterCreationTest(unittest.TestCase):
         owned.assert_called_once_with(Path("/private/state"))
         command.assert_called_once_with(["helm", "--kubeconfig", identity["kubeconfig"], "--kube-context", identity["context"],
                                          "--namespace", identity["namespace"], "test", "bank", "--timeout", "180s"], timeout=210)
+
+    def test_failed_helm_hook_reports_only_safe_phase_markers(self):
+        identity = {"kubeconfig": "/private/kubeconfig", "context": "kind-bank11-test-single", "namespace": "bank11-test"}
+        output = "BANK_HELM_TEST readiness accounts\nBANK_HELM_TEST failed readiness accounts exit=28\npassword=private\nBANK_HELM_TEST kafka private\n"
+        diagnostics = io.StringIO()
+        with patch("sys.argv", ["runtime.py", "--state-dir", "/private/state", "test"]), \
+                patch.object(runtime, "owned_identity", return_value=identity), \
+                patch.object(runtime, "command", side_effect=RuntimeError("Command failed")), \
+                patch.object(runtime, "kubectl", return_value=output), redirect_stderr(diagnostics):
+            with self.assertRaisesRegex(RuntimeError, "Command failed"):
+                runtime.main()
+        self.assertEqual(diagnostics.getvalue(),
+                         "BANK_HELM_TEST readiness accounts\nBANK_HELM_TEST failed readiness accounts exit=28\n")
 
     def test_image_operations_refuse_low_host_space_before_each_build_and_import(self):
         floor = 5 * 1024 ** 3

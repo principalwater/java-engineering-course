@@ -473,8 +473,19 @@ def main() -> None:
         ready(args)
     elif args.operation == "test":
         identity = owned_identity(args.state_dir)
-        print(command(["helm", "--kubeconfig", identity["kubeconfig"], "--kube-context", identity["context"],
-                       "--namespace", identity["namespace"], "test", "bank", "--timeout", "180s"], timeout=210))
+        try:
+            print(command(["helm", "--kubeconfig", identity["kubeconfig"], "--kube-context", identity["context"],
+                           "--namespace", identity["namespace"], "test", "bank", "--timeout", "180s"], timeout=210))
+        except (RuntimeError, subprocess.SubprocessError):
+            # Полный Kafka-лог может содержать JAAS; наружу выходят только маркеры этапов.
+            try:
+                output = kubectl(identity, "logs", "job/bank11-release-test", "--tail=30", timeout=15)
+                for line in output.splitlines():
+                    if re.fullmatch(r"BANK_HELM_TEST (?:failed )?(?:readiness (?:accounts|cash|transfer|front|gateway|analytics)|kafka|offsets)(?: exit=\d{1,3})?", line):
+                        print(line, file=sys.stderr)
+            except (RuntimeError, subprocess.SubprocessError):
+                print("Helm test phase diagnostics are unavailable", file=sys.stderr)
+            raise
     else:
         lifecycle(args, stop=args.operation == "stop")
 

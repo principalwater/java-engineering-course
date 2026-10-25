@@ -31,7 +31,8 @@ spec:
               set -euo pipefail
               umask 077
               for service in accounts cash transfer front gateway{{ if .Values.global.analyticsEnabled }} analytics{{ end }}; do
-                curl --fail --silent --show-error --max-time 10 "http://${service}:8080/actuator/health/readiness" > /dev/null
+                echo "BANK_HELM_TEST readiness ${service}"
+                curl --fail --silent --max-time 10 "http://${service}:8080/actuator/health/readiness" > /dev/null || { echo "BANK_HELM_TEST failed readiness ${service} exit=$?"; exit 1; }
               done
               password="$(cat /run/client/password)"
               password="${password//\\/\\\\}"
@@ -39,11 +40,12 @@ spec:
               {
                 printf '%s\n' 'security.protocol=SASL_SSL' 'sasl.mechanism=SCRAM-SHA-512'
                 printf 'sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="notifications-service" password="%s";\n' "$password"
-                printf '%s\n' 'ssl.truststore.type=PEM' 'ssl.truststore.location=/run/ca/ca.crt' 'ssl.endpoint.identification.algorithm=https' 'default.api.timeout.ms=15000'
+                printf '%s\n' 'ssl.truststore.type=PEM' 'ssl.truststore.location=/run/ca/ca.crt' 'ssl.endpoint.identification.algorithm=https' 'request.timeout.ms=5000' 'default.api.timeout.ms=15000'
               } > /tmp/client.properties
               unset password
-              /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server {{ .Values.global.kafkaCluster }}-kafka-bootstrap:9093 --command-config /tmp/client.properties --topic bank.cash.notifications.v1 > /tmp/metadata 2>&1 || { echo 'Kafka TLS/SCRAM metadata check failed' >&2; exit 1; }
-              grep -Eq '^bank[.]cash[.]notifications[.]v1:[0-9]+:[0-9]+$' /tmp/metadata || { echo 'Kafka returned no readable topic offsets' >&2; exit 1; }
+              echo 'BANK_HELM_TEST kafka'
+              /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server {{ .Values.global.kafkaCluster }}-kafka-bootstrap:9093 --command-config /tmp/client.properties --topic bank.cash.notifications.v1 > /tmp/metadata 2>&1 || { echo "BANK_HELM_TEST failed kafka exit=$?"; exit 1; }
+              grep -Eq '^bank[.]cash[.]notifications[.]v1:[0-9]+:[0-9]+$' /tmp/metadata || { echo 'BANK_HELM_TEST failed offsets'; exit 1; }
               echo 'PASS installed release: service readiness and authenticated Kafka metadata'
           env:
             - {name: KAFKA_HEAP_OPTS, value: '-Xms32m -Xmx96m -XX:ActiveProcessorCount=1'}

@@ -42,7 +42,8 @@ spec:
                 printf '%s\n' 'ssl.truststore.type=PEM' 'ssl.truststore.location=/run/ca/ca.crt' 'ssl.endpoint.identification.algorithm=https' 'default.api.timeout.ms=15000'
               } > /tmp/client.properties
               unset password
-              /opt/kafka/bin/kafka-topics.sh --bootstrap-server {{ .Values.global.kafkaCluster }}-kafka-bootstrap:9093 --command-config /tmp/client.properties --describe --topic bank.cash.notifications.v1 > /tmp/metadata 2>&1 || { echo 'Kafka TLS/SCRAM metadata check failed' >&2; exit 1; }
+              /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server {{ .Values.global.kafkaCluster }}-kafka-bootstrap:9093 --command-config /tmp/client.properties --topic bank.cash.notifications.v1 > /tmp/metadata 2>&1 || { echo 'Kafka TLS/SCRAM metadata check failed' >&2; exit 1; }
+              grep -Eq '^bank[.]cash[.]notifications[.]v1:[0-9]+:[0-9]+$' /tmp/metadata || { echo 'Kafka returned no readable topic offsets' >&2; exit 1; }
               echo 'PASS installed release: service readiness and authenticated Kafka metadata'
           env:
             - {name: KAFKA_HEAP_OPTS, value: '-Xms32m -Xmx96m -XX:ActiveProcessorCount=1'}

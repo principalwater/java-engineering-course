@@ -225,7 +225,8 @@ class BankChartTest(unittest.TestCase):
             container = pod["containers"][0]
             script = container["args"][0]
             self.assertIn("/actuator/health/readiness", script)
-            self.assertIn("--describe --topic bank.cash.notifications.v1", script)
+            self.assertIn("kafka-get-offsets.sh", script)
+            self.assertIn("--topic bank.cash.notifications.v1", script)
             self.assertNotIn("--create", script)
             self.assertTrue(container["securityContext"]["readOnlyRootFilesystem"])
 

@@ -21,21 +21,31 @@ import runtime
 
 
 class ClusterCreationTest(unittest.TestCase):
-    def test_apply_failure_classification_does_not_publish_private_log_contents(self):
-        with tempfile.TemporaryDirectory() as directory:
-            state = Path(directory)
-            (state / "tofu-apply.log").write_text("private-value\nError: context deadline exceeded\n", encoding="utf-8")
-            output = io.StringIO()
-            with patch.object(runtime, "owned_identity", return_value={}), \
-                    patch.object(runtime, "kubectl", return_value='{"items":[]}'), redirect_stdout(output):
-                runtime.diagnostics(argparse.Namespace(state_dir=state))
-            self.assertEqual(output.getvalue(), "BANK_CI_TOFU deadline\n")
+    def test_host_diagnostics_report_numeric_linux_resources(self):
+        contents = {"/proc/meminfo": "MemAvailable: 2048 kB\nSwapTotal: 4096 kB\nSwapFree: 1024 kB\nprivate-value\n",
+                    "/proc/vmstat": "oom_kill 7\nprivate-value\n"}
+        with patch.object(runtime.sys, "platform", "linux"), \
+                patch.object(Path, "read_text", autospec=True, side_effect=lambda path, **kwargs: contents[str(path)]), \
+                patch.object(runtime.shutil, "disk_usage", return_value=SimpleNamespace(used=25, total=100)):
+            self.assertEqual(runtime.host_diagnostics(Path("/owned/state")),
+                             "BANK_CI_HOST mem_available_mib=2 swap_used_mib=3 oom_kills=7 disk_used_pct=25")
+
+    def test_unavailable_cluster_preserves_host_evidence_and_never_reads_pods(self):
+        output = io.StringIO()
+        with patch.object(runtime, "host_diagnostics", return_value="BANK_CI_HOST fixture"), \
+                patch.object(runtime, "owned_identity", side_effect=RuntimeError("Command failed")), \
+                patch.object(runtime, "kubectl") as kubectl, redirect_stdout(output):
+            with self.assertRaises(RuntimeError):
+                runtime.diagnostics(argparse.Namespace(state_dir=Path("/owned/state")))
+        kubectl.assert_not_called()
+        self.assertEqual(output.getvalue(), "BANK_CI_HOST fixture\nBANK_CI_CLUSTER unavailable\n")
 
     def test_failure_diagnostics_expose_only_owned_component_states(self):
         pods = {"items": [
             {"metadata": {"labels": {"app": "accounts"}, "annotations": {"secret": "private-value"}},
              "status": {"containerStatuses": [{"ready": False, "restartCount": 3,
-                         "state": {"waiting": {"reason": "CrashLoopBackOff", "message": "private-value"}}}]}},
+                         "state": {"waiting": {"reason": "CrashLoopBackOff", "message": "private-value"}},
+                         "lastState": {"terminated": {"reason": "OOMKilled", "message": "private-value"}}}]}},
             {"metadata": {"labels": {"app": "cash"}}, "status": {"containerStatuses": [
                 {"state": {"waiting": {"reason": "private-value"}}}]}},
             {"metadata": {"labels": {"app": "private-value"}}, "status": {}},
@@ -45,6 +55,7 @@ class ClusterCreationTest(unittest.TestCase):
             {"type": "private-value", "status": "True"}]}}]}
         output = io.StringIO()
         with patch.object(runtime, "owned_identity", return_value={}) as owned, \
+                patch.object(runtime, "host_diagnostics", return_value="BANK_CI_HOST fixture"), \
                 patch.object(runtime, "kubectl", side_effect=[json.dumps(pods), json.dumps(nodes)]) as kubectl, \
                 redirect_stdout(output):
             runtime.diagnostics(argparse.Namespace(state_dir=Path("/owned/state")))
@@ -52,8 +63,8 @@ class ClusterCreationTest(unittest.TestCase):
         self.assertEqual([call.args[1:] for call in kubectl.call_args_list],
                          [("get", "pods", "-o", "json"), ("get", "nodes", "-o", "json")])
         self.assertTrue(all(call.kwargs["timeout"] == 15 for call in kubectl.call_args_list))
-        self.assertEqual(output.getvalue(), "BANK_CI_POD accounts ready=0 restarts=3 reason=CrashLoopBackOff\n"
-                         "BANK_CI_POD cash ready=0 restarts=0 reason=Other\nBANK_CI_NODE MemoryPressure True\n")
+        self.assertEqual(output.getvalue(), "BANK_CI_HOST fixture\nBANK_CI_POD accounts ready=0 restarts=3 reason=CrashLoopBackOff last=OOMKilled\n"
+                         "BANK_CI_POD cash ready=0 restarts=0 reason=Other last=None\nBANK_CI_NODE MemoryPressure True\n")
 
     def test_helm_test_uses_only_the_verified_release_identity(self):
         identity = {"kubeconfig": "/private/kubeconfig", "context": "kind-bank11-test-single", "namespace": "bank11-test"}

@@ -1,12 +1,15 @@
 """Protect saved-plan safety and exact secret redaction at the CLI owner boundary."""
 
 import base64
+from contextlib import redirect_stdout
 import importlib.util
+import io
 import json
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 
 SPEC = importlib.util.spec_from_file_location("bank_helm_deploy", Path(__file__).parents[1] / "deploy.py")
@@ -15,6 +18,26 @@ SPEC.loader.exec_module(DEPLOY)
 
 
 class PlanGuardTest(unittest.TestCase):
+    def test_failed_phase_reports_current_fixed_category_without_private_output(self):
+        cases = (("plan", b"context deadline exceeded", "deadline"),
+                 ("apply", b"BackoffLimitExceeded", "job-failed"),
+                 ("init", b"failed to download chart", "chart-fetch"),
+                 ("show", b"unclassified failure", "other"))
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "tofu.log"
+            for phase, message, category in cases:
+                with self.subTest(phase=phase):
+                    log.write_text("old connection refused", encoding="utf-8")
+                    response = SimpleNamespace(returncode=1, stdout=message + b" private-value")
+                    output = io.StringIO()
+                    with patch.object(DEPLOY.subprocess, "run", return_value=response), redirect_stdout(output):
+                        with self.assertRaisesRegex(RuntimeError, "phase failed") as failure:
+                            DEPLOY.run(["tofu", "-chdir=/public/infra", phase], environment={},
+                                       values=[b"private-value"], log=log)
+                    self.assertEqual(output.getvalue(), f"BANK_CI_TOFU {category} {phase}\n")
+                    self.assertNotIn("private-value", str(failure.exception))
+                    self.assertNotIn(b"private-value", log.read_bytes())
+
     def test_review_accepts_only_nondestructive_bank_release_actions(self):
         changes = [{"address": "helm_release.bank", "change": {"actions": ["update"]}},
                    {"address": "helm_release.strimzi", "change": {"actions": ["create"]}}]

@@ -28,24 +28,35 @@ class DiagnosticsTest(unittest.TestCase):
             path = project / "deployment/scripts/verify-runtime.py"
             path.parent.mkdir(parents=True)
             path.write_text('require(ok, "fixed failure")\nwait_for("notification delivery", probe)\n'
-                            'require(ok, f"{private_value}")\n', encoding="utf-8")
+                            'raise TransportUnavailable("fixed transport")\nrequire(ok, f"{private_value}")\n', encoding="utf-8")
             self.assertEqual(ci.verification_failures(project),
-                             {"FAIL fixed failure", "FAIL Timed out: notification delivery"})
+                             {"FAIL fixed failure", "FAIL Timed out: notification delivery", "FAIL fixed transport"})
 
     def test_reports_only_fixed_failure_categories_and_typed_workload_states(self):
         console = ("FAIL Timed out: recovered cabinet notification\n"
-                   "BANK_CI_POD accounts ready=0 restarts=2 reason=OOMKilled\n"
+                   "BANK_CI_POD accounts ready=0 restarts=2 reason=Running last=OOMKilled\n"
                    "BANK_CI_NODE DiskPressure True\n"
-                   "BANK_CI_TOFU deadline\n"
+                   "BANK_CI_TOFU deadline apply\n"
+                   "BANK_CI_HOST mem_available_mib=123 swap_used_mib=3 oom_kills=7 disk_used_pct=25\n"
+                   "FAIL Command timed out: Kubernetes rollout\n"
                    "BANK_CI_POD private-value ready=0 restarts=0 reason=Error\n"
                    "BANK_CI_POD cash ready=0 restarts=0 reason=private-value\n"
                    "BANK_CI_NODE Ready private-value\nprivate-value\n")
         summary = ci.console_diagnostics(console, set(), {"FAIL Timed out: recovered cabinet notification"})
-        self.assertIn("verification failures=[FAIL Timed out: recovered cabinet notification]", summary)
-        self.assertIn("BANK_CI_POD accounts ready=0 restarts=2 reason=OOMKilled", summary)
+        self.assertIn("FAIL Timed out: recovered cabinet notification", summary)
+        self.assertIn("FAIL Command timed out: Kubernetes rollout", summary)
+        self.assertIn("BANK_CI_POD accounts ready=0 restarts=2 reason=Running last=OOMKilled", summary)
         self.assertIn("BANK_CI_NODE DiskPressure True", summary)
-        self.assertIn("BANK_CI_TOFU deadline", summary)
+        self.assertIn("BANK_CI_TOFU deadline apply", summary)
+        self.assertIn("BANK_CI_HOST mem_available_mib=123", summary)
         self.assertNotIn("private-value", summary)
+
+    def test_successful_early_stage_warnings_are_not_failure_indicators(self):
+        console = ("[Pipeline] { (Build)\nTimeoutException\nERROR: script returned exit code 42\n"
+                   "[Pipeline] { (Verify)\nERROR: script returned exit code 1\n")
+        summary = ci.console_diagnostics(console, {"Build", "Verify"})
+        self.assertIn("shell exit codes=[1]", summary)
+        self.assertIn("console indicators=[]", summary)
 
 
 def commit(repository: Path, name: str, content: str, *, amend: bool = False) -> None:

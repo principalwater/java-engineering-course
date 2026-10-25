@@ -101,14 +101,18 @@ CONSOLE_INDICATORS = (
     ("deployment", r"\btofu phase failed\b"),
     ("gradle", r"^FAILURE: Build failed with an exception\.$"),
 )
+CONTAINER_REASON = (r"(?:Running|Completed|Error|OOMKilled|CrashLoopBackOff|ImagePullBackOff|ErrImagePull|"
+                    r"ContainerCreating|PodInitializing|CreateContainerConfigError|RunContainerError|Pending|Unschedulable|Other)")
 POD_DIAGNOSTIC = re.compile(
     r"^BANK_CI_POD (?:accounts|cash|transfer|front|gateway|notifications|analytics|authorization|edge|database|"
     r"discovery|zipkin|prometheus|alertmanager|grafana|elasticsearch|kibana|logstash|cassandra|clickhouse|kafka|"
     r"config-seed|cassandra-init|clickhouse-init|elasticsearch-bootstrap|kibana-bootstrap|grafana-bootstrap) "
-    r"ready=[01] restarts=\d{1,6} reason=(?:Running|Completed|Error|OOMKilled|CrashLoopBackOff|ImagePullBackOff|"
-    r"ErrImagePull|ContainerCreating|PodInitializing|CreateContainerConfigError|RunContainerError|Pending|Unschedulable|Other)$")
+    r"ready=[01] restarts=\d{1,6} reason=" + CONTAINER_REASON + r" last=(?:" + CONTAINER_REASON + r"|None)$")
 NODE_DIAGNOSTIC = re.compile(r"^BANK_CI_NODE (?:Ready|MemoryPressure|DiskPressure|PIDPressure) (?:True|False|Unknown)$")
-TOFU_DIAGNOSTIC = re.compile(r"^BANK_CI_TOFU (?:deadline|connection|disk|tls|operation-in-progress)$")
+TOFU_DIAGNOSTIC = re.compile(r"^BANK_CI_TOFU (?:deadline|connection|disk|tls|operation-in-progress|job-failed|chart-fetch|other) (?:init|plan|show|apply|other)$")
+HOST_DIAGNOSTIC = re.compile(r"^BANK_CI_HOST mem_available_mib=-?\d{1,12} swap_used_mib=-?\d{1,12} oom_kills=-?\d{1,12} disk_used_pct=(?:-1|\d{1,3})$")
+CLUSTER_DIAGNOSTIC = re.compile(r"^BANK_CI_(?:CLUSTER unavailable|DIAGNOSTICS timeout)$")
+COMMAND_FAILURE = re.compile(r"^FAIL Command (?:failed|timed out): Kubernetes (?:get|exec|scale|wait|rollout|logs)(?: \(exit -?\d{1,3}\))?$")
 
 
 def verification_failures(project: Path) -> set[str]:
@@ -125,7 +129,7 @@ def verification_failures(project: Path) -> set[str]:
                 continue
             name = getattr(node.func, "id", getattr(node.func, "attr", ""))
             position = 1 if name == "require" else 0
-            if name not in {"require", "VerificationError", "wait_for", "ready"} or len(node.args) <= position:
+            if name not in {"require", "VerificationError", "TransportUnavailable", "wait_for", "ready"} or len(node.args) <= position:
                 continue
             message = node.args[position]
             if isinstance(message, ast.Constant) and isinstance(message.value, str) and "\n" not in message.value:
@@ -138,13 +142,17 @@ def console_diagnostics(console: str, stages: set[str], allowed_failures: set[st
     """Внешняя консоль даёт лишь фиксированные индикаторы; имена стадий разрешает закоммиченный Jenkinsfile."""
     skipped = set(re.findall(r'^Stage "([^"\r\n]+)" skipped due to ', console, re.MULTILINE))
     executed = [name for name in STAGE_LINE.findall(console) if name in stages and name not in skipped]
+    # Предупреждение успешного раннего этапа не является причиной поздней ошибки.
+    failure_console = console[console.rfind(f"[Pipeline] {{ ({executed[-1]})"):] if executed else console
     codes = sorted({int(code) for code in re.findall(
-        r"^(?:ERROR: )?script returned exit code (-?\d{1,3})$", console, re.MULTILINE)})[:8]
-    indicators = [name for name, pattern in CONSOLE_INDICATORS if re.search(pattern, console, re.MULTILINE | re.IGNORECASE)]
-    diagnostics = list(dict.fromkeys(line for line in console.splitlines()
+        r"^(?:ERROR: )?script returned exit code (-?\d{1,3})$", failure_console, re.MULTILINE)})[:8]
+    indicators = [name for name, pattern in CONSOLE_INDICATORS if re.search(pattern, failure_console, re.MULTILINE | re.IGNORECASE)]
+    diagnostics = list(dict.fromkeys(line for line in failure_console.splitlines()
                                    if POD_DIAGNOSTIC.fullmatch(line) or NODE_DIAGNOSTIC.fullmatch(line)
-                                   or TOFU_DIAGNOSTIC.fullmatch(line)))[:40]
-    failures = sorted(set(console.splitlines()) & allowed_failures)
+                                   or TOFU_DIAGNOSTIC.fullmatch(line) or HOST_DIAGNOSTIC.fullmatch(line)
+                                   or CLUSTER_DIAGNOSTIC.fullmatch(line)))[:64]
+    failures = sorted({line for line in failure_console.splitlines()
+                       if line in allowed_failures or COMMAND_FAILURE.fullmatch(line)})
     return (f"last executed stage={executed[-1] if executed else 'none'}; shell exit codes={codes}; "
             f"console indicators=[{', '.join(indicators)}]; verification failures=[{'; '.join(failures)}]; "
             f"workload diagnostics=[{'; '.join(diagnostics)}]")

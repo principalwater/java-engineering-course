@@ -198,11 +198,17 @@ pipeline {
             script {
                 // Снимаем состояние до архивации: за время загрузки JAR неготовый Pod может восстановиться.
                 if (currentBuild.currentResult != 'SUCCESS') {
-                    sh returnStatus: true, script: '''
-                        if test -n "${BANK_STATE:-}" && test -f "$BANK_STATE/cluster.json"; then
-                            "$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/runtime.py" --state-dir "$BANK_STATE" diagnostics
-                        fi
-                    '''
+                    try {
+                        timeout(time: 3, unit: 'MINUTES') {
+                            sh returnStatus: true, script: '''
+                                if test -n "${BANK_STATE:-}" && test -f "$BANK_STATE/cluster.json"; then
+                                    "$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/runtime.py" --state-dir "$BANK_STATE" diagnostics
+                                fi
+                            '''
+                        }
+                    } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException ignored) {
+                        echo 'BANK_CI_DIAGNOSTICS timeout'
+                    }
                 }
             }
             junit testResults: 'projects/sprint11-observability/**/build/test-results/**/*.xml', allowEmptyResults: true

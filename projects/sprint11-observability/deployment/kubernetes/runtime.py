@@ -26,8 +26,6 @@ NODE_IMAGE = "kindest/node:v1.34.11@sha256:44e222ee2132dab25ff87301682f89eb82c78
 OWNER_LABEL = "bank11.io/cluster"
 # Docker exports/unpacked layers need temporary headroom; this floor is not a capacity estimate.
 MIN_HOST_DISK_FREE_GIB = 5
-# Хвост ошибки провайдера ограничен: диагностика не загружает весь журнал в память.
-MAX_DIAGNOSTIC_LOG_BYTES = 128 * 1024
 
 
 def command(arguments: list[str], *, data: bytes | None = None, timeout: int = 120,
@@ -446,22 +444,33 @@ def lifecycle(args: argparse.Namespace, *, stop: bool) -> None:
             print("Resumed retained bootstrap nodes; OpenBao has not been installed yet")
 
 
+def host_diagnostics(directory: Path) -> str:
+    """Счётчики Linux-хоста, видимые из агента; -1 означает недоступный показатель."""
+    available = swap = kills = disk = -1
+    if sys.platform.startswith("linux"):
+        try:
+            memory = dict(re.findall(r"(?m)^(\w+):\s+(\d+) kB$", Path("/proc/meminfo").read_text(encoding="ascii")))
+            available = int(memory["MemAvailable"]) // 1024
+            swap = (int(memory["SwapTotal"]) - int(memory["SwapFree"])) // 1024
+            kills = int(re.search(r"(?m)^oom_kill (\d+)$", Path("/proc/vmstat").read_text(encoding="ascii"))[1])
+        except (OSError, KeyError, TypeError):
+            pass
+    try:
+        usage = shutil.disk_usage(directory)
+        disk = 100 * usage.used // usage.total
+    except OSError:
+        pass
+    return f"BANK_CI_HOST mem_available_mib={available} swap_used_mib={swap} oom_kills={kills} disk_used_pct={disk}"
+
+
 def diagnostics(args: argparse.Namespace) -> None:
     """Только состояние собственных компонентов: без событий Kubernetes, логов и Secret bodies."""
-    identity = owned_identity(args.state_dir, api_timeout=15)
-    apply_log = args.state_dir / "tofu-apply.log"
-    if apply_log.is_file() and not apply_log.is_symlink():
-        # Только фиксированные категории из ограниченного хвоста; содержимое журнала остаётся приватным.
-        with apply_log.open("rb") as stream:
-            stream.seek(max(apply_log.stat().st_size - MAX_DIAGNOSTIC_LOG_BYTES, 0))
-            tail = stream.read(MAX_DIAGNOSTIC_LOG_BYTES).decode("utf-8", "replace")
-        for category, pattern in (("deadline", r"context deadline exceeded|timed out waiting"),
-                                  ("connection", r"connection refused"),
-                                  ("disk", r"no space left on device"),
-                                  ("tls", r"x509:|TLS handshake"),
-                                  ("operation-in-progress", r"another operation.*in progress")):
-            if re.search(pattern, tail, re.IGNORECASE):
-                print(f"BANK_CI_TOFU {category}")
+    print(host_diagnostics(args.state_dir), flush=True)
+    try:
+        identity = owned_identity(args.state_dir, api_timeout=15)
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        print("BANK_CI_CLUSTER unavailable", flush=True)
+        raise
     applications = {*APPS, "authorization", "edge", "database", "discovery", "zipkin", "prometheus",
                     "alertmanager", "grafana", "elasticsearch", "kibana", "logstash", "cassandra", "clickhouse",
                     "config-seed", "cassandra-init", "clickhouse-init", "elasticsearch-bootstrap",
@@ -481,13 +490,15 @@ def diagnostics(args: argparse.Namespace) -> None:
             detail = state.get("waiting") or state.get("terminated") or {}
             reason = detail.get("reason", "Running" if "running" in state else "Other")
             reason = reason if reason in reasons else "Other"
+            previous = container.get("lastState", {}).get("terminated", {}).get("reason", "None")
+            previous = previous if previous in reasons or previous == "None" else "Other"
             ready = int(container.get("ready") is True)
             restarts = min(max(int(container.get("restartCount", 0)), 0), 999999)
-            print(f"BANK_CI_POD {application} ready={ready} restarts={restarts} reason={reason}")
+            print(f"BANK_CI_POD {application} ready={ready} restarts={restarts} reason={reason} last={previous}")
         if not pod.get("status", {}).get("containerStatuses"):
             unscheduled = any(condition.get("type") == "PodScheduled" and condition.get("reason") == "Unschedulable"
                               for condition in pod.get("status", {}).get("conditions", []))
-            print(f"BANK_CI_POD {application} ready=0 restarts=0 reason={'Unschedulable' if unscheduled else 'Pending'}")
+            print(f"BANK_CI_POD {application} ready=0 restarts=0 reason={'Unschedulable' if unscheduled else 'Pending'} last=None")
     for node in json.loads(kubectl(identity, "get", "nodes", "-o", "json", timeout=15))["items"]:
         for condition in node.get("status", {}).get("conditions", []):
             if condition["type"] in {"Ready", "MemoryPressure", "DiskPressure", "PIDPressure"} and condition["status"] in {"True", "False", "Unknown"}:

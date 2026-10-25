@@ -100,6 +100,8 @@ spec:
       transaction.state.log.replication.factor: {{ ternary 3 1 $ha }}
       transaction.state.log.min.isr: {{ ternary 2 1 $ha }}
       log.retention.hours: 168
+      # Офсеты переживают семидневные события: мониторинг видит утрату непрочитанного диапазона.
+      offsets.retention.minutes: 43200
       log.segment.bytes: 16777216
       num.partitions: 6
   entityOperator:

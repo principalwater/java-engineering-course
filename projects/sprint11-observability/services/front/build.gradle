@@ -5,16 +5,19 @@ dependencies {
     testImplementation project(':bank-test-support')
 }
 
+// Windows поставляет npm как командный файл; остальные ОС используют исполняемый npm.
+def npm = System.getProperty('os.name').startsWith('Windows') ? 'npm.cmd' : 'npm'
+
 tasks.register('installUi', Exec) {
     workingDir 'ui'
-    commandLine 'npm', 'ci', '--no-fund'
+    commandLine npm, 'ci', '--no-fund'
     inputs.files 'ui/package.json', 'ui/package-lock.json'
     outputs.dir 'ui/node_modules'
 }
 tasks.register('buildUi', Exec) {
     dependsOn 'installUi'
     workingDir 'ui'
-    commandLine 'npm', 'run', 'build'
+    commandLine npm, 'run', 'build'
     inputs.dir 'ui/src'
     inputs.files 'ui/astro.config.mjs', 'ui/package.json', 'ui/package-lock.json'
     outputs.dir 'ui/build/site'
@@ -22,7 +25,7 @@ tasks.register('buildUi', Exec) {
 tasks.register('checkUi', Exec) {
     dependsOn 'installUi'
     workingDir 'ui'
-    commandLine 'npm', 'run', 'check'
+    commandLine npm, 'run', 'check'
     inputs.dir 'ui/src'
     inputs.dir 'ui/test'
     inputs.files 'ui/package.json', 'ui/package-lock.json'

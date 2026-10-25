@@ -25,7 +25,7 @@ class BankChartTest(unittest.TestCase):
                     superset=superset, external_port=8460)
             rendered = subprocess.run(["helm", "template", "bank", str(cls.project / "deployment/charts/bank"),
                                        "--namespace", "bank11-dev", "-f", str(destination / "public-values.yaml")],
-                                      capture_output=True, text=True, check=True)
+                                      capture_output=True, text=True, encoding="utf-8", check=True)
             cls.models[(profile, analytics)] = list(yaml.safe_load_all(rendered.stdout))
             cls.sources[(profile, analytics)] = {}
             for document in re.split(r"(?m)^---\s*$", rendered.stdout):
@@ -184,7 +184,7 @@ class BankChartTest(unittest.TestCase):
                 override.write_text(yaml.safe_dump(values), encoding="utf-8")
                 rendered = subprocess.run(["helm", "template", "bank", str(self.project / "deployment/charts/bank"),
                                            "--namespace", "bank11-dev", "-f", str(override)],
-                                          capture_output=True, text=True, check=True)
+                                          capture_output=True, text=True, encoding="utf-8", check=True)
                 actual = {(item["kind"], item["metadata"]["name"]): item["spec"]["template"]
                           for item in yaml.safe_load_all(rendered.stdout)
                           if item and item["kind"] in {"Deployment", "StatefulSet"}}
@@ -205,19 +205,38 @@ class BankChartTest(unittest.TestCase):
                 override.write_text(yaml.safe_dump(updated), encoding="utf-8")
                 rendered = subprocess.run(["helm", "template", "bank", str(self.project / "deployment/charts/bank"),
                                            "--namespace", "bank11-dev", "-f", str(override)],
-                                          capture_output=True, text=True, check=True)
+                                          capture_output=True, text=True, encoding="utf-8", check=True)
                 current = next(item["metadata"]["name"] for item in yaml.safe_load_all(rendered.stdout)
                                if item and item["kind"] == "Job" and item["metadata"]["name"].startswith("bank-bi-"))
                 self.assertNotEqual(previous, current)
 
+    def test_consumer_offsets_outlive_the_business_retention_window(self):
+        config = self.resources(kind="Kafka")["bank-kafka"]["spec"]["kafka"]["config"]
+        self.assertGreater(config["offsets.retention.minutes"], config["log.retention.hours"] * 60)
+
+    def test_installed_release_has_a_bounded_read_only_helm_test(self):
+        for profile, analytics in self.models:
+            job = self.resources(profile, analytics, kind="Job")["bank11-release-test"]
+            self.assertEqual(job["metadata"]["annotations"]["helm.sh/hook"], "test")
+            self.assertEqual(job["spec"]["backoffLimit"], 0)
+            self.assertLessEqual(job["spec"]["activeDeadlineSeconds"], 120)
+            pod = job["spec"]["template"]["spec"]
+            self.assertFalse(pod["automountServiceAccountToken"])
+            container = pod["containers"][0]
+            script = container["args"][0]
+            self.assertIn("/actuator/health/readiness", script)
+            self.assertIn("--describe --topic bank.cash.notifications.v1", script)
+            self.assertNotIn("--create", script)
+            self.assertTrue(container["securityContext"]["readOnlyRootFilesystem"])
+
     def test_foreign_namespace_fails_before_any_cluster_contact(self):
         result = subprocess.run(["helm", "template", "bank", str(self.project / "deployment/charts/bank"), "--namespace", "default",
-                                 "-f", str(Path(self.directory.name) / "single-False/public-values.yaml")], capture_output=True, text=True)
+                                 "-f", str(Path(self.directory.name) / "single-False/public-values.yaml")], capture_output=True, text=True, encoding="utf-8")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("release namespace must equal", result.stderr)
         extra_replica = subprocess.run(["helm", "template", "bank", str(self.project / "deployment/charts/bank"), "--namespace", "bank11-dev",
                                        "-f", str(Path(self.directory.name) / "single-False/public-values.yaml"),
-                                       "--set", "apps.accounts.replicas=2"], capture_output=True, text=True)
+                                       "--set", "apps.accounts.replicas=2"], capture_output=True, text=True, encoding="utf-8")
         self.assertNotEqual(extra_replica.returncode, 0)
         self.assertIn("replicas", extra_replica.stderr)
 

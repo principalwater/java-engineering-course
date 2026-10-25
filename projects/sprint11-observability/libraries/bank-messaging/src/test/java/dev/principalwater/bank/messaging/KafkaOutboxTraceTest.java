@@ -22,6 +22,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -178,6 +180,25 @@ class KafkaOutboxTraceTest extends PostgresTestBase {
         relay();
         assertThat(status()).isEqualTo("PUBLISHED");
         assertThat(publishing.get()).isNotNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"accounts", "notifications"})
+    void retainedFailureFactsCanBeReplayedByTheirOwningApplication(String application)
+            throws Exception {
+        outbox.enqueue(
+                BankTopics.BUSINESS_FAILURES, "owner", "failure-1", Map.of("type", "WITHDRAWAL"));
+        relay();
+        assertThat(status()).isEqualTo("PUBLISHED");
+        var page =
+                new OutboxReplay(jdbc, new TransactionTemplate(transactions))
+                        .requeue(application, 0, 1000);
+        assertThat(page.requeued()).isEqualTo(1);
+        assertThat(status()).isEqualTo("PENDING");
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT payload->>'type' FROM bank_kafka_outbox", String.class))
+                .isEqualTo("WITHDRAWAL");
     }
 
     private void relay() throws Exception {

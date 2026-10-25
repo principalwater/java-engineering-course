@@ -157,6 +157,11 @@ pipeline {
                 '''
             }
         }
+        stage('Test the installed Helm release') {
+            steps {
+                sh '"$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/runtime.py" --state-dir "$BANK_STATE" test'
+            }
+        }
         stage('Verify OpenBao seal recovery') {
             steps {
                 sh '"$BANK_PYTHON" "$BANK_PROJECT/deployment/kubernetes/bao.py" --state-dir "$BANK_STATE" verify --secrets-dir "$BANK_SECRETS_DIR" --exercise-seal'

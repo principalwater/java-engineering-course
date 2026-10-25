@@ -14,6 +14,7 @@ import dev.principalwater.bank.contract.NotificationReceipt;
 import dev.principalwater.bank.contract.NotificationSource;
 import dev.principalwater.bank.messaging.KafkaOutbox;
 import dev.principalwater.bank.messaging.MessageCodec;
+import dev.principalwater.bank.messaging.replay.OutboxReplay;
 import dev.principalwater.bank.notifications.NotificationsApplication;
 import dev.principalwater.bank.notifications.NotificationsTestBase;
 import dev.principalwater.bank.testing.KafkaFixture;
@@ -21,12 +22,14 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.sql.Connection;
 import java.sql.Statement;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -41,6 +44,8 @@ import org.springframework.core.env.StandardEnvironment;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.MessageListener;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @ExtendWith(OutputCaptureExtension.class)
 class NotificationKafkaTest extends NotificationsTestBase {
@@ -55,10 +60,85 @@ class NotificationKafkaTest extends NotificationsTestBase {
     @Autowired private NotificationReplay replay;
     @Autowired private NotificationListener listener;
     @Autowired private ConcurrentKafkaListenerContainerFactory<String, String> factory;
+    @Autowired private PlatformTransactionManager transactions;
 
     @AfterEach
     void stop() {
         stopConsumers();
+    }
+
+    @Test
+    void publishedSourceSurvivesBrokerRetentionBeforeConsumerReadAndReplaysOnce() {
+        String topic = BankTopics.CASH_NOTIFICATIONS;
+        BankEvent first = event("DEPOSIT_SUCCEEDED");
+        // В общей тестовой БД находится outbox производителя Cash: библиотека и SQL-схема те же.
+        startConsumers();
+        outbox.enqueue(topic, first.ownerId().toString(), first.eventId().toString(), first);
+        deliverPending();
+        await().atMost(KafkaFixture.WAIT).untilAsserted(() -> assertThat(count()).isEqualTo(1));
+        awaitCommitted(NotificationSource.CASH);
+        stopConsumers();
+
+        BankEvent missed = event("DEPOSIT_SUCCEEDED", first.ownerId());
+        outbox.enqueue(topic, missed.ownerId().toString(), missed.eventId().toString(), missed);
+        deliverPending();
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT status FROM bank_kafka_outbox WHERE message_id=?",
+                                String.class,
+                                missed.eventId().toString()))
+                .isEqualTo("PUBLISHED");
+        assertThat(count()).isEqualTo(1);
+        long committed = KafkaFixture.committed(BankTopics.NOTIFICATIONS_GROUP, topic);
+        // deleteRecords воспроизводит уже удалённый retention диапазон без недельного sleep.
+        KafkaFixture.clear(topic);
+        try (var consumer = KafkaFixture.consumer()) {
+            List<TopicPartition> partitions =
+                    consumer.partitionsFor(topic).stream()
+                            .map(info -> new TopicPartition(topic, info.partition()))
+                            .toList();
+            assertThat(consumer.beginningOffsets(partitions))
+                    .isEqualTo(consumer.endOffsets(partitions));
+            assertThat(
+                            consumer.beginningOffsets(partitions).values().stream()
+                                    .mapToLong(Long::longValue)
+                                    .sum())
+                    .isGreaterThan(committed);
+            consumer.assign(partitions);
+            consumer.seekToBeginning(partitions);
+            assertThat(consumer.poll(Duration.ofMillis(500)).isEmpty()).isTrue();
+        }
+        // После рестарта earliest пропускает утраченное событие, но читает новое контрольное.
+        startConsumers();
+        BankEvent sentinel = event("DEPOSIT_SUCCEEDED", first.ownerId());
+        outbox.enqueue(
+                topic, sentinel.ownerId().toString(), sentinel.eventId().toString(), sentinel);
+        deliverPending();
+        await().atMost(KafkaFixture.WAIT).untilAsserted(() -> assertThat(count()).isEqualTo(2));
+        awaitCommitted(NotificationSource.CASH);
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT count(*) FROM bank_notification WHERE event_id=?",
+                                Integer.class,
+                                missed.eventId()))
+                .isZero();
+        OutboxReplay source = new OutboxReplay(jdbc, new TransactionTemplate(transactions));
+        assertThat(source.requeue("cash", 0, 1000).requeued()).isEqualTo(3);
+        deliverPending();
+        await().atMost(KafkaFixture.WAIT).untilAsserted(() -> assertThat(count()).isEqualTo(3));
+        awaitCommitted(NotificationSource.CASH);
+        // Повтор восстановления не создаёт второе уведомление и не запускает денежную команду.
+        source.requeue("cash", 0, 1000);
+        deliverPending();
+        awaitCommitted(NotificationSource.CASH);
+        assertThat(count()).isEqualTo(3);
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT payload::text FROM bank_kafka_outbox WHERE topic=? AND message_id=?",
+                                String.class,
+                                topic,
+                                missed.eventId().toString()))
+                .contains(missed.eventId().toString());
     }
 
     @Test
@@ -598,9 +678,13 @@ class NotificationKafkaTest extends NotificationsTestBase {
     }
 
     private BankEvent event(String type) {
+        return event(type, UUID.randomUUID());
+    }
+
+    private BankEvent event(String type, UUID owner) {
         return new BankEvent(
                 UUID.randomUUID(),
-                UUID.randomUUID(),
+                owner,
                 type,
                 100,
                 500,

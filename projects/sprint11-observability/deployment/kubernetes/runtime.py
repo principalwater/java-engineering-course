@@ -459,6 +459,7 @@ def main() -> None:
     subparsers.add_parser("load-images")
     readiness = subparsers.add_parser("ready")
     readiness.add_argument("--timeout", type=int, default=900)
+    subparsers.add_parser("test")
     subparsers.add_parser("stop")
     subparsers.add_parser("resume")
     args = parser.parse_args()
@@ -470,6 +471,10 @@ def main() -> None:
         load_images(args)
     elif args.operation == "ready":
         ready(args)
+    elif args.operation == "test":
+        identity = owned_identity(args.state_dir)
+        print(command(["helm", "--kubeconfig", identity["kubeconfig"], "--kube-context", identity["context"],
+                       "--namespace", identity["namespace"], "test", "bank", "--timeout", "180s"], timeout=210))
     else:
         lifecycle(args, stop=args.operation == "stop")
 

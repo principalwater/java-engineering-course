@@ -93,3 +93,54 @@ tests:
               summary: "Kafka has 0 active controllers instead of exactly one"
               description: "The KRaft quorum reports 0 active controllers for 2 minutes."
               action: "Check the controller pod logs for quorum loss; in the ha profile verify that at least two of the three controllers are running."
+  - name: stalled low-traffic consumer alerts before retention and resolves on progress
+    interval: 1m
+    input_series:
+    - series: kafka_consumergroup_lag{consumergroup="bank.notifications.v1",topic="bank.cash.notifications.v1",partition="0"}
+      values: 1x75
+    - series: kafka_consumergroup_current_offset{consumergroup="bank.notifications.v1",topic="bank.cash.notifications.v1",partition="0"}
+      values: 2x60 3+1x15
+    alert_rule_test:
+    - eval_time: 31m
+      alertname: KafkaConsumerGroupStalled
+      exp_alerts:
+      - exp_labels:
+          consumergroup: bank.notifications.v1
+          topic: bank.cash.notifications.v1
+          partition: '0'
+          severity: warning
+        exp_annotations:
+          summary: Consumer group bank.notifications.v1 is stalled on bank.cash.notifications.v1
+          description: Outstanding records have not advanced for 30 minutes, even at low traffic.
+          action: Restore the consumer before topic retention expires; inspect retry failures and the oldest retained offset.
+            After a long outage, follow the PostgreSQL outbox replay runbook.
+    - eval_time: 63m
+      alertname: KafkaConsumerGroupStalled
+      exp_alerts: []
+  - name: deleted unread offsets alert while unknown offsets do not, reset is not recovery
+    interval: 1m
+    input_series:
+    - series: kafka_consumergroup_current_offset{consumergroup="bank.notifications.v1",topic="bank.cash.notifications.v1",partition="0"}
+      values: 3x5 6x5
+    - series: kafka_consumergroup_current_offset{consumergroup="unknown",topic="bank.cash.notifications.v1",partition="0"}
+      values: -1x10
+    - series: kafka_topic_partition_oldest_offset{topic="bank.cash.notifications.v1",partition="0"}
+      values: 5x10
+    alert_rule_test:
+    - eval_time: 2m
+      alertname: KafkaRecordsDeletedBeforeConsumption
+      exp_alerts:
+      - exp_labels:
+          consumergroup: bank.notifications.v1
+          topic: bank.cash.notifications.v1
+          partition: '0'
+          severity: critical
+        exp_annotations:
+          summary: Unread Kafka records were deleted on bank.cash.notifications.v1
+          description: The committed offset is behind the oldest retained record. earliest cannot recover the deleted range.
+          action: 'Replay source outboxes from PostgreSQL: notifications group -> accounts/cash/transfer; Accounts receipt group
+            -> notifications; analytics ingress -> accounts; analytics failures -> accounts/notifications. A resolved alert
+            after offset reset does not prove recovery; verify destination records.'
+    - eval_time: 7m
+      alertname: KafkaRecordsDeletedBeforeConsumption
+      exp_alerts: []

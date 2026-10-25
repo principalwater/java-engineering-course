@@ -116,22 +116,22 @@ network:
   ingress:
     front:
       - {clients: [edge], ports: [8443]}
-      - {clients: [prometheus], ports: [8080]}
+      - {clients: [prometheus, helm-test], ports: [8080]}
     gateway:
       - {clients: [front], ports: [8443]}
-      - {clients: [prometheus], ports: [8080]}
+      - {clients: [prometheus, helm-test], ports: [8080]}
     accounts:
       - {clients: [gateway, cash, transfer, analytics], ports: [8443]}
-      - {clients: [prometheus], ports: [8080]}
+      - {clients: [prometheus, helm-test], ports: [8080]}
     cash:
       - {clients: [gateway], ports: [8443]}
-      - {clients: [prometheus], ports: [8080]}
+      - {clients: [prometheus, helm-test], ports: [8080]}
     transfer:
       - {clients: [gateway], ports: [8443]}
-      - {clients: [prometheus], ports: [8080]}
+      - {clients: [prometheus, helm-test], ports: [8080]}
     analytics:
       - {clients: [gateway], ports: [8443]}
-      - {clients: [prometheus], ports: [8080]}
+      - {clients: [prometheus, helm-test], ports: [8080]}
     notifications:
       - {clients: [prometheus], ports: [9400]}
     database:

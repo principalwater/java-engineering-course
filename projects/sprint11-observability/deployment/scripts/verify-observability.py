@@ -434,8 +434,9 @@ def check_prometheus(stack, report):
             problems = lacking(clients, found, "kafka client metrics")
             if total(port, "sum(kafka_server_brokertopicmetrics_messagesin_total)") <= 0:
                 problems.append("brokers report no incoming messages")
-            if not instant(port, "kafka_consumergroup_lag"):
-                problems.append("Kafka Exporter reports no consumer group lag")
+            for name in ("kafka_consumergroup_lag", "kafka_consumergroup_current_offset", "kafka_topic_partition_oldest_offset"):
+                if not instant(port, name):
+                    problems.append("Kafka Exporter reports no " + name)
             return problems
         stack.wait("Kafka series", kafka_metrics)
         report.passed("kafka metrics", f"client series for {sorted(clients)}; broker traffic and consumer lag series present")

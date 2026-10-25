@@ -89,7 +89,7 @@ def image_reference(project: Path, name: str) -> str:
         context = project / "deployment" / name
         for path in sorted(context.rglob("*")):
             if path.is_file() and "__pycache__" not in path.parts:
-                hashed.update(str(path.relative_to(context)).encode() + b"\0" + path.read_bytes())
+                hashed.update(path.relative_to(context).as_posix().encode() + b"\0" + path.read_bytes())
     return f"bank11-{name}:{hashed.hexdigest()[:20]}"
 
 
@@ -100,7 +100,7 @@ def chart_digest(project: Path) -> str:
         if path.is_file():
             # A source-only directory move must not roll every application Pod.
             logical_path = Path("charts") / path.relative_to(charts)
-            hashed.update(str(logical_path).encode() + b"\0" + path.read_bytes())
+            hashed.update(logical_path.as_posix().encode() + b"\0" + path.read_bytes())
     return hashed.hexdigest()
 
 
@@ -114,7 +114,7 @@ def source_digest(project: Path, analytics: bool, superset: bool = False) -> str
         files.update(path for path in (project / "deployment/superset").rglob("*") if path.is_file() and "__pycache__" not in path.parts)
     hashed = hashlib.sha256()
     for path in sorted(files):
-        hashed.update(str(path.relative_to(project)).encode() + b"\0" + path.read_bytes())
+        hashed.update(path.relative_to(project).as_posix().encode() + b"\0" + path.read_bytes())
     return hashed.hexdigest()
 
 

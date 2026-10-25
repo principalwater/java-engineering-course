@@ -77,7 +77,7 @@ def render(analytics: bool, overrides: tuple = (), environment: str = "dev") -> 
         override_file.write_text(yaml.safe_dump(values), encoding="utf-8")
         arguments = [argument for override in overrides for argument in ("--set", override)]
         rendered = subprocess.run(["helm", "template", "bank", str(CHART), "--namespace", f"bank11-{environment}",
-                                   "-f", str(override_file), *arguments], capture_output=True, text=True, check=True)
+                                   "-f", str(override_file), *arguments], capture_output=True, text=True, encoding="utf-8", check=True)
     return tuple(item for item in yaml.safe_load_all(rendered.stdout) if isinstance(item, dict))
 
 
@@ -127,7 +127,7 @@ class AssetContractTest(unittest.TestCase):
                             json.loads(line)
                     elif name.endswith(".sh"):
                         shell = "bash" if text.startswith("#!/bin/bash") else "sh"
-                        subprocess.run([shell, "-n", str(path)], check=True, capture_output=True, text=True)
+                        subprocess.run([shell, "-n", str(path)], check=True, capture_output=True, text=True, encoding="utf-8")
 
     def test_alert_rules_name_a_severity_and_a_first_diagnostic_step(self):
         jobs = {job["job_name"] for job in yaml.safe_load(asset_text("prometheus", "prometheus.yml"))["scrape_configs"]}
@@ -249,7 +249,7 @@ class AssetContractTest(unittest.TestCase):
                     with self.subTest(permission_denied=denied, folder_error=folder_error):
                         state["deny"] = denied
                         state["folder_error"] = folder_error
-                        result = subprocess.run(["bash"], input=script, text=True, capture_output=True, timeout=20)
+                        result = subprocess.run(["bash"], input=script, text=True, encoding="utf-8", capture_output=True, timeout=20)
                         output = result.stdout + result.stderr
                         self.assertNotIn(reflected, output)
                         if denied or folder_error:
@@ -304,7 +304,7 @@ class AssetContractTest(unittest.TestCase):
 @unittest.skipUnless(PROMTOOL, "promtool is not installed; install the official Prometheus release to run this check")
 class PromtoolTest(unittest.TestCase):
     def promtool(self, *arguments):
-        result = subprocess.run([PROMTOOL, *arguments], capture_output=True, text=True)
+        result = subprocess.run([PROMTOOL, *arguments], capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_rules_and_their_unit_tests_pass(self):
@@ -424,7 +424,7 @@ class AlertmanagerTest(unittest.TestCase):
                 (Path(directory) / name).write_text("1", encoding="utf-8")
             path = Path(directory) / "alertmanager.yml"
             path.write_text(text.replace("/run/secrets/", f"{directory}/"), encoding="utf-8")
-            result = subprocess.run([AMTOOL, "check-config", str(path)], capture_output=True, text=True)
+            result = subprocess.run([AMTOOL, "check-config", str(path)], capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 

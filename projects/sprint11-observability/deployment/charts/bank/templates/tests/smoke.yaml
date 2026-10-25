@@ -1,0 +1,109 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bank11-release-test
+  labels:
+    {{- include "bank.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 120
+  template:
+    metadata:
+      labels: {app: helm-test, bank11.io/role: helm-test}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: services-and-kafka
+          image: {{ .Values.kafka.image | quote }}
+          command: [bash, -ec]
+          args:
+            - |
+              set -euo pipefail
+              umask 077
+              for service in accounts cash transfer front gateway{{ if .Values.global.analyticsEnabled }} analytics{{ end }}; do
+                curl --fail --silent --show-error --max-time 10 "http://${service}:8080/actuator/health/readiness" > /dev/null
+              done
+              password="$(cat /run/client/password)"
+              password="${password//\\/\\\\}"
+              password="${password//\"/\\\"}"
+              {
+                printf '%s\n' 'security.protocol=SASL_SSL' 'sasl.mechanism=SCRAM-SHA-512'
+                printf 'sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="notifications-service" password="%s";\n' "$password"
+                printf '%s\n' 'ssl.truststore.type=PEM' 'ssl.truststore.location=/run/ca/ca.crt' 'ssl.endpoint.identification.algorithm=https' 'default.api.timeout.ms=15000'
+              } > /tmp/client.properties
+              unset password
+              /opt/kafka/bin/kafka-topics.sh --bootstrap-server {{ .Values.global.kafkaCluster }}-kafka-bootstrap:9093 --command-config /tmp/client.properties --describe --topic bank.cash.notifications.v1 > /tmp/metadata 2>&1 || { echo 'Kafka TLS/SCRAM metadata check failed' >&2; exit 1; }
+              echo 'PASS installed release: service readiness and authenticated Kafka metadata'
+          env:
+            - {name: KAFKA_HEAP_OPTS, value: '-Xms32m -Xmx96m -XX:ActiveProcessorCount=1'}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {cpu: 500m, memory: 192Mi}
+          volumeMounts:
+            - {name: client, mountPath: /run/client, readOnly: true}
+            - {name: ca, mountPath: /run/ca, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: client
+          secret:
+            secretName: notifications-service
+            defaultMode: 288
+            items: [{key: password, path: password}]
+        - name: ca
+          secret:
+            secretName: {{ .Values.global.kafkaCluster }}-cluster-ca-cert
+            defaultMode: 292
+            items: [{key: ca.crt, path: ca.crt}]
+        - name: tmp
+          emptyDir: {medium: Memory, sizeLimit: 16Mi}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: helm-test-kafka}
+spec:
+  podSelector:
+    matchLabels: {strimzi.io/cluster: {{ .Values.global.kafkaCluster }}, strimzi.io/kind: Kafka}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: helm-test}
+      ports: [{protocol: TCP, port: 9093}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: helm-test-egress}
+spec:
+  podSelector:
+    matchLabels: {app: helm-test}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to:
+        - podSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [accounts, cash, transfer, front, gateway, analytics]}
+      ports: [{protocol: TCP, port: 8080}]
+    - to:
+        - podSelector:
+            matchLabels: {strimzi.io/cluster: {{ .Values.global.kafkaCluster }}, strimzi.io/kind: Kafka}
+      ports: [{protocol: TCP, port: 9093}]

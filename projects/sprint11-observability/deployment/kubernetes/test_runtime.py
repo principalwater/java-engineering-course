@@ -19,6 +19,16 @@ import runtime
 
 
 class ClusterCreationTest(unittest.TestCase):
+    def test_helm_test_uses_only_the_verified_release_identity(self):
+        identity = {"kubeconfig": "/private/kubeconfig", "context": "kind-bank11-test-single", "namespace": "bank11-test"}
+        with patch("sys.argv", ["runtime.py", "--state-dir", "/private/state", "test"]), \
+                patch.object(runtime, "owned_identity", return_value=identity) as owned, \
+                patch.object(runtime, "command", return_value="PASS") as command:
+            runtime.main()
+        owned.assert_called_once_with(Path("/private/state"))
+        command.assert_called_once_with(["helm", "--kubeconfig", identity["kubeconfig"], "--kube-context", identity["context"],
+                                         "--namespace", identity["namespace"], "test", "bank", "--timeout", "180s"], timeout=210)
+
     def test_image_operations_refuse_low_host_space_before_each_build_and_import(self):
         floor = 5 * 1024 ** 3
         cases = (([floor - 1], []),

@@ -27,10 +27,12 @@ public final class OutboxReplay {
                     case "accounts" ->
                             List.of(
                                     BankTopics.ACCOUNTS_NOTIFICATIONS,
-                                    BankTopics.ACCOUNTS_ANALYTICS);
+                                    BankTopics.ACCOUNTS_ANALYTICS,
+                                    BankTopics.BUSINESS_FAILURES);
                     case "cash" -> List.of(BankTopics.CASH_NOTIFICATIONS);
                     case "transfer" -> List.of(BankTopics.TRANSFER_NOTIFICATIONS);
-                    case "notifications" -> List.of(BankTopics.NOTIFICATION_RECEIPTS);
+                    case "notifications" ->
+                            List.of(BankTopics.NOTIFICATION_RECEIPTS, BankTopics.BUSINESS_FAILURES);
                     default ->
                             throw new IllegalArgumentException(
                                     "Unsupported outbox replay application");

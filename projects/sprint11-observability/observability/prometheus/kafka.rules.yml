@@ -68,3 +68,24 @@ groups:
           summary: "Messages were dead-lettered to {{ $labels.topic }}"
           description: "{{ $value | printf \"%.0f\" }} messages reached {{ $labels.topic }} in the last 15 minutes: a consumer gave up on them after its retries."
           action: "DLT headers retain the original topic, partition and offset; exception headers are intentionally omitted. Correlate the confirmed quarantine ERROR in Kibana, inspect the protected record and replay or discard deliberately."
+      - alert: KafkaConsumerGroupStalled
+        expr: (kafka_consumergroup_lag > 0) unless on(consumergroup, topic, partition) (changes(kafka_consumergroup_current_offset[30m])
+          > 0)
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: Consumer group {{ $labels.consumergroup }} is stalled on {{ $labels.topic }}
+          description: Outstanding records have not advanced for 30 minutes, even at low traffic.
+          action: Restore the consumer before topic retention expires; inspect retry failures and the oldest retained offset. After
+            a long outage, follow the PostgreSQL outbox replay runbook.
+      - alert: KafkaRecordsDeletedBeforeConsumption
+        expr: (kafka_consumergroup_current_offset >= 0) < on(topic, partition) group_left kafka_topic_partition_oldest_offset
+        labels:
+          severity: critical
+        annotations:
+          summary: Unread Kafka records were deleted on {{ $labels.topic }}
+          description: The committed offset is behind the oldest retained record. earliest cannot recover the deleted range.
+          action: 'Replay source outboxes from PostgreSQL: notifications group -> accounts/cash/transfer; Accounts receipt group
+            -> notifications; analytics ingress -> accounts; analytics failures -> accounts/notifications. A resolved alert after
+            offset reset does not prove recovery; verify destination records.'

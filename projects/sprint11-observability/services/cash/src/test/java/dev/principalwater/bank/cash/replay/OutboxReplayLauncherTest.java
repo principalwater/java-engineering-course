@@ -9,6 +9,7 @@ import dev.principalwater.bank.testing.PostgresTestBase;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
@@ -134,9 +135,7 @@ class OutboxReplayLauncherTest extends PostgresTestBase {
     private Path privateDatabaseConfiguration() throws Exception {
         Path secrets =
                 Files.createDirectory(
-                        directory.resolve("private"),
-                        PosixFilePermissions.asFileAttribute(
-                                PosixFilePermissions.fromString("rwx------")));
+                        directory.resolve("private"), privatePermissions("rwx------"));
         HikariDataSource database = jdbc.getDataSource().unwrap(HikariDataSource.class);
         writeSecret(secrets, "spring.datasource.url", database.getJdbcUrl());
         writeSecret(secrets, "spring.datasource.username", database.getUsername());
@@ -145,12 +144,19 @@ class OutboxReplayLauncherTest extends PostgresTestBase {
     }
 
     private void writeSecret(Path directory, String name, String value) throws Exception {
-        Path file =
-                Files.createFile(
-                        directory.resolve(name),
-                        PosixFilePermissions.asFileAttribute(
-                                PosixFilePermissions.fromString("rw-------")));
+        Path file = Files.createFile(directory.resolve(name), privatePermissions("rw-------"));
         Files.writeString(file, value);
+    }
+
+    private FileAttribute<?>[] privatePermissions(String permissions) throws Exception {
+        // Одноразовые тестовые креды: Windows наследует ACL пользовательского @TempDir,
+        // POSIX дополнительно ограничивает права при создании, без небезопасного chmod постфактум.
+        return Files.getFileStore(directory).supportsFileAttributeView("posix")
+                ? new FileAttribute<?>[] {
+                    PosixFilePermissions.asFileAttribute(
+                            PosixFilePermissions.fromString(permissions))
+                }
+                : new FileAttribute<?>[0];
     }
 
     private int runReplay(Path image, Path secrets, String option) throws Exception {
@@ -163,7 +169,7 @@ class OutboxReplayLauncherTest extends PostgresTestBase {
                                 OutboxReplayApplication.class.getName(),
                                 "--BANK_CONFIG_IMPORT=optional:classpath:bank-common.properties",
                                 "--spring.config.import=classpath:bank-common.properties,optional:configtree:"
-                                        + secrets
+                                        + secrets.toString().replace('\\', '/')
                                         + "/",
                                 option));
         ProcessBuilder builder =
@@ -182,6 +188,7 @@ class OutboxReplayLauncherTest extends PostgresTestBase {
     }
 
     private String javaExecutable() {
-        return Path.of(System.getProperty("java.home"), "bin", "java").toString();
+        String name = System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java";
+        return Path.of(System.getProperty("java.home"), "bin", name).toString();
     }
 }

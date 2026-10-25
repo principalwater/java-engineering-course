@@ -363,7 +363,7 @@ Java-приложения получают секреты через Spring Clou
 
 Ядро и Gradle-модули общие для Linux, macOS и Windows. На Unix используется `./gradlew`, в PowerShell - `.\gradlew.bat`; Node/npm должны быть в `PATH`. Gradle сам выбирает `npm.cmd` на Windows. Исходники и вывод Helm используют UTF-8; приватные файлы replay-теста создаются с POSIX-правами либо наследуют ACL пользовательского временного каталога Windows.
 
-Основной CI на Linux, macOS и Windows компилирует все модули и тесты, проверяет форматирование/PMD и UI, собирает Executable JAR и на Windows запускает извлечённое replay-приложение с настоящим локальным PostgreSQL. На Windows regression использует предустановленный PostgreSQL; каждая тестовая JVM получает отдельную БД. Полный `check`, Kafka/Testcontainers, контрактные сценарии и Kubernetes выполняются в Linux CI и Jenkins; нативная сборка не означает запуск Linux-контейнеров в Windows-режиме Docker.
+Основной CI на Linux, macOS и Windows компилирует все модули и тесты, проверяет форматирование/PMD и UI, собирает Executable JAR и на Windows выполняет весь `:cash:test`, включая извлечённое replay-приложение с настоящим локальным PostgreSQL. На Windows regression использует предустановленный PostgreSQL; каждая тестовая JVM получает отдельную БД. Полный `check`, Kafka/Testcontainers, контрактные сценарии и Kubernetes выполняются в Linux CI и Jenkins; нативная сборка не означает запуск Linux-контейнеров в Windows-режиме Docker.
 
 ### Подготовка
 

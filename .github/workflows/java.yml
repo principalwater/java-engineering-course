@@ -1334,14 +1334,14 @@ jobs:
           $gradle = if ($IsWindows) { './gradlew.bat' } else { './gradlew' }
           & $gradle --no-daemon --max-workers=2 testClasses contractTestClasses messagingConsumerTestClasses spotlessCheck pmdMain pmdTest :front:checkUi packageDeployment
           exit $LASTEXITCODE
-      - name: Run the packaged replay launcher against native Windows PostgreSQL
+      - name: Run all Cash regressions and packaged replay on native Windows
         if: runner.os == 'Windows'
         working-directory: projects/sprint11-observability
         # Full Kafka consumer/producer contract execution stays in the Linux Docker gate.
         # Only this native regression excludes the producer contract task requiring Kafka.
         run: |
           $gradle = if ($IsWindows) { './gradlew.bat' } else { './gradlew' }
-          & $gradle --no-daemon --max-workers=2 :cash:test --tests '*OutboxReplayLauncherTest' -x :accounts:contractTest
+          & $gradle --no-daemon --max-workers=2 :cash:test -x :accounts:contractTest
           exit $LASTEXITCODE
       - name: Render Helm contracts with the platform default locale
         working-directory: projects/sprint11-observability
